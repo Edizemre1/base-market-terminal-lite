@@ -1,101 +1,198 @@
-import { ArrowRight, BarChart3, Eye, LockKeyhole, RotateCcw } from "lucide-react";
+import { ArrowRight, Eye, RotateCcw } from "lucide-react";
 import Link from "next/link";
-import { LandingTerminalPreview } from "@/components/LandingTerminalPreview";
 import { MetricCard } from "@/components/MetricCard";
 import { TokenTable } from "@/components/TokenTable";
-import { getTrendingTokens, marketStats } from "@/data/mockTokens";
+import {
+  EventTape,
+  GaugeCard,
+  HeatmapGrid,
+  MiniBarList,
+  StatusPill,
+  TerminalPanel
+} from "@/components/TerminalWidgets";
+import {
+  getTrendingTokens,
+  getVolumeGainers,
+  marketStats,
+  mockBaseTokens
+} from "@/data/mockTokens";
+import { formatCompactCurrency } from "@/lib/format";
+
+const macroMetrics = [
+  ["BTC.D", "52.4", "+0.2"],
+  ["ETH/BTC", "0.053", "-0.1"],
+  ["BASE IDX", "72", "+2.1"],
+  ["STABLE FLOW", "$18.4M", "+4.8"]
+];
 
 export default function HomePage() {
-  const trendingTokens = getTrendingTokens(4);
+  const trendingTokens = getTrendingTokens(6);
+  const volumeGainers = getVolumeGainers(4);
+  const highestRisk = mockBaseTokens.filter((token) => token.riskLevel !== "clear");
 
   return (
-    <main className="bg-base-black">
-      <section className="terminal-grid relative min-h-[82vh] overflow-hidden border-b border-base-line">
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,82,255,0.22),rgba(3,5,10,0.32)_36%,#03050a_100%)]" />
-        <LandingTerminalPreview tokens={trendingTokens} />
-
-        <div className="relative mx-auto max-w-7xl px-4 pb-48 pt-16 sm:px-6 sm:pt-20 lg:px-8 lg:pb-72">
-          <div className="flex max-w-5xl flex-wrap gap-3 text-[11px] font-semibold uppercase tracking-[0.2em]">
-            <span className="rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-base-electric">
-              Base ecosystem
-            </span>
-            <span className="rounded border border-base-line bg-base-raised/70 px-3 py-2 text-base-muted">
-              Public intelligence terminal
-            </span>
-            <span className="rounded border border-base-amber/30 bg-base-amber/10 px-3 py-2 text-base-amber">
-              Mock data only
-            </span>
+    <main className="terminal-grid bg-base-black px-4 py-4 sm:px-6">
+      <section className="mb-4 border border-base-line bg-base-panel p-3 shadow-panel">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <StatusPill label="Base Market Terminal Lite" />
+              <StatusPill label="Public safe" tone="muted" />
+              <StatusPill label="Mock feed" tone="blue" />
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold text-base-text md:text-3xl">
+              Institutional-style Base market overview
+            </h1>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-base-muted">
+              A dense public terminal for demo token discovery, risk regime
+              monitoring, and UI-only route preview workflows.
+            </p>
           </div>
 
-          <h1 className="mt-8 max-w-4xl text-5xl font-semibold leading-[1.02] text-base-text md:text-7xl">
-            Base Market Terminal Lite
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-base-muted">
-            A premium public terminal for scanning mock Base markets, monitoring
-            demo risk states, and previewing routing UI without touching wallets
-            or live execution.
-          </p>
-
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             <Link
               href="/dashboard"
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-base-blue/60 bg-base-blue px-4 py-3 text-sm font-semibold text-white transition hover:bg-base-electric"
+              className="inline-flex min-h-8 items-center gap-2 border border-base-mint bg-base-mint px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-white"
             >
-              <Eye size={17} aria-hidden="true" />
-              Open terminal
-              <ArrowRight size={17} aria-hidden="true" />
+              <Eye size={14} aria-hidden="true" />
+              Open scanner
+              <ArrowRight size={14} aria-hidden="true" />
             </Link>
             <Link
               href="/swap"
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-base-line bg-base-elevated/70 px-4 py-3 text-sm font-semibold text-base-text transition hover:border-base-blue/60 hover:text-base-electric"
+              className="inline-flex min-h-8 items-center gap-2 border border-base-line bg-base-elevated px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-base-text"
             >
-              <RotateCcw size={17} aria-hidden="true" />
-              Preview route UI
+              <RotateCcw size={14} aria-hidden="true" />
+              Route ticket
             </Link>
           </div>
+        </div>
+      </section>
 
-          <div className="mt-10 grid max-w-4xl gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-base-line bg-base-panel/70 p-4">
-              <BarChart3 size={18} className="text-base-electric" aria-hidden="true" />
-              <p className="mt-3 text-sm font-semibold text-base-text">
-                Market scan
-              </p>
-              <p className="mt-1 text-xs leading-5 text-base-muted">
-                Trending, new, and volume-gainer views.
-              </p>
-            </div>
-            <div className="rounded-lg border border-base-line bg-base-panel/70 p-4">
-              <LockKeyhole size={18} className="text-base-amber" aria-hidden="true" />
-              <p className="mt-3 text-sm font-semibold text-base-text">
-                Demo safety layer
-              </p>
-              <p className="mt-1 text-xs leading-5 text-base-muted">
-                Labels are local UI examples only.
-              </p>
-            </div>
-            <div className="rounded-lg border border-base-line bg-base-panel/70 p-4">
-              <RotateCcw size={18} className="text-base-cyan" aria-hidden="true" />
-              <p className="mt-3 text-sm font-semibold text-base-text">
-                Routing preview
-              </p>
-              <p className="mt-1 text-xs leading-5 text-base-muted">
-                No swaps, approvals, or signing.
-              </p>
-            </div>
+      <section className="mb-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {marketStats.map((stat) => (
+          <MetricCard key={stat.label} stat={stat} />
+        ))}
+      </section>
+
+      <section className="mb-4 grid gap-2 xl:grid-cols-4">
+        {macroMetrics.map(([label, value, change]) => (
+          <div
+            key={label}
+            className="grid grid-cols-[1fr_auto] items-center border border-base-line bg-base-panel px-3 py-2"
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-base-muted">
+              {label}
+            </span>
+            <span className="font-mono text-sm font-semibold text-base-text">
+              {value}
+              <span
+                className={
+                  change.startsWith("+")
+                    ? "ml-2 text-base-mint"
+                    : "ml-2 text-base-rose"
+                }
+              >
+                {change}%
+              </span>
+            </span>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_420px]">
+        <div className="space-y-4">
+          <TokenTable tokens={trendingTokens} label="Base market scanner" />
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <TerminalPanel label="Macro" title="Demo indicators strip">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="border border-base-line bg-base-elevated p-3">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-base-muted">
+                    Liquidity pulse
+                  </p>
+                  <p className="mt-2 font-mono text-lg font-semibold text-base-mint">
+                    68
+                  </p>
+                </div>
+                <div className="border border-base-line bg-base-elevated p-3">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-base-muted">
+                    Volatility
+                  </p>
+                  <p className="mt-2 font-mono text-lg font-semibold text-base-amber">
+                    42
+                  </p>
+                </div>
+              </div>
+            </TerminalPanel>
+
+            <TerminalPanel label="Sentiment" title="Fear / greed gauge">
+              <GaugeCard value={62} label="Constructive" />
+            </TerminalPanel>
+
+            <TerminalPanel label="Breadth" title="Market breadth">
+              <HeatmapGrid
+                items={[
+                  { label: "Infra", value: "+12", tone: "mint" },
+                  { label: "DeFi", value: "+8", tone: "mint" },
+                  { label: "Social", value: "+3", tone: "blue" },
+                  { label: "Games", value: "-2", tone: "rose" }
+                ]}
+              />
+            </TerminalPanel>
           </div>
         </div>
-      </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {marketStats.map((stat) => (
-            <MetricCard key={stat.label} stat={stat} />
-          ))}
-        </div>
-      </section>
+        <aside className="space-y-4">
+          <TerminalPanel label="Risk" title="Regime monitor">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border border-base-mint/30 bg-base-mint/10 px-3 py-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-base-mint">
+                  Composite score
+                </span>
+                <span className="font-mono text-xl font-semibold text-base-text">
+                  74
+                </span>
+              </div>
+              <EventTape
+                items={highestRisk.slice(0, 3).map(
+                  (token) =>
+                    `${token.symbol}: ${token.riskFlags[0]?.label ?? "Demo risk label"}`
+                )}
+              />
+            </div>
+          </TerminalPanel>
 
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
-        <TokenTable tokens={trendingTokens} label="Institutional-style watchlist" />
+          <TerminalPanel label="Flow" title="Funding / volume bars">
+            <MiniBarList
+              items={[
+                { label: "Spot volume", value: 76, tone: "mint" },
+                { label: "New pool flow", value: 58, tone: "blue" },
+                { label: "Risk alerts", value: 31, tone: "rose" },
+                { label: "Stable routing", value: 69, tone: "mint" }
+              ]}
+            />
+          </TerminalPanel>
+
+          <TerminalPanel label="Movers" title="Top volume acceleration">
+            <div className="space-y-2">
+              {volumeGainers.map((token) => (
+                <div
+                  key={token.id}
+                  className="grid grid-cols-[52px_1fr_auto] items-center gap-2 border border-base-line bg-base-elevated px-2 py-2 text-xs"
+                >
+                  <span className="font-semibold text-base-text">{token.symbol}</span>
+                  <span className="font-mono text-base-muted">
+                    {formatCompactCurrency(token.volume24h)}
+                  </span>
+                  <span className="font-mono text-base-mint">
+                    +{token.volumeChange24h.toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </TerminalPanel>
+        </aside>
       </section>
     </main>
   );
