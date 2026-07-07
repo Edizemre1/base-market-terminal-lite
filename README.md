@@ -2,6 +2,8 @@
 
 Standalone public MVP for a Base market terminal lite experience. The app uses local mock data only and is designed for UI review, architecture iteration, and future public integrations.
 
+Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
+
 ## Safety Boundaries
 
 - No unrelated private branding.
