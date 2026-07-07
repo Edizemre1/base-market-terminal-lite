@@ -1,32 +1,48 @@
 import { ShieldAlert } from "lucide-react";
 import { SwapPreviewForm } from "@/components/SwapPreviewForm";
+import { StatusPill } from "@/components/TerminalWidgets";
 import { getSwapPreviewTokens } from "@/data/mockTokens";
 
 export default function SwapPage() {
   const tokens = getSwapPreviewTokens();
 
   return (
-    <main className="bg-base-black">
-      <section className="border-b border-base-line bg-base-raised">
-        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-          <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-rose/30 bg-base-rose/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-rose">
-            <ShieldAlert size={14} aria-hidden="true" />
-            No real transactions
+    <main className="terminal-grid bg-base-black px-4 py-4 sm:px-6">
+      <section className="mb-4 border border-base-line bg-base-panel shadow-panel">
+        <div className="border-b border-base-line bg-base-raised px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill label="Route sandbox" />
+            <StatusPill label="Mock tokens" tone="blue" />
+            <StatusPill label="No live transaction" tone="amber" />
           </div>
-          <h1 className="text-4xl font-semibold text-base-text md:text-5xl">
-            Swap preview
-          </h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-base-muted">
-            Preview a local mock quote between demo tokens. Wallet connection,
-            route execution, contract approvals, and signing are intentionally
-            absent from this public MVP.
-          </p>
+        </div>
+
+        <div className="grid gap-4 p-3 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-end">
+          <div>
+            <h1 className="text-2xl font-semibold text-base-text md:text-3xl">
+              Swap preview ticket
+            </h1>
+            <p className="mt-2 max-w-3xl text-xs leading-5 text-base-muted">
+              Preview a local mock quote between demo tokens. Wallet connection,
+              route execution, contract approvals, and signing are intentionally
+              absent from this public MVP.
+            </p>
+          </div>
+
+          <div className="border border-base-rose/40 bg-base-rose/10 p-3">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-base-rose">
+              <ShieldAlert size={14} aria-hidden="true" />
+              UI-only execution boundary
+            </div>
+            <p className="text-xs leading-5 text-base-muted">
+              This page cannot create, sign, approve, or submit blockchain
+              transactions.
+            </p>
+          </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <SwapPreviewForm tokens={tokens} />
-      </section>
+      <SwapPreviewForm tokens={tokens} />
     </main>
   );
 }

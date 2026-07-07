@@ -2,10 +2,10 @@ import type { RiskFlag, RiskLevel } from "@/types/market";
 import { cx } from "@/lib/format";
 
 const riskClassName: Record<RiskLevel, string> = {
-  clear: "border-base-blue/30 bg-base-blue/10 text-base-electric",
-  watch: "border-base-amber/30 bg-base-amber/10 text-base-amber",
-  elevated: "border-orange-300/30 bg-orange-400/10 text-orange-200",
-  high: "border-base-rose/30 bg-base-rose/10 text-base-rose"
+  clear: "border-base-mint/40 bg-base-mint/10 text-base-mint",
+  watch: "border-base-amber/40 bg-base-amber/10 text-base-amber",
+  elevated: "border-orange-300/40 bg-orange-100 text-orange-700",
+  high: "border-base-rose/40 bg-base-rose/10 text-base-rose"
 };
 
 const riskLabel: Record<RiskLevel, string> = {
@@ -27,8 +27,8 @@ export function RiskBadge({
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded border font-semibold uppercase tracking-[0.16em]",
-        compact ? "px-2 py-1 text-[10px]" : "px-2.5 py-1.5 text-xs",
+        "inline-flex items-center border font-semibold uppercase tracking-[0.14em]",
+        compact ? "px-1.5 py-0.5 text-[9px]" : "px-2 py-1 text-[10px]",
         riskClassName[level]
       )}
     >
@@ -39,14 +39,14 @@ export function RiskBadge({
 
 export function RiskFlagList({ flags }: { flags: RiskFlag[] }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {flags.map((flag) => (
         <div
           key={`${flag.level}-${flag.label}`}
-          className="rounded-lg border border-base-line bg-base-elevated/60 p-4"
+          className="border border-base-line bg-base-elevated p-3"
         >
           <RiskBadge level={flag.level} label={flag.label} compact />
-          <p className="mt-3 text-sm leading-6 text-base-muted">
+          <p className="mt-2 text-xs leading-5 text-base-muted">
             {flag.description}
           </p>
         </div>
