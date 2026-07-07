@@ -1,9 +1,17 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Database, Gauge, ShieldAlert } from "lucide-react";
+import { ArrowRight, ShieldAlert } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { RiskBadge } from "@/components/RiskBadge";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TokenTable } from "@/components/TokenTable";
+import {
+  EventTape,
+  GaugeCard,
+  HeatmapGrid,
+  MiniBarList,
+  StatusPill,
+  TerminalPanel
+} from "@/components/TerminalWidgets";
 import {
   getNewTokens,
   getTrendingTokens,
@@ -22,124 +30,163 @@ export default function DashboardPage() {
   );
 
   return (
-    <main className="bg-base-black">
-      <section className="border-b border-base-line bg-base-raised">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="grid gap-8 lg:grid-cols-[1fr_360px] lg:items-end">
-            <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
-                <Database size={14} aria-hidden="true" />
-                Local mock market feed
-              </div>
-              <h1 className="text-4xl font-semibold text-base-text md:text-5xl">
-                Market command center
-              </h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-base-muted">
-                Monitor demo Base token momentum, new-pool activity, liquidity,
-                and risk flags from one dense public dashboard.
-              </p>
+    <main className="terminal-grid bg-base-black px-4 py-4 sm:px-6">
+      <section className="mb-4 border border-base-line bg-base-panel p-3 shadow-panel">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <StatusPill label="Market scanner" />
+              <StatusPill label="Mock data" tone="blue" />
+              <StatusPill label="Execution disabled" tone="amber" />
             </div>
-
-            <div className="rounded-lg border border-base-line bg-base-panel p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-base-amber">
-                <ShieldAlert size={15} aria-hidden="true" />
-                Execution disabled
-              </div>
-              <p className="mt-3 text-sm leading-6 text-base-muted">
-                Dashboard rows are mock snapshots. There are no API keys,
-                wallet actions, approvals, or live transactions.
-              </p>
-              <Link
-                href="/swap"
-                className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/50 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
-              >
-                Open route preview
-                <ArrowRight size={16} aria-hidden="true" />
-              </Link>
-            </div>
+            <h1 className="mt-3 text-2xl font-semibold text-base-text md:text-3xl">
+              Base market command center
+            </h1>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-base-muted">
+              Dense demo token scanner with risk regime, flow alerts, breadth,
+              and public-safe market notes.
+            </p>
           </div>
+
+          <Link
+            href="/swap"
+            className="inline-flex min-h-8 w-fit items-center gap-2 border border-base-mint bg-base-mint px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-white"
+          >
+            Open route ticket
+            <ArrowRight size={14} aria-hidden="true" />
+          </Link>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {marketStats.map((stat) => (
-            <MetricCard key={stat.label} stat={stat} />
-          ))}
-        </div>
+      <section className="mb-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {marketStats.map((stat) => (
+          <MetricCard key={stat.label} stat={stat} />
+        ))}
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[1fr_340px] lg:px-8">
-        <div className="space-y-8">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_390px]">
+        <div className="space-y-4">
           <div>
             <SectionHeader
-              eyebrow="Momentum"
-              title="Trending tokens"
-              description="Highest demo trend scores with compact institutional table density."
+              eyebrow="Scanner"
+              title="Token scanner"
+              description="Thin-row table optimized for repeated market review."
             />
-            <TokenTable tokens={trendingTokens} label="Trending demo tokens" />
+            <TokenTable tokens={trendingTokens} label="Primary token scanner" />
           </div>
 
-          <div>
-            <SectionHeader
-              eyebrow="Launch monitor"
-              title="New tokens"
-              description="Youngest mock pools by local age metadata."
-            />
-            <TokenTable tokens={newTokens} label="New demo pools" />
-          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <TerminalPanel label="New pools" title="Launch monitor">
+              <TokenTable tokens={newTokens.slice(0, 4)} label="Newest demo tokens" />
+            </TerminalPanel>
 
-          <div>
-            <SectionHeader
-              eyebrow="Flow"
-              title="Volume gainers"
-              description="Largest simulated 24h volume-change leaders."
-            />
-            <TokenTable tokens={volumeGainers} label="Volume acceleration" />
+            <TerminalPanel label="Top movers" title="Volume acceleration">
+              <div className="space-y-2">
+                {volumeGainers.map((token) => (
+                  <div
+                    key={token.id}
+                    className="grid grid-cols-[56px_1fr_auto] items-center gap-2 border border-base-line bg-base-elevated px-2 py-2 text-xs"
+                  >
+                    <span className="font-semibold text-base-text">{token.symbol}</span>
+                    <span className="font-mono text-base-muted">
+                      {formatCompactCurrency(token.volume24h)}
+                    </span>
+                    <span className="font-mono text-base-mint">
+                      +{token.volumeChange24h.toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </TerminalPanel>
           </div>
         </div>
 
-        <aside className="h-fit space-y-4">
-          <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
-            <div className="mb-5 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
-              <AlertTriangle size={16} aria-hidden="true" />
-              Demo risk watch
-            </div>
-            <div className="space-y-3">
+        <aside className="space-y-4">
+          <TerminalPanel label="Risk" title="Risk regime / scam flags">
+            <div className="space-y-2">
               {riskWatchTokens.map((token) => (
                 <Link
                   key={token.id}
                   href={`/tokens/${token.symbol.toLowerCase()}`}
-                  className="block rounded-lg border border-base-line bg-base-elevated/60 p-4 transition hover:border-base-amber/40"
+                  className="block border border-base-line bg-base-elevated p-3 transition hover:border-base-mint"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-base-text">{token.symbol}</p>
-                      <p className="mt-1 text-xs text-base-muted">
+                      <p className="text-sm font-semibold text-base-text">
+                        {token.symbol}
+                      </p>
+                      <p className="mt-1 text-[11px] text-base-muted">
                         {formatCompactCurrency(token.liquidityUsd)} liquidity
                       </p>
                     </div>
                     <RiskBadge level={token.riskLevel} compact />
                   </div>
-                  <p className="mt-3 text-sm leading-6 text-base-muted">
+                  <p className="mt-2 text-xs leading-5 text-base-muted">
                     {token.riskFlags[0]?.label ?? "Demo label"}
                   </p>
                 </Link>
               ))}
             </div>
-          </div>
+          </TerminalPanel>
 
-          <div className="rounded-lg border border-base-blue/30 bg-base-blue/10 p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-electric">
-              <Gauge size={16} aria-hidden="true" />
-              Terminal posture
+          <TerminalPanel label="Alerts" title="Volume alerts">
+            <MiniBarList
+              items={[
+                { label: "Volume acceleration", value: 82, tone: "mint" },
+                { label: "Thin liquidity", value: 37, tone: "rose" },
+                { label: "New pool activity", value: 64, tone: "blue" },
+                { label: "Risk labels", value: 44, tone: "rose" }
+              ]}
+            />
+          </TerminalPanel>
+
+          <TerminalPanel label="Posture" title="Execution policy">
+            <div className="flex items-start gap-3 border border-base-amber/40 bg-base-amber/10 p-3">
+              <ShieldAlert className="mt-0.5 shrink-0 text-base-amber" size={16} />
+              <p className="text-xs leading-5 text-base-muted">
+                Mock market intelligence only. No wallet signing, approvals, or
+                transaction execution is implemented.
+              </p>
             </div>
-            <p className="text-sm leading-6 text-base-muted">
-              Risk labels are hard-coded examples for public UI review and are
-              not token safety assessments.
-            </p>
-          </div>
+          </TerminalPanel>
         </aside>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-4">
+        <TerminalPanel label="Breadth" title="Market breadth">
+          <GaugeCard value={66} label="Positive breadth" />
+        </TerminalPanel>
+
+        <TerminalPanel label="Sectors" title="Mock heatmap">
+          <HeatmapGrid
+            items={[
+              { label: "Infra", value: "+12", tone: "mint" },
+              { label: "DeFi", value: "+9", tone: "mint" },
+              { label: "Social", value: "+3", tone: "blue" },
+              { label: "Gaming", value: "-2", tone: "rose" }
+            ]}
+          />
+        </TerminalPanel>
+
+        <TerminalPanel label="Funding" title="Funding / volume">
+          <MiniBarList
+            items={[
+              { label: "AUSD flow", value: 71, tone: "mint" },
+              { label: "Route depth", value: 63, tone: "blue" },
+              { label: "Spec risk", value: 28, tone: "rose" }
+            ]}
+          />
+        </TerminalPanel>
+
+        <TerminalPanel label="Notes" title="Demo news tape">
+          <EventTape
+            items={[
+              "Base mock volume remains concentrated in stable and infra rows.",
+              "New-pool monitor highlights PIXEL and FLASH as demo watch states.",
+              "Route preview remains disabled and uses local quote math only."
+            ]}
+          />
+        </TerminalPanel>
       </section>
     </main>
   );
