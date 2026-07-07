@@ -14,8 +14,8 @@ export function PriceChange({
       className={cx(
         "inline-flex items-center rounded border px-2 py-1 text-xs font-semibold",
         isPositive
-          ? "border-base-mint/24 bg-base-mint/10 text-base-mint"
-          : "border-base-rose/24 bg-base-rose/10 text-base-rose",
+          ? "border-base-mint/25 bg-base-mint/10 text-base-mint"
+          : "border-base-rose/25 bg-base-rose/10 text-base-rose",
         compact && "px-1.5 py-0.5"
       )}
     >

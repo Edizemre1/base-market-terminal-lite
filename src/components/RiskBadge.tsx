@@ -2,10 +2,10 @@ import type { RiskFlag, RiskLevel } from "@/types/market";
 import { cx } from "@/lib/format";
 
 const riskClassName: Record<RiskLevel, string> = {
-  clear: "border-base-mint/28 bg-base-mint/10 text-base-mint",
+  clear: "border-base-mint/30 bg-base-mint/10 text-base-mint",
   watch: "border-base-amber/30 bg-base-amber/10 text-base-amber",
   elevated: "border-orange-300/30 bg-orange-400/10 text-orange-200",
-  high: "border-base-rose/35 bg-base-rose/12 text-base-rose"
+  high: "border-base-rose/30 bg-base-rose/10 text-base-rose"
 };
 
 const riskLabel: Record<RiskLevel, string> = {
@@ -46,7 +46,7 @@ export function RiskFlagList({ flags }: { flags: RiskFlag[] }) {
           className="rounded-lg border border-white/10 bg-white/[0.04] p-4"
         >
           <RiskBadge level={flag.level} label={flag.label} compact />
-          <p className="mt-3 text-sm leading-6 text-emerald-50/66">
+          <p className="mt-3 text-sm leading-6 text-emerald-50/70">
             {flag.description}
           </p>
         </div>

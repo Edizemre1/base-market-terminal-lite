@@ -20,14 +20,14 @@ export function TokenTable({
   label: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-white/10 bg-base-panel/88">
+    <div className="overflow-hidden rounded-lg border border-white/10 bg-base-panel/90">
       <div className="border-b border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-50/50">
         {label}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-white/10 text-left text-xs uppercase tracking-[0.16em] text-emerald-50/42">
+            <tr className="border-b border-white/10 text-left text-xs uppercase tracking-[0.16em] text-emerald-50/40">
               <th className="px-4 py-3 font-medium">Token</th>
               <th className="px-4 py-3 font-medium">Price</th>
               <th className="px-4 py-3 font-medium">24h</th>
@@ -47,7 +47,7 @@ export function TokenTable({
               >
                 <td className="px-4 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-base-mint/24 bg-base-mint/10 text-xs font-bold text-base-mint">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-base-mint/25 bg-base-mint/10 text-xs font-bold text-base-mint">
                       {token.symbol.slice(0, 2)}
                     </div>
                     <div>
@@ -57,7 +57,7 @@ export function TokenTable({
                       >
                         {token.name}
                       </Link>
-                      <p className="text-xs uppercase tracking-[0.14em] text-emerald-50/46">
+                      <p className="text-xs uppercase tracking-[0.14em] text-emerald-50/50">
                         {token.symbol} · {token.category}
                       </p>
                     </div>
@@ -69,16 +69,16 @@ export function TokenTable({
                 <td className="px-4 py-4">
                   <PriceChange value={token.priceChange24h} compact />
                 </td>
-                <td className="px-4 py-4 text-emerald-50/76">
+                <td className="px-4 py-4 text-emerald-50/75">
                   {formatCompactCurrency(token.volume24h)}
-                  <span className="ml-2 text-xs text-emerald-50/38">
+                  <span className="ml-2 text-xs text-emerald-50/40">
                     {formatNumber(token.transactions24h)} tx
                   </span>
                 </td>
-                <td className="px-4 py-4 text-emerald-50/76">
+                <td className="px-4 py-4 text-emerald-50/75">
                   {formatCompactCurrency(token.liquidityUsd)}
                 </td>
-                <td className="px-4 py-4 text-emerald-50/68">
+                <td className="px-4 py-4 text-emerald-50/70">
                   {formatAge(token.ageHours)}
                 </td>
                 <td className="px-4 py-4">
@@ -87,7 +87,7 @@ export function TokenTable({
                       points={token.sparkline}
                       positive={token.priceChange24h >= 0}
                     />
-                    <span className="text-xs font-semibold text-emerald-50/58">
+                    <span className="text-xs font-semibold text-emerald-50/60">
                       {token.trendScore}
                     </span>
                   </div>
