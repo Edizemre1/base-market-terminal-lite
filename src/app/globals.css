@@ -3,25 +3,56 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+  --color-bg: 246 248 245;
+  --color-panel: 251 253 251;
+  --color-raised: 238 245 241;
+  --color-elevated: 242 247 244;
+  --color-line: 207 222 215;
+  --color-blue: 45 99 242;
+  --color-blue-soft: 36 79 214;
+  --color-text: 24 35 31;
+  --color-muted: 123 139 134;
+  --color-mint: 15 159 135;
+  --color-cyan: 18 143 149;
+  --color-amber: 167 119 25;
+  --color-rose: 201 54 73;
+}
+
+[data-theme="dark"] {
   color-scheme: dark;
-  background: #03050a;
+  --color-bg: 7 10 15;
+  --color-panel: 11 15 22;
+  --color-raised: 13 20 29;
+  --color-elevated: 16 24 34;
+  --color-line: 37 50 64;
+  --color-blue: 89 132 255;
+  --color-blue-soft: 128 165 255;
+  --color-text: 226 237 235;
+  --color-muted: 119 138 151;
+  --color-mint: 54 226 191;
+  --color-cyan: 65 194 200;
+  --color-amber: 221 166 57;
+  --color-rose: 255 96 126;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  background: rgb(var(--color-bg));
+}
+
 body {
   min-height: 100vh;
   margin: 0;
-  background:
-    linear-gradient(180deg, rgba(0, 82, 255, 0.16), rgba(3, 5, 10, 0) 24rem),
-    linear-gradient(90deg, rgba(0, 163, 255, 0.08), rgba(3, 5, 10, 0) 28rem),
-    #03050a;
-  color: #eaf1ff;
+  background: rgb(var(--color-bg));
+  color: rgb(var(--color-text));
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  font-size: 13px;
 }
 
 a {
@@ -29,22 +60,28 @@ a {
   text-decoration: none;
 }
 
+button,
+input,
+select {
+  font: inherit;
+}
+
 ::selection {
-  background: rgba(0, 82, 255, 0.35);
+  background: rgb(var(--color-mint) / 0.18);
 }
 
 .terminal-grid {
   background-image:
-    linear-gradient(rgba(234, 241, 255, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(234, 241, 255, 0.055) 1px, transparent 1px);
-  background-size: 48px 48px;
+    linear-gradient(rgb(var(--color-line) / 0.32) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--color-line) / 0.32) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 .market-scanline {
   background-image: linear-gradient(
     180deg,
-    rgba(234, 241, 255, 0.04) 1px,
+    rgb(var(--color-line) / 0.55) 1px,
     transparent 1px
   );
-  background-size: 100% 8px;
+  background-size: 100% 22px;
 }
