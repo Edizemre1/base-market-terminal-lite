@@ -6,24 +6,24 @@ const config: Config = {
     extend: {
       colors: {
         base: {
-          black: "#03050a",
-          panel: "#070b13",
-          raised: "#0b1220",
-          elevated: "#111827",
-          line: "#1f2a44",
-          blue: "#0052ff",
-          electric: "#00a3ff",
-          text: "#eaf1ff",
-          muted: "#8b9bb4",
-          mint: "#20d49b",
-          cyan: "#55d7ff",
-          amber: "#f5b84b",
-          rose: "#ff5c7a"
+          black: "#f6f8f5",
+          panel: "#fbfdfb",
+          raised: "#eef5f1",
+          elevated: "#f2f7f4",
+          line: "#cfded7",
+          blue: "#2d63f2",
+          electric: "#244fd6",
+          text: "#18231f",
+          muted: "#7b8b86",
+          mint: "#0f9f87",
+          cyan: "#128f95",
+          amber: "#a77719",
+          rose: "#c93649"
         }
       },
       boxShadow: {
-        glow: "0 0 44px rgba(0, 82, 255, 0.22)",
-        panel: "0 18px 60px rgba(0, 0, 0, 0.32)"
+        glow: "0 0 0 1px rgba(15, 159, 135, 0.18)",
+        panel: "0 1px 0 rgba(24, 35, 31, 0.03)"
       }
     }
   },
