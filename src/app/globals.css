@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: dark;
-  background: #070908;
+  background: #03050a;
 }
 
 * {
@@ -15,10 +15,10 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    linear-gradient(180deg, rgba(61, 220, 151, 0.08), transparent 28rem),
-    radial-gradient(circle at 20% 10%, rgba(94, 200, 242, 0.12), transparent 18rem),
-    #070908;
-  color: #ecfdf3;
+    linear-gradient(180deg, rgba(0, 82, 255, 0.16), rgba(3, 5, 10, 0) 24rem),
+    linear-gradient(90deg, rgba(0, 163, 255, 0.08), rgba(3, 5, 10, 0) 28rem),
+    #03050a;
+  color: #eaf1ff;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -30,12 +30,21 @@ a {
 }
 
 ::selection {
-  background: rgba(61, 220, 151, 0.28);
+  background: rgba(0, 82, 255, 0.35);
 }
 
 .terminal-grid {
   background-image:
-    linear-gradient(rgba(236, 253, 243, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(236, 253, 243, 0.04) 1px, transparent 1px);
-  background-size: 44px 44px;
+    linear-gradient(rgba(234, 241, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(234, 241, 255, 0.055) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.market-scanline {
+  background-image: linear-gradient(
+    180deg,
+    rgba(234, 241, 255, 0.04) 1px,
+    transparent 1px
+  );
+  background-size: 100% 8px;
 }

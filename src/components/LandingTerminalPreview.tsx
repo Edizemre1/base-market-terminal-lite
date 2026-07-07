@@ -12,11 +12,11 @@ export function LandingTerminalPreview({
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-4 bottom-0 mx-auto hidden max-w-6xl translate-y-[42%] lg:block">
-      <div className="rounded-lg border border-white/10 bg-base-panel/90 p-4 shadow-2xl shadow-black/40 backdrop-blur">
-        <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-50/50">
+      <div className="market-scanline rounded-lg border border-base-line bg-base-panel/95 p-4 shadow-panel backdrop-blur">
+        <div className="mb-4 flex items-center justify-between border-b border-base-line pb-3">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
             <Activity size={14} aria-hidden="true" />
-            Demo market pulse
+            Base demo market pulse
           </div>
           <div className="flex items-center gap-2 text-xs text-base-amber">
             <ShieldAlert size={14} aria-hidden="true" />
@@ -24,7 +24,7 @@ export function LandingTerminalPreview({
           </div>
         </div>
 
-        <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] gap-3 px-3 pb-2 text-xs uppercase tracking-[0.16em] text-emerald-50/40">
+        <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] gap-3 px-3 pb-2 text-[11px] uppercase tracking-[0.18em] text-base-muted">
           <span>Token</span>
           <span>Price</span>
           <span>24h</span>
@@ -36,22 +36,22 @@ export function LandingTerminalPreview({
           {tokens.map((token) => (
             <div
               key={token.id}
-              className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] items-center gap-3 rounded border border-white/[0.06] bg-white/[0.035] px-3 py-3"
+              className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] items-center gap-3 rounded-lg border border-base-line bg-base-raised/58 px-3 py-3"
             >
               <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded border border-base-mint/25 bg-base-mint/10 text-xs font-bold text-base-mint">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/14 text-xs font-bold text-base-electric">
                   {token.symbol.slice(0, 2)}
                 </span>
                 <span>
-                  <span className="block text-sm font-semibold text-white">
+                  <span className="block text-sm font-semibold text-base-text">
                     {token.symbol}
                   </span>
-                  <span className="block text-xs text-emerald-50/50">
+                  <span className="block text-xs text-base-muted">
                     {formatCompactCurrency(token.volume24h)} vol
                   </span>
                 </span>
               </div>
-              <span className="text-sm font-semibold text-white">
+              <span className="text-sm font-semibold tabular-nums text-base-text">
                 {formatCurrency(token.priceUsd, token.priceUsd < 0.1 ? 4 : 2)}
               </span>
               <PriceChange value={token.priceChange24h} compact />
@@ -64,7 +64,7 @@ export function LandingTerminalPreview({
           ))}
         </div>
 
-        <div className="mt-4 flex items-center gap-2 text-xs text-emerald-50/50">
+        <div className="mt-4 flex items-center gap-2 text-xs text-base-muted">
           <Database size={14} aria-hidden="true" />
           Demo rows are loaded from local mock data only.
         </div>

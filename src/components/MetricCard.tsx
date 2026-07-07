@@ -2,7 +2,7 @@ import type { MarketStat } from "@/types/market";
 import { cx } from "@/lib/format";
 
 const toneClassName: Record<MarketStat["tone"], string> = {
-  mint: "border-base-mint/25 text-base-mint",
+  mint: "border-base-blue/35 text-base-electric",
   cyan: "border-base-cyan/25 text-base-cyan",
   amber: "border-base-amber/30 text-base-amber",
   rose: "border-base-rose/30 text-base-rose"
@@ -10,17 +10,17 @@ const toneClassName: Record<MarketStat["tone"], string> = {
 
 export function MetricCard({ stat }: { stat: MarketStat }) {
   return (
-    <article className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
+    <article className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
       <div
         className={cx(
-          "mb-6 inline-flex rounded border bg-white/[0.03] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.18em]",
+          "mb-6 inline-flex rounded border bg-white/[0.035] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]",
           toneClassName[stat.tone]
         )}
       >
         {stat.label}
       </div>
-      <p className="text-3xl font-semibold text-white">{stat.value}</p>
-      <p className="mt-2 text-sm leading-6 text-emerald-50/60">{stat.detail}</p>
+      <p className="text-3xl font-semibold text-base-text">{stat.value}</p>
+      <p className="mt-2 text-sm leading-6 text-base-muted">{stat.detail}</p>
     </article>
   );
 }
