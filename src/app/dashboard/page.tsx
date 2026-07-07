@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { Route } from "next";
 import { AlertTriangle, ArrowRight, Database } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { RiskBadge } from "@/components/RiskBadge";
@@ -99,7 +98,7 @@ export default function DashboardPage() {
             {riskWatchTokens.map((token) => (
               <Link
                 key={token.id}
-                href={`/tokens/${token.symbol.toLowerCase()}` as Route}
+                href={`/tokens/${token.symbol.toLowerCase()}`}
                 className="block rounded-lg border border-white/10 bg-white/[0.04] p-4 transition hover:border-base-amber/40"
               >
                 <div className="flex items-start justify-between gap-3">

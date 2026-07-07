@@ -13,7 +13,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/swap", label: "Swap preview", icon: RotateCcw },
   { href: "/docs", label: "Docs", icon: BookOpenText }
-];
+] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (

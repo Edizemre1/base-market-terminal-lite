@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { Route } from "next";
 import { ExternalLink } from "lucide-react";
 import { PriceChange } from "@/components/PriceChange";
 import { RiskBadge } from "@/components/RiskBadge";
@@ -52,7 +51,7 @@ export function TokenTable({
                     </div>
                     <div>
                       <Link
-                        href={`/tokens/${token.symbol.toLowerCase()}` as Route}
+                        href={`/tokens/${token.symbol.toLowerCase()}`}
                         className="font-semibold text-white hover:text-base-mint"
                       >
                         {token.name}
@@ -97,7 +96,7 @@ export function TokenTable({
                 </td>
                 <td className="px-4 py-4">
                   <Link
-                    href={`/tokens/${token.symbol.toLowerCase()}` as Route}
+                    href={`/tokens/${token.symbol.toLowerCase()}`}
                     aria-label={`Open ${token.name}`}
                     className="inline-flex h-9 w-9 items-center justify-center rounded border border-white/10 bg-white/[0.04] text-emerald-50/70 transition hover:border-base-mint/40 hover:text-base-mint"
                   >

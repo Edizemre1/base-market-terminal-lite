@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 export const publicSafetyChecklist = [
-  "No Mergen branding",
+  "No unrelated private branding",
   "No private business logic",
   "No real API keys or backend secrets",
   "No real swaps, approvals, or transactions",
