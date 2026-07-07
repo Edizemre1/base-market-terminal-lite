@@ -9,8 +9,8 @@ export function Sparkline({
   className?: string;
   positive?: boolean;
 }) {
-  const width = 148;
-  const height = 44;
+  const width = 120;
+  const height = 30;
   const min = Math.min(...points);
   const max = Math.max(...points);
   const spread = max - min || 1;
@@ -27,19 +27,19 @@ export function Sparkline({
     <svg
       aria-hidden="true"
       viewBox={`0 0 ${width} ${height}`}
-      className={cx("h-11 w-36 overflow-visible", className)}
+      className={cx("h-7 w-24 overflow-visible", className)}
     >
+      <path
+        d={`${path} L ${width} ${height} L 0 ${height} Z`}
+        fill={positive ? "rgba(15, 159, 135, 0.1)" : "rgba(201, 54, 73, 0.08)"}
+      />
       <path
         d={path}
         fill="none"
-        stroke={positive ? "#00a3ff" : "#ff5c7a"}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2.5"
-      />
-      <path
-        d={`${path} L ${width} ${height} L 0 ${height} Z`}
-        fill={positive ? "rgba(0, 82, 255, 0.14)" : "rgba(255, 92, 122, 0.1)"}
+        stroke={positive ? "#0f9f87" : "#c93649"}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+        strokeWidth="1.5"
       />
     </svg>
   );

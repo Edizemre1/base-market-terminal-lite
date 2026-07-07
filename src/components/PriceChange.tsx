@@ -12,11 +12,11 @@ export function PriceChange({
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded border px-2 py-1 text-xs font-semibold tabular-nums",
+        "inline-flex items-center border font-mono font-semibold tabular-nums",
+        compact ? "px-1 py-0.5 text-[10px]" : "px-1.5 py-0.5 text-[11px]",
         isPositive
-          ? "border-base-mint/30 bg-base-mint/10 text-base-mint"
-          : "border-base-rose/25 bg-base-rose/10 text-base-rose",
-        compact && "px-1.5 py-0.5"
+          ? "border-base-mint/35 bg-base-mint/10 text-base-mint"
+          : "border-base-rose/35 bg-base-rose/10 text-base-rose"
       )}
     >
       {formatPercent(value)}
