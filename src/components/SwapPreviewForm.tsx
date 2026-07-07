@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowDownUp, Ban, Route, WalletCards } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  Ban,
+  Route,
+  ShieldAlert,
+  WalletCards
+} from "lucide-react";
 import { PriceChange } from "@/components/PriceChange";
 import { RiskBadge } from "@/components/RiskBadge";
 import {
@@ -44,24 +51,24 @@ export function SwapPreviewForm({
     fromToken && amountUsd > 0
       ? Math.min(7.5, (amountUsd / fromToken.liquidityUsd) * 100 * 0.8)
       : 0;
-  const routeLabel = fromToken && toToken ? `${fromToken.symbol} → AUSD → ${toToken.symbol}` : "-";
+  const routeLabel = fromToken && toToken ? `${fromToken.symbol} -> AUSD -> ${toToken.symbol}` : "-";
   const canPreview = cleanAmount > 0 && !sameToken;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-      <div className="rounded-lg border border-white/10 bg-base-panel p-5">
+    <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
+      <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
         <div className="mb-5 flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-base-mint">
-              UI only
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
+              Quote sandbox
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">
-              Swap preview
+            <h2 className="mt-2 text-2xl font-semibold text-base-text">
+              Route preview
             </h2>
           </div>
           <div className="inline-flex items-center gap-2 rounded border border-base-amber/30 bg-base-amber/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-base-amber">
             <Ban size={14} aria-hidden="true" />
-            Disabled
+            Execution off
           </div>
         </div>
 
@@ -81,7 +88,7 @@ export function SwapPreviewForm({
               setFromSymbol(toSymbol);
               setToSymbol(fromSymbol);
             }}
-            className="mx-auto flex h-11 w-11 items-center justify-center rounded border border-white/10 bg-white/[0.05] text-emerald-50/70 transition hover:border-base-mint/40 hover:text-base-mint"
+            className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-base-line bg-base-elevated/70 text-base-muted transition hover:border-base-blue/60 hover:text-base-electric"
             aria-label="Flip preview direction"
           >
             <ArrowDownUp size={17} aria-hidden="true" />
@@ -98,8 +105,8 @@ export function SwapPreviewForm({
         </div>
 
         <div className="mt-5">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-50/50">
-            Demo slippage
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-base-muted">
+            Demo slippage setting
           </p>
           <div className="grid grid-cols-3 gap-2">
             {slippageOptions.map((option) => (
@@ -107,10 +114,10 @@ export function SwapPreviewForm({
                 key={option}
                 type="button"
                 onClick={() => setSlippage(option)}
-                className={`min-h-10 rounded border px-3 py-2 text-sm font-semibold transition ${
+                className={`min-h-10 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
                   slippage === option
-                    ? "border-base-mint/40 bg-base-mint/20 text-base-mint"
-                    : "border-white/10 bg-white/[0.04] text-emerald-50/70 hover:border-base-mint/30"
+                    ? "border-base-blue/60 bg-base-blue/20 text-base-electric"
+                    : "border-base-line bg-base-elevated/60 text-base-muted hover:border-base-blue/40 hover:text-base-text"
                 }`}
               >
                 {option.toFixed(1)}%
@@ -121,15 +128,15 @@ export function SwapPreviewForm({
 
         {!canPreview ? (
           <div className="mt-5 rounded-lg border border-base-amber/30 bg-base-amber/10 p-4 text-sm leading-6 text-base-amber">
-            Select two different demo tokens and enter an amount to preview a mock
-            quote.
+            Select two different demo tokens and enter an amount to preview a
+            mock route.
           </div>
         ) : null}
 
         <button
           type="button"
           disabled
-          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-emerald-50/50"
+          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-base-line bg-base-elevated/50 px-4 py-3 text-sm font-semibold text-base-muted"
         >
           <WalletCards size={17} aria-hidden="true" />
           Wallet connection not implemented
@@ -137,8 +144,8 @@ export function SwapPreviewForm({
       </div>
 
       <aside className="space-y-4">
-        <div className="rounded-lg border border-white/10 bg-base-panel p-5">
-          <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-cyan">
+        <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
+          <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-electric">
             <Route size={16} aria-hidden="true" />
             Mock route
           </div>
@@ -154,22 +161,32 @@ export function SwapPreviewForm({
           </dl>
         </div>
 
+        <div className="rounded-lg border border-base-amber/30 bg-base-amber/10 p-5">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
+            <ShieldAlert size={16} aria-hidden="true" />
+            Preview only
+          </div>
+          <p className="text-sm leading-6 text-base-muted">
+            This interface never builds, signs, or submits transactions.
+          </p>
+        </div>
+
         {fromToken && toToken ? (
-          <div className="rounded-lg border border-white/10 bg-base-panel p-5">
+          <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
             <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
               <AlertTriangle size={16} aria-hidden="true" />
-              Preview checks
+              Demo checks
             </div>
             <div className="space-y-3">
               {[fromToken, toToken].map((token) => (
                 <div
                   key={token.id}
-                  className="rounded-lg border border-white/10 bg-white/[0.04] p-4"
+                  className="rounded-lg border border-base-line bg-base-elevated/60 p-4"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-white">{token.symbol}</p>
-                      <p className="mt-1 text-xs text-emerald-50/50">
+                      <p className="font-semibold text-base-text">{token.symbol}</p>
+                      <p className="mt-1 text-xs text-base-muted">
                         {formatCompactCurrency(token.liquidityUsd)} liquidity
                       </p>
                     </div>
@@ -206,8 +223,8 @@ function TokenAmountPanel({
   readOnly?: boolean;
 }) {
   return (
-    <label className="block rounded-lg border border-white/10 bg-white/[0.04] p-4">
-      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-50/50">
+    <label className="block rounded-lg border border-base-line bg-base-elevated/50 p-4">
+      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-base-muted">
         {label}
       </span>
       <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_180px]">
@@ -216,17 +233,17 @@ function TokenAmountPanel({
           readOnly={readOnly}
           inputMode="decimal"
           onChange={(event) => onValueChange?.(event.target.value)}
-          className="min-h-12 w-full rounded border border-white/10 bg-black/30 px-3 py-2 text-2xl font-semibold text-white outline-none transition placeholder:text-emerald-50/30 focus:border-base-mint/50"
+          className="min-h-12 w-full rounded border border-base-line bg-base-black/50 px-3 py-2 text-2xl font-semibold tabular-nums text-base-text outline-none transition placeholder:text-base-muted focus:border-base-blue/60"
           placeholder="0.00"
         />
         <select
           value={selectedSymbol}
           onChange={(event) => onSymbolChange(event.target.value)}
-          className="min-h-12 w-full rounded border border-white/10 bg-base-raised px-3 py-2 text-sm font-semibold text-white outline-none transition focus:border-base-mint/50"
+          className="min-h-12 w-full rounded border border-base-line bg-base-raised px-3 py-2 text-sm font-semibold text-base-text outline-none transition focus:border-base-blue/60"
         >
           {tokens.map((token) => (
             <option key={token.id} value={token.symbol}>
-              {token.symbol} · {token.name}
+              {token.symbol} / {token.name}
             </option>
           ))}
         </select>
@@ -237,9 +254,11 @@ function TokenAmountPanel({
 
 function QuoteRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-white/[0.06] pb-3 last:border-0 last:pb-0">
-      <dt className="text-emerald-50/50">{label}</dt>
-      <dd className="max-w-[13rem] text-right font-semibold text-white">{value}</dd>
+    <div className="flex items-start justify-between gap-4 border-b border-base-line/70 pb-3 last:border-0 last:pb-0">
+      <dt className="text-base-muted">{label}</dt>
+      <dd className="max-w-[13rem] text-right font-semibold text-base-text">
+        {value}
+      </dd>
     </div>
   );
 }
