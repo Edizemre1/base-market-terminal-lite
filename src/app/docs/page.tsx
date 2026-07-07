@@ -9,18 +9,18 @@ import {
 export default function DocsPage() {
   return (
     <main className="bg-base-black">
-      <section className="border-b border-white/10 bg-base-raised">
+      <section className="border-b border-base-line bg-base-raised">
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-          <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-mint/30 bg-base-mint/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-base-mint">
+          <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
             <FileText size={14} aria-hidden="true" />
-            Docs and builder log
+            Terminal docs
           </div>
-          <h1 className="text-4xl font-semibold text-white md:text-5xl">
-            Public MVP notes
+          <h1 className="text-4xl font-semibold text-base-text md:text-5xl">
+            Builder log and public boundaries
           </h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-emerald-50/60">
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-base-muted">
             Implementation notes for the standalone public Base market terminal
-            lite MVP, including safety constraints and future integration
+            MVP, including demo-only data constraints and future integration
             boundaries.
           </p>
         </div>
@@ -32,22 +32,22 @@ export default function DocsPage() {
             <SectionHeader
               eyebrow="Build log"
               title="What exists in this MVP"
-              description="A concise history of the public demo app structure."
+              description="A concise implementation record for the public terminal interface."
             />
             <div className="space-y-4">
               {builderLogEntries.map((entry, index) => (
                 <article
                   key={entry.title}
-                  className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.04] p-5 sm:grid-cols-[72px_1fr]"
+                  className="grid gap-4 rounded-lg border border-base-line bg-base-panel p-5 shadow-panel sm:grid-cols-[72px_1fr]"
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded border border-base-cyan/30 bg-base-cyan/10 text-sm font-semibold text-base-cyan">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/10 text-sm font-semibold text-base-electric">
                     {(index + 1).toString().padStart(2, "0")}
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold text-white">
+                    <h2 className="text-xl font-semibold text-base-text">
                       {entry.title}
                     </h2>
-                    <p className="mt-2 text-sm leading-7 text-emerald-50/60">
+                    <p className="mt-2 text-sm leading-7 text-base-muted">
                       {entry.detail}
                     </p>
                   </div>
@@ -69,15 +69,15 @@ export default function DocsPage() {
                 return (
                   <article
                     key={item.title}
-                    className="rounded-lg border border-white/10 bg-base-panel p-5"
+                    className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel"
                   >
-                    <div className="mb-4 flex h-10 w-10 items-center justify-center rounded border border-base-mint/30 bg-base-mint/10 text-base-mint">
+                    <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/10 text-base-electric">
                       <Icon size={18} aria-hidden="true" />
                     </div>
-                    <h2 className="text-lg font-semibold text-white">
+                    <h2 className="text-lg font-semibold text-base-text">
                       {item.title}
                     </h2>
-                    <p className="mt-2 text-sm leading-7 text-emerald-50/60">
+                    <p className="mt-2 text-sm leading-7 text-base-muted">
                       {item.detail}
                     </p>
                   </article>
@@ -88,8 +88,8 @@ export default function DocsPage() {
         </div>
 
         <aside className="space-y-6">
-          <div className="rounded-lg border border-white/10 bg-base-panel p-5">
-            <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-mint">
+          <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
+            <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-electric">
               <ShieldCheck size={16} aria-hidden="true" />
               Public safety checklist
             </div>
@@ -97,12 +97,12 @@ export default function DocsPage() {
               {publicSafetyChecklist.map((item) => (
                 <div
                   key={item}
-                  className="flex items-start gap-3 rounded border border-white/10 bg-white/[0.04] p-3 text-sm text-emerald-50/75"
+                  className="flex items-start gap-3 rounded border border-base-line bg-base-elevated/60 p-3 text-sm text-base-text/80"
                 >
                   <CheckCircle2
                     size={16}
                     aria-hidden="true"
-                    className="mt-0.5 shrink-0 text-base-mint"
+                    className="mt-0.5 shrink-0 text-base-electric"
                   />
                   <span>{item}</span>
                 </div>
@@ -110,12 +110,12 @@ export default function DocsPage() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-base-amber/25 bg-base-amber/10 p-5">
+          <div className="rounded-lg border border-base-amber/30 bg-base-amber/10 p-5">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
               <GitBranch size={16} aria-hidden="true" />
               Review stance
             </div>
-            <p className="text-sm leading-7 text-emerald-50/70">
+            <p className="text-sm leading-7 text-base-muted">
               This app is ready for UI review as a public demo. Real data,
               wallets, routing, secrets, and fee behavior are deliberately
               outside the MVP.
