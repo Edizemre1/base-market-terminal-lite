@@ -1,145 +1,204 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Database, Gauge, ShieldAlert } from "lucide-react";
-import { MetricCard } from "@/components/MetricCard";
-import { RiskBadge } from "@/components/RiskBadge";
-import { SectionHeader } from "@/components/SectionHeader";
 import { TokenTable } from "@/components/TokenTable";
+import {
+  DonutMetric,
+  EventTape,
+  HeatmapGrid,
+  MarketMiniCard,
+  MiniBarList,
+  RouteMiniTicket,
+  StatusPill,
+  TerminalPanel
+} from "@/components/TerminalWidgets";
 import {
   getNewTokens,
   getTrendingTokens,
   getVolumeGainers,
-  marketStats,
   mockBaseTokens
 } from "@/data/mockTokens";
-import { formatCompactCurrency } from "@/lib/format";
+import { formatCompactCurrency, formatPercent } from "@/lib/format";
+
+const tabs = [
+  "Overview",
+  "Crypto",
+  "Equities",
+  "Funding",
+  "FX",
+  "Macro",
+  "Commodities",
+  "Compare"
+];
 
 export default function DashboardPage() {
-  const trendingTokens = getTrendingTokens();
-  const newTokens = getNewTokens();
-  const volumeGainers = getVolumeGainers();
+  const trendingTokens = getTrendingTokens(10);
+  const newTokens = getNewTokens(4);
+  const volumeGainers = getVolumeGainers(4);
   const riskWatchTokens = mockBaseTokens.filter(
     (token) => token.riskLevel !== "clear"
   );
 
   return (
-    <main className="bg-base-black">
-      <section className="border-b border-base-line bg-base-raised">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="grid gap-8 lg:grid-cols-[1fr_360px] lg:items-end">
-            <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
-                <Database size={14} aria-hidden="true" />
-                Local mock market feed
-              </div>
-              <h1 className="text-4xl font-semibold text-base-text md:text-5xl">
-                Market command center
-              </h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-base-muted">
-                Monitor demo Base token momentum, new-pool activity, liquidity,
-                and risk flags from one dense public dashboard.
-              </p>
-            </div>
+    <main className="terminal-grid min-h-[calc(100vh-40px)] bg-base-black p-2">
+      <nav className="mb-2 flex gap-3 border-b border-base-line px-1 pb-2 text-[11px] text-base-muted">
+        {tabs.map((tab, index) => (
+          <span
+            key={tab}
+            className={
+              index === 0
+                ? "border-b border-base-mint pb-1 font-semibold text-base-text"
+                : "pb-1"
+            }
+          >
+            {tab}
+          </span>
+        ))}
+      </nav>
 
-            <div className="rounded-lg border border-base-line bg-base-panel p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-base-amber">
-                <ShieldAlert size={15} aria-hidden="true" />
-                Execution disabled
-              </div>
-              <p className="mt-3 text-sm leading-6 text-base-muted">
-                Dashboard rows are mock snapshots. There are no API keys,
-                wallet actions, approvals, or live transactions.
-              </p>
-              <Link
-                href="/swap"
-                className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/50 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
-              >
-                Open route preview
-                <ArrowRight size={16} aria-hidden="true" />
-              </Link>
-            </div>
-          </div>
-        </div>
+      <section className="grid gap-1 lg:grid-cols-6">
+        <MarketMiniCard
+          label="BTC / USD"
+          value="63,740.00"
+          change="+0.62%"
+          points={[63200, 63540, 63320, 63720, 63740]}
+          meta="spot"
+        />
+        <MarketMiniCard
+          label="ETH / USD"
+          value="1,788.36"
+          change="+0.78%"
+          points={[1762, 1774, 1768, 1782, 1788]}
+          meta="spot"
+        />
+        <MarketMiniCard
+          label="Mock 24h vol"
+          value="$65.6M"
+          change="+14.8%"
+          points={[42, 45, 51, 58, 65]}
+        />
+        <MarketMiniCard
+          label="New pools"
+          value={newTokens.length.toString()}
+          change="+3"
+          points={[1, 2, 2, 3, 4]}
+          meta="age"
+        />
+        <MarketMiniCard
+          label="Risk radar"
+          value="41"
+          change="watch"
+          points={[34, 38, 42, 39, 41]}
+          positive={false}
+          meta="risk"
+        />
+        <MarketMiniCard
+          label="Execution"
+          value="OFF"
+          change="UI-only"
+          points={[1, 1, 1, 1, 1]}
+          meta="safe"
+        />
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {marketStats.map((stat) => (
-            <MetricCard key={stat.label} stat={stat} />
-          ))}
-        </div>
-      </section>
+      <section className="mt-2 grid gap-2 xl:grid-cols-[minmax(0,1fr)_330px]">
+        <TokenTable
+          tokens={trendingTokens}
+          label="BASE TOKEN SCANNER · OPERATOR VIEW"
+          dense
+        />
 
-      <section className="mx-auto grid max-w-7xl gap-6 px-4 pb-10 sm:px-6 lg:grid-cols-[1fr_340px] lg:px-8">
-        <div className="space-y-8">
-          <div>
-            <SectionHeader
-              eyebrow="Momentum"
-              title="Trending tokens"
-              description="Highest demo trend scores with compact institutional table density."
-            />
-            <TokenTable tokens={trendingTokens} label="Trending demo tokens" />
-          </div>
-
-          <div>
-            <SectionHeader
-              eyebrow="Launch monitor"
-              title="New tokens"
-              description="Youngest mock pools by local age metadata."
-            />
-            <TokenTable tokens={newTokens} label="New demo pools" />
-          </div>
-
-          <div>
-            <SectionHeader
-              eyebrow="Flow"
-              title="Volume gainers"
-              description="Largest simulated 24h volume-change leaders."
-            />
-            <TokenTable tokens={volumeGainers} label="Volume acceleration" />
-          </div>
-        </div>
-
-        <aside className="h-fit space-y-4">
-          <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
-            <div className="mb-5 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
-              <AlertTriangle size={16} aria-hidden="true" />
-              Demo risk watch
+        <aside className="space-y-2">
+          <TerminalPanel
+            label="RISK RADAR"
+            title="Composite risk view"
+            meta={<StatusPill label="Demo" tone="muted" />}
+          >
+            <DonutMetric value={41} label="Risk radar" />
+            <div className="mt-2">
+              <MiniBarList
+                items={[
+                  { label: "Fresh pools", value: 52, tone: "amber" },
+                  { label: "Thin liquidity", value: 34, tone: "rose" },
+                  { label: "Holder conc", value: 46, tone: "amber" }
+                ]}
+              />
             </div>
-            <div className="space-y-3">
-              {riskWatchTokens.map((token) => (
+          </TerminalPanel>
+
+          <TerminalPanel label="SCAM FLAG WATCH" title="Demo labels">
+            <div className="space-y-1">
+              {riskWatchTokens.slice(0, 4).map((token) => (
                 <Link
                   key={token.id}
                   href={`/tokens/${token.symbol.toLowerCase()}`}
-                  className="block rounded-lg border border-base-line bg-base-elevated/60 p-4 transition hover:border-base-amber/40"
+                  className="grid grid-cols-[54px_1fr_auto] gap-2 border border-base-line bg-base-elevated px-2 py-1.5 text-[11px] hover:border-base-mint"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-base-text">{token.symbol}</p>
-                      <p className="mt-1 text-xs text-base-muted">
-                        {formatCompactCurrency(token.liquidityUsd)} liquidity
-                      </p>
-                    </div>
-                    <RiskBadge level={token.riskLevel} compact />
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-base-muted">
+                  <span className="font-mono font-semibold text-base-text">
+                    {token.symbol}
+                  </span>
+                  <span className="truncate text-base-muted">
                     {token.riskFlags[0]?.label ?? "Demo label"}
-                  </p>
+                  </span>
+                  <span className="font-mono text-base-muted">
+                    {formatCompactCurrency(token.liquidityUsd)}
+                  </span>
                 </Link>
               ))}
             </div>
-          </div>
+          </TerminalPanel>
 
-          <div className="rounded-lg border border-base-blue/30 bg-base-blue/10 p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-electric">
-              <Gauge size={16} aria-hidden="true" />
-              Terminal posture
-            </div>
-            <p className="text-sm leading-6 text-base-muted">
-              Risk labels are hard-coded examples for public UI review and are
-              not token safety assessments.
-            </p>
-          </div>
+          <TerminalPanel label="VOLUME ALERTS" title="Flow monitor">
+            <MiniBarList
+              items={volumeGainers.slice(0, 4).map((token) => ({
+                label: token.symbol,
+                value: Math.min(96, Math.round(token.volumeChange24h / 4)),
+                tone: token.volumeChange24h > 150 ? "mint" : "blue"
+              }))}
+            />
+          </TerminalPanel>
+
+          <TerminalPanel label="ROUTE PREVIEW" title="Mini ticket">
+            <RouteMiniTicket />
+          </TerminalPanel>
         </aside>
+      </section>
+
+      <section className="mt-2 grid gap-2 xl:grid-cols-[1.25fr_1fr_1.35fr]">
+        <TerminalPanel label="SECTORS" title="Mock sector heatmap">
+          <HeatmapGrid
+            items={[
+              { label: "Infra", value: "+12.1", tone: "mint" },
+              { label: "DeFi", value: "+9.4", tone: "mint" },
+              { label: "Social", value: "+4.2", tone: "blue" },
+              { label: "Gaming", value: "+2.6", tone: "blue" },
+              { label: "Culture", value: "-1.8", tone: "rose" },
+              { label: "Utility", value: "-0.4", tone: "amber" },
+              { label: "Stable", value: "+0.1", tone: "blue" },
+              { label: "New", value: "+18.7", tone: "mint" }
+            ]}
+          />
+        </TerminalPanel>
+
+        <TerminalPanel label="FUNDING" title="Funding bars">
+          <MiniBarList
+            items={[
+              { label: "Stable inflow", value: 74, tone: "mint" },
+              { label: "Spec pressure", value: 38, tone: "rose" },
+              { label: "Route depth", value: 63, tone: "blue" },
+              { label: "Breadth", value: 66, tone: "mint" }
+            ]}
+          />
+        </TerminalPanel>
+
+        <TerminalPanel label="EVENT TAPE" title="Demo market events">
+          <EventTape
+            items={[
+              `MINT volume delta ${formatPercent(118.3)} with fresh-pool watch label.`,
+              "FLASH remains excluded from preview tokens because demo risk is high.",
+              "AUSD route depth is the largest mock liquidity anchor.",
+              "All rows are local mock data; no live feed is connected."
+            ]}
+          />
+        </TerminalPanel>
       </section>
     </main>
   );
