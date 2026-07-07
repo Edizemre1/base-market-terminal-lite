@@ -2,7 +2,7 @@ import type { MarketStat } from "@/types/market";
 import { cx } from "@/lib/format";
 
 const toneClassName: Record<MarketStat["tone"], string> = {
-  mint: "border-base-blue/35 text-base-electric",
+  mint: "border-base-blue/30 text-base-electric",
   cyan: "border-base-cyan/25 text-base-cyan",
   amber: "border-base-amber/30 text-base-amber",
   rose: "border-base-rose/30 text-base-rose"

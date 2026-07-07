@@ -36,10 +36,10 @@ export function LandingTerminalPreview({
           {tokens.map((token) => (
             <div
               key={token.id}
-              className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] items-center gap-3 rounded-lg border border-base-line bg-base-raised/58 px-3 py-3"
+              className="grid grid-cols-[1.2fr_0.7fr_0.7fr_1fr_0.7fr] items-center gap-3 rounded-lg border border-base-line bg-base-raised/60 px-3 py-3"
             >
               <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/14 text-xs font-bold text-base-electric">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/10 text-xs font-bold text-base-electric">
                   {token.symbol.slice(0, 2)}
                 </span>
                 <span>

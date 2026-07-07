@@ -27,7 +27,7 @@ export default function DashboardPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="grid gap-8 lg:grid-cols-[1fr_360px] lg:items-end">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-blue/40 bg-base-blue/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
+              <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
                 <Database size={14} aria-hidden="true" />
                 Local mock market feed
               </div>
@@ -51,7 +51,7 @@ export default function DashboardPage() {
               </p>
               <Link
                 href="/swap"
-                className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/55 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
+                className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/50 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
               >
                 Open route preview
                 <ArrowRight size={16} aria-hidden="true" />
@@ -110,7 +110,7 @@ export default function DashboardPage() {
                 <Link
                   key={token.id}
                   href={`/tokens/${token.symbol.toLowerCase()}`}
-                  className="block rounded-lg border border-base-line bg-base-elevated/58 p-4 transition hover:border-base-amber/45"
+                  className="block rounded-lg border border-base-line bg-base-elevated/60 p-4 transition hover:border-base-amber/40"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>

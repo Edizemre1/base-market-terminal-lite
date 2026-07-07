@@ -20,7 +20,7 @@ export function TokenTable({
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-base-line bg-base-panel shadow-panel">
-      <div className="flex items-center justify-between border-b border-base-line bg-base-raised/52 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-base-line bg-base-raised/50 px-4 py-3">
         <div className="text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
           {label}
         </div>
@@ -31,7 +31,7 @@ export function TokenTable({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-base-line bg-base-black/35 text-left text-[11px] uppercase tracking-[0.16em] text-base-muted">
+            <tr className="border-b border-base-line bg-base-black/30 text-left text-[11px] uppercase tracking-[0.16em] text-base-muted">
               <th className="px-4 py-3 font-medium">Token</th>
               <th className="px-4 py-3 font-medium">Price</th>
               <th className="px-4 py-3 font-medium">24h</th>
@@ -51,7 +51,7 @@ export function TokenTable({
               >
                 <td className="px-4 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-base-blue/35 bg-base-blue/12 text-xs font-bold text-base-electric">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-base-blue/30 bg-base-blue/10 text-xs font-bold text-base-electric">
                       {token.symbol.slice(0, 2)}
                     </div>
                     <div>
@@ -73,13 +73,13 @@ export function TokenTable({
                 <td className="px-4 py-4">
                   <PriceChange value={token.priceChange24h} compact />
                 </td>
-                <td className="px-4 py-4 tabular-nums text-base-text/78">
+                <td className="px-4 py-4 tabular-nums text-base-text/80">
                   {formatCompactCurrency(token.volume24h)}
                   <span className="ml-2 text-xs text-base-muted">
                     {formatNumber(token.transactions24h)} tx
                   </span>
                 </td>
-                <td className="px-4 py-4 tabular-nums text-base-text/78">
+                <td className="px-4 py-4 tabular-nums text-base-text/80">
                   {formatCompactCurrency(token.liquidityUsd)}
                 </td>
                 <td className="px-4 py-4 text-base-muted">

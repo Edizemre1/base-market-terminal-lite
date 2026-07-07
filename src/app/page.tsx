@@ -16,13 +16,13 @@ export default function HomePage() {
 
         <div className="relative mx-auto max-w-7xl px-4 pb-48 pt-16 sm:px-6 sm:pt-20 lg:px-8 lg:pb-72">
           <div className="flex max-w-5xl flex-wrap gap-3 text-[11px] font-semibold uppercase tracking-[0.2em]">
-            <span className="rounded border border-base-blue/40 bg-base-blue/12 px-3 py-2 text-base-electric">
+            <span className="rounded border border-base-blue/40 bg-base-blue/10 px-3 py-2 text-base-electric">
               Base ecosystem
             </span>
             <span className="rounded border border-base-line bg-base-raised/70 px-3 py-2 text-base-muted">
               Public intelligence terminal
             </span>
-            <span className="rounded border border-base-amber/35 bg-base-amber/10 px-3 py-2 text-base-amber">
+            <span className="rounded border border-base-amber/30 bg-base-amber/10 px-3 py-2 text-base-amber">
               Mock data only
             </span>
           </div>

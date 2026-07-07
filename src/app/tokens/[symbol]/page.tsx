@@ -81,7 +81,7 @@ export default async function TokenDetailPage({ params }: TokenPageProps) {
           <div className="grid gap-8 lg:grid-cols-[1fr_400px] lg:items-end">
             <div>
               <div className="mb-5 flex flex-wrap items-center gap-3">
-                <span className="flex h-14 w-14 items-center justify-center rounded-lg border border-base-blue/45 bg-base-blue/14 text-sm font-bold text-base-electric">
+                <span className="flex h-14 w-14 items-center justify-center rounded-lg border border-base-blue/40 bg-base-blue/10 text-sm font-bold text-base-electric">
                   {token.symbol.slice(0, 2)}
                 </span>
                 <RiskBadge level={token.riskLevel} />
@@ -183,7 +183,7 @@ export default async function TokenDetailPage({ params }: TokenPageProps) {
               </p>
               <Link
                 href="/swap"
-                className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/55 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
+                className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg border border-base-blue/50 bg-base-blue px-3 py-2 text-sm font-semibold text-white transition hover:bg-base-electric"
               >
                 Open preview
                 <ArrowRight size={16} aria-hidden="true" />

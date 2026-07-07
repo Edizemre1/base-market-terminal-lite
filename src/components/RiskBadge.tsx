@@ -2,7 +2,7 @@ import type { RiskFlag, RiskLevel } from "@/types/market";
 import { cx } from "@/lib/format";
 
 const riskClassName: Record<RiskLevel, string> = {
-  clear: "border-base-blue/35 bg-base-blue/12 text-base-electric",
+  clear: "border-base-blue/30 bg-base-blue/10 text-base-electric",
   watch: "border-base-amber/30 bg-base-amber/10 text-base-amber",
   elevated: "border-orange-300/30 bg-orange-400/10 text-orange-200",
   high: "border-base-rose/30 bg-base-rose/10 text-base-rose"
