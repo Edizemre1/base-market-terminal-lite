@@ -19,14 +19,19 @@ export function TokenTable({
   label: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-white/10 bg-base-panel/90">
-      <div className="border-b border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-50/50">
-        {label}
+    <div className="overflow-hidden rounded-lg border border-base-line bg-base-panel shadow-panel">
+      <div className="flex items-center justify-between border-b border-base-line bg-base-raised/50 px-4 py-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
+          {label}
+        </div>
+        <div className="text-[11px] uppercase tracking-[0.18em] text-base-muted">
+          Mock feed
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-white/10 text-left text-xs uppercase tracking-[0.16em] text-emerald-50/40">
+            <tr className="border-b border-base-line bg-base-black/30 text-left text-[11px] uppercase tracking-[0.16em] text-base-muted">
               <th className="px-4 py-3 font-medium">Token</th>
               <th className="px-4 py-3 font-medium">Price</th>
               <th className="px-4 py-3 font-medium">24h</th>
@@ -42,42 +47,42 @@ export function TokenTable({
             {tokens.map((token) => (
               <tr
                 key={token.id}
-                className="border-b border-white/[0.06] transition hover:bg-white/[0.035]"
+                className="border-b border-base-line/70 transition hover:bg-base-blue/[0.055]"
               >
                 <td className="px-4 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-base-mint/25 bg-base-mint/10 text-xs font-bold text-base-mint">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-base-blue/30 bg-base-blue/10 text-xs font-bold text-base-electric">
                       {token.symbol.slice(0, 2)}
                     </div>
                     <div>
                       <Link
                         href={`/tokens/${token.symbol.toLowerCase()}`}
-                        className="font-semibold text-white hover:text-base-mint"
+                        className="font-semibold text-base-text hover:text-base-electric"
                       >
                         {token.name}
                       </Link>
-                      <p className="text-xs uppercase tracking-[0.14em] text-emerald-50/50">
-                        {token.symbol} · {token.category}
+                      <p className="text-xs uppercase tracking-[0.14em] text-base-muted">
+                        {token.symbol} / {token.category}
                       </p>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-4 font-medium text-white">
+                <td className="px-4 py-4 font-medium tabular-nums text-base-text">
                   {formatCurrency(token.priceUsd, token.priceUsd < 0.1 ? 4 : 2)}
                 </td>
                 <td className="px-4 py-4">
                   <PriceChange value={token.priceChange24h} compact />
                 </td>
-                <td className="px-4 py-4 text-emerald-50/75">
+                <td className="px-4 py-4 tabular-nums text-base-text/80">
                   {formatCompactCurrency(token.volume24h)}
-                  <span className="ml-2 text-xs text-emerald-50/40">
+                  <span className="ml-2 text-xs text-base-muted">
                     {formatNumber(token.transactions24h)} tx
                   </span>
                 </td>
-                <td className="px-4 py-4 text-emerald-50/75">
+                <td className="px-4 py-4 tabular-nums text-base-text/80">
                   {formatCompactCurrency(token.liquidityUsd)}
                 </td>
-                <td className="px-4 py-4 text-emerald-50/70">
+                <td className="px-4 py-4 text-base-muted">
                   {formatAge(token.ageHours)}
                 </td>
                 <td className="px-4 py-4">
@@ -86,7 +91,7 @@ export function TokenTable({
                       points={token.sparkline}
                       positive={token.priceChange24h >= 0}
                     />
-                    <span className="text-xs font-semibold text-emerald-50/60">
+                    <span className="text-xs font-semibold text-base-muted">
                       {token.trendScore}
                     </span>
                   </div>
@@ -98,7 +103,7 @@ export function TokenTable({
                   <Link
                     href={`/tokens/${token.symbol.toLowerCase()}`}
                     aria-label={`Open ${token.name}`}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded border border-white/10 bg-white/[0.04] text-emerald-50/70 transition hover:border-base-mint/40 hover:text-base-mint"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-base-line bg-base-elevated/70 text-base-muted transition hover:border-base-blue/60 hover:text-base-electric"
                   >
                     <ExternalLink size={15} aria-hidden="true" />
                   </Link>

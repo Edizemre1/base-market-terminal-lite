@@ -12,16 +12,16 @@ export function SectionHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
       <div>
         {eyebrow ? (
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-mint">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-base-electric">
             {eyebrow}
           </p>
         ) : null}
-        <h2 className="text-2xl font-semibold text-white md:text-3xl">{title}</h2>
+        <h2 className="text-2xl font-semibold text-base-text md:text-3xl">{title}</h2>
         {description ? (
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-50/60">
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-base-muted">
             {description}
           </p>
         ) : null}

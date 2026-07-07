@@ -12,9 +12,9 @@ export function PriceChange({
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded border px-2 py-1 text-xs font-semibold",
+        "inline-flex items-center rounded border px-2 py-1 text-xs font-semibold tabular-nums",
         isPositive
-          ? "border-base-mint/25 bg-base-mint/10 text-base-mint"
+          ? "border-base-mint/30 bg-base-mint/10 text-base-mint"
           : "border-base-rose/25 bg-base-rose/10 text-base-rose",
         compact && "px-1.5 py-0.5"
       )}

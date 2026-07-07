@@ -32,14 +32,14 @@ export function Sparkline({
       <path
         d={path}
         fill="none"
-        stroke={positive ? "#3ddc97" : "#ff6f91"}
+        stroke={positive ? "#00a3ff" : "#ff5c7a"}
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3"
+        strokeWidth="2.5"
       />
       <path
         d={`${path} L ${width} ${height} L 0 ${height} Z`}
-        fill={positive ? "rgba(61, 220, 151, 0.12)" : "rgba(255, 111, 145, 0.1)"}
+        fill={positive ? "rgba(0, 82, 255, 0.14)" : "rgba(255, 92, 122, 0.1)"}
       />
     </svg>
   );

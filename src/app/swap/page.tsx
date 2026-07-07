@@ -7,19 +7,19 @@ export default function SwapPage() {
 
   return (
     <main className="bg-base-black">
-      <section className="border-b border-white/10 bg-base-raised">
+      <section className="border-b border-base-line bg-base-raised">
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-          <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-rose/30 bg-base-rose/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-base-rose">
+          <div className="mb-4 inline-flex items-center gap-2 rounded border border-base-rose/30 bg-base-rose/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-base-rose">
             <ShieldAlert size={14} aria-hidden="true" />
             No real transactions
           </div>
-          <h1 className="text-4xl font-semibold text-white md:text-5xl">
+          <h1 className="text-4xl font-semibold text-base-text md:text-5xl">
             Swap preview
           </h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-emerald-50/60">
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-base-muted">
             Preview a local mock quote between demo tokens. Wallet connection,
             route execution, contract approvals, and signing are intentionally
-            absent from this MVP.
+            absent from this public MVP.
           </p>
         </div>
       </section>
