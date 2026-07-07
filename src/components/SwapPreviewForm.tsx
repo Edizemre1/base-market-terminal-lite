@@ -1,17 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  ArrowDownUp,
-  Ban,
-  Route,
-  ShieldAlert,
-  WalletCards
-} from "lucide-react";
+import { ArrowDownUp, LockKeyhole, WalletCards } from "lucide-react";
 import { PriceChange } from "@/components/PriceChange";
 import { RiskBadge } from "@/components/RiskBadge";
+import { MiniBarList, StatusPill, TerminalPanel } from "@/components/TerminalWidgets";
 import {
+  cx,
   formatCompactCurrency,
   formatCurrency,
   formatNumber
@@ -40,7 +35,8 @@ export function SwapPreviewForm({
   );
 
   const parsedAmount = Number.parseFloat(amount);
-  const cleanAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0;
+  const cleanAmount =
+    Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0;
   const sameToken = fromToken?.symbol === toToken?.symbol;
   const amountUsd = cleanAmount * (fromToken?.priceUsd ?? 0);
   const estimatedOutput =
@@ -51,30 +47,19 @@ export function SwapPreviewForm({
     fromToken && amountUsd > 0
       ? Math.min(7.5, (amountUsd / fromToken.liquidityUsd) * 100 * 0.8)
       : 0;
-  const routeLabel = fromToken && toToken ? `${fromToken.symbol} -> AUSD -> ${toToken.symbol}` : "-";
-  const canPreview = cleanAmount > 0 && !sameToken;
+  const routeLabel =
+    fromToken && toToken ? `${fromToken.symbol} / AUSD / ${toToken.symbol}` : "-";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
-      <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-base-electric">
-              Quote sandbox
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-base-text">
-              Route preview
-            </h2>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded border border-base-amber/30 bg-base-amber/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-base-amber">
-            <Ban size={14} aria-hidden="true" />
-            Execution off
-          </div>
-        </div>
-
-        <div className="space-y-4">
+    <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <TerminalPanel
+        label="EXECUTION TICKET"
+        title="UI-only route preview"
+        meta={<StatusPill label="Execution disabled" tone="amber" />}
+      >
+        <div className="grid gap-2 lg:grid-cols-[1fr_34px_1fr] lg:items-center">
           <TokenAmountPanel
-            label="From"
+            label="Sell"
             value={amount}
             onValueChange={setAmount}
             selectedSymbol={fromSymbol}
@@ -88,14 +73,14 @@ export function SwapPreviewForm({
               setFromSymbol(toSymbol);
               setToSymbol(fromSymbol);
             }}
-            className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-base-line bg-base-elevated/70 text-base-muted transition hover:border-base-blue/60 hover:text-base-electric"
+            className="mx-auto flex h-8 w-8 items-center justify-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
             aria-label="Flip preview direction"
           >
-            <ArrowDownUp size={17} aria-hidden="true" />
+            <ArrowDownUp size={14} aria-hidden="true" />
           </button>
 
           <TokenAmountPanel
-            label="To"
+            label="Buy"
             value={estimatedOutput > 0 ? estimatedOutput.toFixed(4) : "0"}
             readOnly
             selectedSymbol={toSymbol}
@@ -104,102 +89,107 @@ export function SwapPreviewForm({
           />
         </div>
 
-        <div className="mt-5">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-base-muted">
-            Demo slippage setting
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {slippageOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setSlippage(option)}
-                className={`min-h-10 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                  slippage === option
-                    ? "border-base-blue/60 bg-base-blue/20 text-base-electric"
-                    : "border-base-line bg-base-elevated/60 text-base-muted hover:border-base-blue/40 hover:text-base-text"
-                }`}
-              >
-                {option.toFixed(1)}%
-              </button>
-            ))}
-          </div>
+        <div className="mt-2 grid gap-1 md:grid-cols-4">
+          <TicketMetric label="Route" value={routeLabel} />
+          <TicketMetric label="Input value" value={formatCurrency(amountUsd)} />
+          <TicketMetric
+            label="Output"
+            value={`${formatNumber(estimatedOutput)} ${toToken?.symbol ?? ""}`}
+          />
+          <TicketMetric label="Impact" value={`${demoPriceImpact.toFixed(2)}%`} />
         </div>
 
-        {!canPreview ? (
-          <div className="mt-5 rounded-lg border border-base-amber/30 bg-base-amber/10 p-4 text-sm leading-6 text-base-amber">
-            Select two different demo tokens and enter an amount to preview a
-            mock route.
+        <div className="mt-2 grid gap-2 lg:grid-cols-[1fr_260px]">
+          <div className="border border-base-line bg-base-elevated p-2">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
+              Slippage
+            </p>
+            <div className="grid grid-cols-3 gap-1">
+              {slippageOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setSlippage(option)}
+                  className={cx(
+                    "h-8 border px-2 font-mono text-[11px] font-semibold",
+                    slippage === option
+                      ? "border-base-mint bg-base-mint/10 text-base-mint"
+                      : "border-base-line bg-base-panel text-base-muted hover:border-base-mint"
+                  )}
+                >
+                  {option.toFixed(1)}%
+                </button>
+              ))}
+            </div>
           </div>
-        ) : null}
+
+          <div className="border border-base-line bg-base-elevated p-2">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
+              Fee placeholder
+            </p>
+            <DisabledRow label="Platform fee" value="Not configured" />
+            <DisabledRow label="Route fee" value="Disabled" />
+          </div>
+        </div>
 
         <button
           type="button"
           disabled
-          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-base-line bg-base-elevated/50 px-4 py-3 text-sm font-semibold text-base-muted"
+          className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-base-muted"
         >
-          <WalletCards size={17} aria-hidden="true" />
-          Wallet connection not implemented
+          <WalletCards size={14} aria-hidden="true" />
+          Disabled execution button
         </button>
-      </div>
+      </TerminalPanel>
 
-      <aside className="space-y-4">
-        <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
-          <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-electric">
-            <Route size={16} aria-hidden="true" />
-            Mock route
-          </div>
-          <dl className="space-y-4 text-sm">
-            <QuoteRow label="Input value" value={formatCurrency(amountUsd)} />
-            <QuoteRow
-              label="Estimated output"
-              value={`${formatNumber(estimatedOutput)} ${toToken?.symbol ?? ""}`}
-            />
-            <QuoteRow label="Route" value={routeLabel} />
-            <QuoteRow label="Price impact" value={`${demoPriceImpact.toFixed(2)}%`} />
-            <QuoteRow label="Liquidity source" value="Local demo data" />
-          </dl>
-        </div>
-
-        <div className="rounded-lg border border-base-amber/30 bg-base-amber/10 p-5">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
-            <ShieldAlert size={16} aria-hidden="true" />
-            Preview only
-          </div>
-          <p className="text-sm leading-6 text-base-muted">
-            This interface never builds, signs, or submits transactions.
-          </p>
-        </div>
-
-        {fromToken && toToken ? (
-          <div className="rounded-lg border border-base-line bg-base-panel p-5 shadow-panel">
-            <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-base-amber">
-              <AlertTriangle size={16} aria-hidden="true" />
-              Demo checks
-            </div>
-            <div className="space-y-3">
+      <aside className="space-y-2">
+        <TerminalPanel label="RISK CHECKS" title="Token checks">
+          {fromToken && toToken ? (
+            <div className="space-y-1">
               {[fromToken, toToken].map((token) => (
                 <div
                   key={token.id}
-                  className="rounded-lg border border-base-line bg-base-elevated/60 p-4"
+                  className="border border-base-line bg-base-elevated p-2"
                 >
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="font-semibold text-base-text">{token.symbol}</p>
-                      <p className="mt-1 text-xs text-base-muted">
-                        {formatCompactCurrency(token.liquidityUsd)} liquidity
+                      <p className="font-mono text-[12px] font-semibold text-base-text">
+                        {token.symbol}
+                      </p>
+                      <p className="text-[10px] text-base-muted">
+                        {formatCompactCurrency(token.liquidityUsd)} liq
                       </p>
                     </div>
                     <RiskBadge level={token.riskLevel} compact />
                   </div>
-                  <div className="mt-3">
+                  <div className="mt-1">
                     <PriceChange value={token.priceChange24h} compact />
                   </div>
                 </div>
               ))}
             </div>
+          ) : null}
+        </TerminalPanel>
+
+        <TerminalPanel label="ROUTE HEALTH" title="Preview bars">
+          <MiniBarList
+            items={[
+              { label: "Depth", value: routeDepth(fromToken, toToken), tone: "mint" },
+              { label: "Impact", value: impactScore(demoPriceImpact), tone: "blue" },
+              { label: "Risk", value: riskReviewScore(fromToken, toToken), tone: "rose" }
+            ]}
+          />
+        </TerminalPanel>
+
+        <TerminalPanel label="EXECUTION" title="Disabled boundary">
+          <div className="flex items-start gap-2 border border-base-rose/40 bg-base-rose/10 p-2">
+            <LockKeyhole className="mt-0.5 shrink-0 text-base-rose" size={14} />
+            <p className="text-[11px] leading-4 text-base-muted">
+              UI only. No wallet signing, approvals, contract calls, live swaps,
+              or blockchain transactions are implemented.
+            </p>
           </div>
-        ) : null}
+        </TerminalPanel>
       </aside>
     </div>
   );
@@ -223,23 +213,23 @@ function TokenAmountPanel({
   readOnly?: boolean;
 }) {
   return (
-    <label className="block rounded-lg border border-base-line bg-base-elevated/50 p-4">
-      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-base-muted">
+    <label className="block border border-base-line bg-base-elevated p-2">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
         {label}
       </span>
-      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_180px]">
+      <div className="mt-2 grid gap-1 sm:grid-cols-[1fr_155px]">
         <input
           value={value}
           readOnly={readOnly}
           inputMode="decimal"
           onChange={(event) => onValueChange?.(event.target.value)}
-          className="min-h-12 w-full rounded border border-base-line bg-base-black/50 px-3 py-2 text-2xl font-semibold tabular-nums text-base-text outline-none transition placeholder:text-base-muted focus:border-base-blue/60"
+          className="h-9 w-full border border-base-line bg-base-panel px-2 font-mono text-lg font-semibold text-base-text outline-none placeholder:text-base-muted focus:border-base-mint"
           placeholder="0.00"
         />
         <select
           value={selectedSymbol}
           onChange={(event) => onSymbolChange(event.target.value)}
-          className="min-h-12 w-full rounded border border-base-line bg-base-raised px-3 py-2 text-sm font-semibold text-base-text outline-none transition focus:border-base-blue/60"
+          className="h-9 w-full border border-base-line bg-base-panel px-2 font-mono text-[12px] font-semibold text-base-text outline-none focus:border-base-mint"
         >
           {tokens.map((token) => (
             <option key={token.id} value={token.symbol}>
@@ -252,13 +242,56 @@ function TokenAmountPanel({
   );
 }
 
-function QuoteRow({ label, value }: { label: string; value: string }) {
+function TicketMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-base-line/70 pb-3 last:border-0 last:pb-0">
-      <dt className="text-base-muted">{label}</dt>
-      <dd className="max-w-[13rem] text-right font-semibold text-base-text">
+    <div className="border border-base-line bg-base-panel px-2 py-1.5">
+      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+      <p className="mt-1 truncate font-mono text-[12px] font-semibold text-base-text">
         {value}
-      </dd>
+      </p>
     </div>
   );
+}
+
+function DisabledRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+      <span className="text-base-muted">{label}</span>
+      <span className="font-mono text-base-text">{value}</span>
+    </div>
+  );
+}
+
+function routeDepth(
+  fromToken: TokenMarketSnapshot | undefined,
+  toToken: TokenMarketSnapshot | undefined
+) {
+  const liquidity = Math.min(
+    fromToken?.liquidityUsd ?? 0,
+    toToken?.liquidityUsd ?? 0
+  );
+
+  return Math.max(18, Math.min(92, Math.round((liquidity / 12000000) * 100)));
+}
+
+function impactScore(priceImpact: number) {
+  return Math.max(12, Math.min(96, Math.round(96 - priceImpact * 10)));
+}
+
+function riskReviewScore(
+  fromToken: TokenMarketSnapshot | undefined,
+  toToken: TokenMarketSnapshot | undefined
+) {
+  const levels = [fromToken?.riskLevel, toToken?.riskLevel];
+  if (levels.includes("high")) {
+    return 20;
+  }
+  if (levels.includes("elevated")) {
+    return 42;
+  }
+  if (levels.includes("watch")) {
+    return 66;
+  }
+
+  return 88;
 }
