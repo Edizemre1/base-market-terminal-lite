@@ -13,6 +13,7 @@ export type PairActivity = {
 };
 
 export type BasePair = {
+  dataSource?: "mock" | "dexscreener";
   id: string;
   pair: string;
   baseToken: string;

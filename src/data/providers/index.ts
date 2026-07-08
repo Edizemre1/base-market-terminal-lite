@@ -124,6 +124,7 @@ async function hydratePair(
 
   return {
     ...pair,
+    dataSource: pair.dataSource ?? (provider.mode === "dexscreener" ? "dexscreener" : "mock"),
     chart,
     activity,
     liquidityDetail: liquidityDetail ?? pair.liquidityDetail,

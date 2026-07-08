@@ -63,6 +63,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             marker="A"
             kind="new"
             pairs={data.newPairs}
+            showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -71,6 +72,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             marker="B"
             kind="inflow"
             pairs={data.volumeInflows}
+            showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -79,6 +81,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             marker="C"
             kind="momentum"
             pairs={data.momentumPairs}
+            showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -111,6 +114,7 @@ function OpportunityFeed({
   marker,
   kind,
   pairs,
+  showFallbackLabels,
   selectedPairId,
   onSelect
 }: {
@@ -119,6 +123,7 @@ function OpportunityFeed({
   marker: string;
   kind: FeedKind;
   pairs: BasePair[];
+  showFallbackLabels: boolean;
   selectedPairId: string;
   onSelect: (id: string) => void;
 }) {
@@ -135,7 +140,7 @@ function OpportunityFeed({
           View all
         </span>
       </div>
-      <div className="grid grid-cols-[minmax(0,1fr)_42px_68px_70px_58px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+      <div className="grid grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
         <span>Pair</span>
         <span>Age</span>
         <span className="text-right">Liquidity</span>
@@ -143,44 +148,75 @@ function OpportunityFeed({
         <span className="text-right">{kind === "momentum" ? "Score" : "Delta"}</span>
       </div>
       <div>
-        {pairs.map((pair) => (
-          <button
-            key={`${title}-${pair.id}`}
-            type="button"
-            onClick={() => onSelect(pair.id)}
-            className={cx(
-              "grid h-8 w-full grid-cols-[minmax(0,1fr)_42px_68px_70px_58px] items-center border-b border-base-line px-2 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
-              selectedPairId === pair.id && "bg-base-mint/10"
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-1.5 font-mono font-semibold text-base-text">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-base-mint" />
-              <span className="truncate">{pair.pair}</span>
-            </span>
-            <span className="font-mono text-base-muted">{pair.age}</span>
-            <span className="text-right font-mono text-base-text">
-              {formatCompactCurrency(pair.liquidity)}
-            </span>
-            <span className="text-right font-mono text-base-text">
-              {formatCompactCurrency(pair.volume24h)}
-            </span>
-            <span
+        {pairs.map((pair) => {
+          const isFallbackRow = showFallbackLabels && pair.dataSource === "mock";
+
+          return (
+            <button
+              key={`${title}-${pair.id}`}
+              type="button"
+              onClick={() => onSelect(pair.id)}
               className={cx(
-                "text-right font-mono",
-                pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+                "grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center border-b border-base-line px-2 py-1 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+                selectedPairId === pair.id && "bg-base-mint/10"
               )}
             >
-              {kind === "momentum"
-                ? pair.momentumScore
-                : kind === "inflow"
-                  ? `+${formatCompactCurrency(pair.inflow24h)}`
-                  : formatPercent(pair.change24h)}
-            </span>
-          </button>
-        ))}
+              <span className="flex min-w-0 items-start gap-1.5">
+                <span
+                  className={cx(
+                    "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                    isFallbackRow ? "bg-base-amber" : "bg-base-mint"
+                  )}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-mono font-semibold text-base-text">
+                    {pair.pair}
+                  </span>
+                  <span
+                    className={cx(
+                      "block truncate text-[9px] leading-3",
+                      isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+                    )}
+                  >
+                    {getFeedRowSubtitle(pair, isFallbackRow)}
+                  </span>
+                </span>
+              </span>
+              <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
+              <span className="text-right font-mono text-[10px] text-base-text">
+                {formatCompactCurrency(pair.liquidity)}
+              </span>
+              <span className="text-right font-mono text-[10px] text-base-text">
+                {formatCompactCurrency(pair.volume24h)}
+              </span>
+              <span
+                className={cx(
+                  "text-right font-mono text-[10px]",
+                  pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+                )}
+              >
+                {kind === "momentum"
+                  ? pair.momentumScore
+                  : kind === "inflow"
+                    ? `+${formatCompactCurrency(pair.inflow24h)}`
+                    : formatPercent(pair.change24h)}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
+}
+
+function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
+  if (isFallbackRow) {
+    return `Demo fallback - ${pair.dex}`;
+  }
+
+  return pair.project && pair.project !== pair.baseToken
+    ? `${pair.project} - ${pair.dex}`
+    : pair.dex;
 }
 
 function SelectedPairPanel({
@@ -190,7 +226,12 @@ function SelectedPairPanel({
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
 }) {
-  const readOnlyDetail = marketDataMode === "dexscreener" ? "Read-only feed" : "+mock";
+  const readOnlyDetail =
+    marketDataMode === "dexscreener"
+      ? pair.dataSource === "mock"
+        ? "Mock fallback"
+        : "Read-only feed"
+      : "+mock";
 
   return (
     <section className="border border-base-line bg-base-panel">
@@ -341,13 +382,13 @@ function MockChart({ pair }: { pair: BasePair }) {
       <div className="flex items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
         <div>
           <p className="font-mono text-[12px] font-semibold text-base-text">
-            {pair.pair.replace(" / ", "/")} - 1h chart preview - {pair.dex} (Base)
+            {pair.pair.replace(" / ", "/")} - Chart preview · OHLCV not connected
           </p>
           <p className="font-mono text-[10px] text-base-mint">
-            O {pair.price} H {pair.price} L {pair.price} C {pair.price} {formatPercent(pair.change24h)}
+            Preview price {pair.price} · 24h {formatPercent(pair.change24h)}
           </p>
           <p className="font-mono text-[10px] text-base-muted">
-            Synthetic preview path; live OHLCV is not connected.
+            Synthetic path only - {pair.dex} (Base)
           </p>
         </div>
         <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
