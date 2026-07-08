@@ -80,7 +80,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
         </aside>
 
         <section className="min-w-0 space-y-2">
-          <SelectedPairPanel pair={selectedPair} />
+          <SelectedPairPanel pair={selectedPair} marketDataMode={data.mode} />
           <PairDetailTabs
             pair={selectedPair}
             activeTab={activeTab}
@@ -90,6 +90,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
 
         <SwapTicket
           pair={selectedPair}
+          marketDataMode={data.mode}
           amount={amount}
           onAmountChange={setAmount}
           estimatedOutput={estimatedOutput}
@@ -177,7 +178,15 @@ function OpportunityFeed({
   );
 }
 
-function SelectedPairPanel({ pair }: { pair: BasePair }) {
+function SelectedPairPanel({
+  pair,
+  marketDataMode
+}: {
+  pair: BasePair;
+  marketDataMode: MarketTerminalSnapshot["mode"];
+}) {
+  const readOnlyDetail = marketDataMode === "dexscreener" ? "Read-only feed" : "+mock";
+
   return (
     <section className="border border-base-line bg-base-panel">
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
@@ -222,8 +231,16 @@ function SelectedPairPanel({ pair }: { pair: BasePair }) {
           detail="+262%"
           tone={pair.change24h >= 0 ? "mint" : "rose"}
         />
-        <Metric label="24h volume" value={formatCompactCurrency(pair.volume24h)} detail="+mock" />
-        <Metric label="Liquidity" value={formatCompactCurrency(pair.liquidity)} detail="+6.33%" />
+        <Metric
+          label="24h volume"
+          value={formatCompactCurrency(pair.volume24h)}
+          detail={readOnlyDetail}
+        />
+        <Metric
+          label="Liquidity"
+          value={formatCompactCurrency(pair.liquidity)}
+          detail={readOnlyDetail}
+        />
         <Metric label="Age" value={pair.age} detail="New" />
         <Metric label="Risk score" value={`${pair.riskScore} / 100`} detail={pair.riskLabel} tone="mint" />
       </div>
@@ -416,15 +433,26 @@ function MiniModule({
 
 function SwapTicket({
   pair,
+  marketDataMode,
   amount,
   onAmountChange,
   estimatedOutput
 }: {
   pair: BasePair;
+  marketDataMode: MarketTerminalSnapshot["mode"];
   amount: string;
   onAmountChange: (value: string) => void;
   estimatedOutput: number;
 }) {
+  const modeWarning =
+    marketDataMode === "dexscreener"
+      ? "Read-only market data. No real funds will be used."
+      : "This is demo data. No real funds will be used.";
+  const modeLabel =
+    marketDataMode === "dexscreener"
+      ? "Read-only mode - no transaction will be sent"
+      : "Demo mode - no transaction will be sent";
+
   return (
     <aside className="sticky top-12 min-w-0 self-start border border-base-line bg-base-panel">
       <div className="flex min-h-10 items-center justify-between border-b border-base-line bg-base-raised px-3">
@@ -483,8 +511,7 @@ function SwapTicket({
         </div>
 
         <div className="border border-base-amber/45 bg-base-amber/10 p-2 text-[11px] leading-4 text-base-muted">
-          Low liquidity: higher price impact and slippage risk. This is demo
-          data. No real funds will be used.
+          Low liquidity: higher price impact and slippage risk. {modeWarning}
         </div>
 
         <button
@@ -497,7 +524,7 @@ function SwapTicket({
         </button>
 
         <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
-          Demo mode - no transaction will be sent
+          {modeLabel}
         </p>
       </div>
     </aside>

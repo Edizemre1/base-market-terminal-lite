@@ -1,6 +1,6 @@
 # Base Terminal Lite
 
-Standalone public MVP for a focused Base on-chain swap/radar terminal. The app uses local mock data only and is designed for UI review, architecture iteration, and future public integrations.
+Standalone public MVP for a focused Base on-chain swap/radar terminal. The app defaults to local mock data and can optionally use read-only public DexScreener data for Base pairs.
 
 Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 
@@ -11,24 +11,33 @@ Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 - No real API keys or backend secrets.
 - No paid product logic.
 - No real transactions, approvals, wallet signing, or swap execution.
-- Mock/demo Base pair data only.
-- Risk labels are demo UI states, not live token safety assessments.
+- Mock/demo Base pair data by default.
+- DexScreener mode is read-only market data only.
+- Risk labels are demo/derived UI states, not live token safety assessments.
 
 ## Data Mode
 
-Current mode is mock/demo:
+Default mode is mock/demo:
 
 ```bash
-NEXT_PUBLIC_MARKET_DATA_MODE=mock
+MARKET_DATA_MODE=mock
 ```
 
-If this value is missing, the app safely falls back to bundled mock data. The provider layer is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
+DexScreener read-only mode is opt-in:
+
+```bash
+MARKET_DATA_MODE=dexscreener
+```
+
+`NEXT_PUBLIC_MARKET_DATA_MODE=mock` is still supported for compatibility. If mode is missing, invalid, rate-limited, or DexScreener returns no usable Base pairs, the app safely falls back to bundled mock data.
+
+No API key is needed. The provider layer is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
 
 ## What Is Included
 
 - Single-page Base pair radar terminal.
 - New Pairs, Volume Inflow, and Momentum opportunity feeds.
-- Selected pair workspace with mock chart, risk, liquidity, and activity modules.
+- Selected pair workspace with chart, risk, liquidity, and activity modules.
 - Always-visible swap preview ticket with disabled execution.
 - Simple docs page with public safety boundaries.
 - Reusable terminal shell and compact panel components.
@@ -72,7 +81,7 @@ src/types/               Shared TypeScript domain types
 ## Future Integration Boundaries
 
 - Wallet connection: add a wallet adapter layer for account state and chain checks.
-- Real Base pair data: add read-only provider adapters behind `src/data/providers/`.
+- Real Base pair data: use read-only provider adapters behind `src/data/providers/`.
 - Provider boundary: route future real data through a private backend or indexer when credentials, rate limits, or enrichment are needed.
 - Swap routing: introduce a quote service before any transaction-building code.
 - Platform fee boundary: keep policy and calculation outside this MVP until product requirements are public and reviewed.

@@ -1,6 +1,8 @@
 import type { BasePair } from "@/types/baseTerminal";
+import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
 import type {
+  FeedStatusLabel,
   MarketDataMode,
   MarketDataProvider,
   MarketTerminalSnapshot
@@ -9,6 +11,7 @@ import type {
 export { createDexScreenerProvider } from "./dexScreenerProvider";
 export { createGeckoTerminalProvider } from "./geckoTerminalProvider";
 export type {
+  FeedStatusLabel,
   MarketDataMode,
   MarketDataProvider,
   MarketTerminalSnapshot,
@@ -18,59 +21,109 @@ export type {
 
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
 
-export function resolveMarketDataMode(mode = process.env.NEXT_PUBLIC_MARKET_DATA_MODE) {
+export function resolveMarketDataMode(
+  mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
+): MarketDataMode {
   const normalized = mode?.trim().toLowerCase();
 
-  if (normalized === "dexscreener" || normalized === "geckoterminal") {
-    return DEFAULT_MARKET_DATA_MODE;
+  if (normalized === "dexscreener") {
+    return "dexscreener";
+  }
+
+  if (normalized === "mock") {
+    return "mock";
   }
 
   return DEFAULT_MARKET_DATA_MODE;
 }
 
-export function getMarketDataProvider(
+export function getMarketFeedStatusLabel(
   mode: MarketDataMode = resolveMarketDataMode()
-): MarketDataProvider {
-  if (mode === "mock") {
-    return mockMarketDataProvider;
+): FeedStatusLabel {
+  return mode === "dexscreener" ? "DEXSCREENER READ-ONLY" : "MOCK FEED";
+}
+
+export async function getMarketDataProvider(
+  mode: MarketDataMode = resolveMarketDataMode()
+): Promise<MarketDataProvider> {
+  if (mode === "dexscreener") {
+    return createDexScreenerProvider();
   }
 
   return mockMarketDataProvider;
 }
 
-export function getMarketTerminalSnapshot(
-  provider: MarketDataProvider = getMarketDataProvider()
-): MarketTerminalSnapshot {
-  const newPairs = hydratePairs(provider, provider.getNewPairs());
-  const volumeInflows = hydratePairs(provider, provider.getVolumeInflows());
-  const momentumPairs = hydratePairs(provider, provider.getMomentumPairs());
+export async function getMarketTerminalSnapshot(
+  mode: MarketDataMode = resolveMarketDataMode()
+): Promise<MarketTerminalSnapshot> {
+  if (mode === "mock") {
+    return buildMarketTerminalSnapshot(mockMarketDataProvider);
+  }
+
+  try {
+    const provider = await getMarketDataProvider(mode);
+    const snapshot = await buildMarketTerminalSnapshot(provider);
+
+    if (snapshot.allPairs.length > 0) {
+      return snapshot;
+    }
+
+    return buildMarketTerminalSnapshot(
+      mockMarketDataProvider,
+      "DexScreener returned no Base pairs; using bundled mock data."
+    );
+  } catch {
+    return buildMarketTerminalSnapshot(
+      mockMarketDataProvider,
+      "DexScreener provider failed; using bundled mock data."
+    );
+  }
+}
+
+async function buildMarketTerminalSnapshot(
+  provider: MarketDataProvider,
+  fallbackReason?: string
+): Promise<MarketTerminalSnapshot> {
+  const newPairs = await hydratePairs(provider, await provider.getNewPairs());
+  const volumeInflows = await hydratePairs(provider, await provider.getVolumeInflows());
+  const momentumPairs = await hydratePairs(provider, await provider.getMomentumPairs());
   const allPairs = dedupePairs([...newPairs, ...volumeInflows, ...momentumPairs]);
   const defaultPairId = allPairs[0]?.id ?? "";
 
   return {
     mode: provider.mode,
     providerName: provider.name,
-    generatedAt: "mock-static",
+    feedStatusLabel: getMarketFeedStatusLabel(provider.mode),
+    generatedAt: provider.mode === "mock" ? "mock-static" : new Date().toISOString(),
     defaultPairId,
     allPairs,
     newPairs,
     volumeInflows,
-    momentumPairs
+    momentumPairs,
+    fallbackReason
   };
 }
 
-function hydratePairs(provider: MarketDataProvider, pairs: BasePair[]) {
-  return pairs.map((pair) => hydratePair(provider, pair));
+async function hydratePairs(provider: MarketDataProvider, pairs: BasePair[]) {
+  return Promise.all(pairs.map((pair) => hydratePair(provider, pair)));
 }
 
-function hydratePair(provider: MarketDataProvider, pair: BasePair): BasePair {
-  const risk = provider.getRiskDetails(pair.id);
+async function hydratePair(
+  provider: MarketDataProvider,
+  pair: BasePair
+): Promise<BasePair> {
+  const [chart, activity, liquidityDetail, risk] = await Promise.all([
+    provider.getPairChart(pair.id),
+    provider.getActivityFeed(pair.id),
+    provider.getLiquidityDetails(pair.id),
+    provider.getRiskDetails(pair.id)
+  ]);
 
   return {
     ...pair,
-    chart: provider.getPairChart(pair.id),
-    activity: provider.getActivityFeed(pair.id),
-    liquidityDetail: provider.getLiquidityDetails(pair.id) ?? pair.liquidityDetail,
+    chart,
+    activity,
+    liquidityDetail: liquidityDetail ?? pair.liquidityDetail,
     riskScore: risk?.riskScore ?? pair.riskScore,
     riskLabel: risk?.riskLabel ?? pair.riskLabel,
     riskChecks: risk?.riskChecks ?? pair.riskChecks,
