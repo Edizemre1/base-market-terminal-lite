@@ -22,6 +22,16 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   const [amount, setAmount] = useState("0.10");
   const selectedPair =
     data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
+  const amountNumber = Number.parseFloat(amount);
+  const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
+  const estimatedOutput = useMemo(() => {
+    if (!selectedPair) {
+      return 0;
+    }
+
+    const base = selectedPair.liquidity / Math.max(selectedPair.riskScore, 1);
+    return cleanAmount * base * selectedPair.volumeMultiple;
+  }, [cleanAmount, selectedPair]);
 
   if (!selectedPair) {
     return (
@@ -37,13 +47,6 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
       </main>
     );
   }
-
-  const amountNumber = Number.parseFloat(amount);
-  const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
-  const estimatedOutput = useMemo(() => {
-    const base = selectedPair.liquidity / Math.max(selectedPair.riskScore, 1);
-    return cleanAmount * base * selectedPair.volumeMultiple;
-  }, [cleanAmount, selectedPair]);
 
   return (
     <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
