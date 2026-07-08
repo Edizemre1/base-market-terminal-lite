@@ -145,7 +145,7 @@ function DataSourceSwitcher() {
         onClick={() => selectMode("mock")}
       />
       <DataSourceButton
-        label="DexScreener Read-Only"
+        label="Live Data Preview"
         active={activeMode === "dexscreener"}
         onClick={() => selectMode("dexscreener")}
       />
@@ -197,7 +197,7 @@ function SidebarNetworkCard() {
 function SidebarNetworkCopy({ mode }: { mode: MarketDataMode }) {
   const copy =
     mode === "dexscreener"
-      ? "DexScreener read-only mode. Some rows may use mock fallback."
+      ? "Read-only Base market preview. Some sections may be unavailable when qualified live data is limited."
       : "Mock/demo pairs only. No transactions are sent.";
 
   return <p className="mt-1 text-[11px] leading-4 text-base-muted">{copy}</p>;
