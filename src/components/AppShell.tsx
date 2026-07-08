@@ -11,8 +11,8 @@ import {
   WalletCards
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, type ReactNode } from "react";
 import type { MarketDataMode } from "@/data/providers";
 import { cx } from "@/lib/format";
 
@@ -24,16 +24,8 @@ const navItems = [
   { href: "/docs", label: "Docs", icon: BookOpenText, active: "/docs" }
 ] as const;
 
-export function AppShell({
-  children,
-  marketDataMode = "mock"
-}: {
-  children: ReactNode;
-  marketDataMode?: MarketDataMode;
-}) {
+export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const feedLabel =
-    marketDataMode === "dexscreener" ? "DexScreener Read-Only" : "Mock Feed";
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
@@ -67,7 +59,9 @@ export function AppShell({
 
           <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
             <TopChip label="Base Network Online" tone="mint" />
-            <TopChip label={feedLabel} tone="blue" />
+            <Suspense fallback={<DataSourceFallback />}>
+              <DataSourceSwitcher />
+            </Suspense>
             <TopChip label="UTC 19:06" />
             <TopChip label="EN / TR" />
             <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />
@@ -118,6 +112,77 @@ export function AppShell({
 
       <div className="min-w-0 pt-10 md:pl-[160px]">{children}</div>
     </div>
+  );
+}
+
+function DataSourceSwitcher() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeMode: MarketDataMode =
+    searchParams.get("data") === "dexscreener" ? "dexscreener" : "mock";
+
+  function selectMode(mode: MarketDataMode) {
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    if (mode === "dexscreener") {
+      nextParams.set("data", "dexscreener");
+    } else {
+      nextParams.delete("data");
+    }
+
+    const queryString = nextParams.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, {
+      scroll: false
+    });
+  }
+
+  return (
+    <div className="hidden h-6 items-center border border-base-line bg-base-elevated lg:inline-flex">
+      <DataSourceButton
+        label="Mock Feed"
+        active={activeMode === "mock"}
+        onClick={() => selectMode("mock")}
+      />
+      <DataSourceButton
+        label="DexScreener Read-Only"
+        active={activeMode === "dexscreener"}
+        onClick={() => selectMode("dexscreener")}
+      />
+    </div>
+  );
+}
+
+function DataSourceButton({
+  label,
+  active,
+  onClick
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "h-full border-r border-base-line px-1.5 text-[9px] font-semibold uppercase tracking-[0.1em] last:border-r-0",
+        active
+          ? "bg-base-blue/5 text-base-electric"
+          : "text-base-muted hover:bg-base-panel hover:text-base-text"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function DataSourceFallback() {
+  return (
+    <span className="hidden h-6 items-center border border-base-line bg-base-elevated px-1.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-base-muted lg:inline-flex">
+      Mock Feed
+    </span>
   );
 }
 

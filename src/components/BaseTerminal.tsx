@@ -50,6 +50,11 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
 
   return (
     <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+      {data.fallbackReason ? (
+        <div className="mb-2 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-base-amber">
+          Fallback: mock data
+        </div>
+      ) : null}
       <section className="grid min-h-[610px] min-w-0 grid-cols-1 gap-2.5 xl:grid-cols-[300px_minmax(0,1fr)_390px] 2xl:grid-cols-[320px_minmax(0,1fr)_410px]">
         <aside className="min-w-0 space-y-2">
           <OpportunityFeed

@@ -37,6 +37,13 @@ export function resolveMarketDataMode(
   return DEFAULT_MARKET_DATA_MODE;
 }
 
+export function resolveUrlMarketDataMode(
+  data: string | string[] | undefined | null
+): MarketDataMode {
+  const mode = Array.isArray(data) ? data[0] : data;
+  return resolveMarketDataMode(mode ?? DEFAULT_MARKET_DATA_MODE);
+}
+
 export function getMarketFeedStatusLabel(
   mode: MarketDataMode = resolveMarketDataMode()
 ): FeedStatusLabel {
