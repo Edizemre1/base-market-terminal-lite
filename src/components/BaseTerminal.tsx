@@ -2,13 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, Settings, ShieldCheck, Star } from "lucide-react";
-import {
-  getDefaultPair,
-  getMomentumPairs,
-  getNewPairs,
-  getVolumeInflowPairs,
-  mockBasePairs
-} from "@/data/mockBasePairs";
+import type { MarketTerminalSnapshot } from "@/data/providers";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -22,12 +16,27 @@ const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "activity", label: "Activity" }
 ];
 
-export function BaseTerminal() {
-  const [selectedPairId, setSelectedPairId] = useState(getDefaultPair().id);
+export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
+  const [selectedPairId, setSelectedPairId] = useState(data.defaultPairId);
   const [activeTab, setActiveTab] = useState<DetailTab>("risk");
   const [amount, setAmount] = useState("0.10");
   const selectedPair =
-    mockBasePairs.find((pair) => pair.id === selectedPairId) ?? getDefaultPair();
+    data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
+
+  if (!selectedPair) {
+    return (
+      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+        <section className="border border-base-line bg-base-panel p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
+            Base Terminal Lite
+          </p>
+          <p className="mt-2 font-mono text-sm text-base-text">
+            No demo pairs are available from the active read-only provider.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   const amountNumber = Number.parseFloat(amount);
   const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
@@ -45,7 +54,7 @@ export function BaseTerminal() {
             title="New Pairs"
             marker="A"
             kind="new"
-            pairs={getNewPairs()}
+            pairs={data.newPairs}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -53,7 +62,7 @@ export function BaseTerminal() {
             title="Volume Inflow"
             marker="B"
             kind="inflow"
-            pairs={getVolumeInflowPairs()}
+            pairs={data.volumeInflows}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -61,7 +70,7 @@ export function BaseTerminal() {
             title="Momentum"
             marker="C"
             kind="momentum"
-            pairs={getMomentumPairs()}
+            pairs={data.momentumPairs}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
