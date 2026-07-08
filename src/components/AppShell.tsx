@@ -7,6 +7,7 @@ import {
   Droplets,
   Radar,
   Search,
+  Star,
   Shuffle,
   WalletCards
 } from "lucide-react";
@@ -108,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 function TerminalSearchBox() {
-  const { pairs, selectedPairId, selectPair } = useTerminalSearch();
+  const { pairs, selectedPairId, selectPair, isPairPinned, togglePinnedPair } = useTerminalSearch();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const results = useMemo(() => getSearchResults(pairs, query), [pairs, query]);
@@ -157,31 +158,49 @@ function TerminalSearchBox() {
         <div className="absolute left-0 right-0 top-[32px] z-[60] max-h-[300px] overflow-y-auto border border-base-line bg-base-panel shadow-none">
           {results.length > 0 ? (
             results.map((pair) => (
-              <button
+              <div
                 key={pair.id}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectResult(pair.id)}
                 className={cx(
-                  "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-base-line px-2 py-1.5 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+                  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-base-line px-2 py-1.5 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
                   pair.id === selectedPairId && "bg-base-mint/10"
                 )}
               >
-                <span className="min-w-0">
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectResult(pair.id)}
+                  className="min-w-0 text-left"
+                >
                   <span className="block truncate font-mono font-semibold text-base-text">
                     {pair.pair}
                   </span>
                   <span className="block truncate text-[10px] text-base-muted">
                     {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} - {pair.dex}
                   </span>
-                </span>
+                </button>
                 <span className="text-right font-mono text-[10px] text-base-muted">
                   <span className="block text-base-text">
                     {formatCompactCurrency(pair.liquidity)}
                   </span>
                   <span>{formatCompactCurrency(pair.volume24h)}</span>
                 </span>
-              </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => togglePinnedPair(pair)}
+                  className={cx(
+                    "grid h-6 w-6 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint",
+                    isPairPinned(pair) && "border-base-mint/45 bg-base-mint/10 text-base-mint"
+                  )}
+                  aria-label={isPairPinned(pair) ? `Unpin ${pair.pair}` : `Pin ${pair.pair}`}
+                >
+                  <Star
+                    size={12}
+                    fill={isPairPinned(pair) ? "currentColor" : "none"}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
             ))
           ) : (
             <div className="px-2 py-2 font-mono text-[11px] text-base-muted">
