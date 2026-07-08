@@ -87,3 +87,100 @@ select {
   );
   background-size: 100% 22px;
 }
+
+@media (min-width: 1180px) {
+  .terminal-main-frame {
+    position: fixed;
+    inset: 40px 0 0 160px;
+    display: flex;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+  }
+
+  .terminal-main-grid {
+    display: grid;
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-columns: 280px minmax(0, 1fr) 380px;
+    gap: 8px;
+  }
+
+  .terminal-left-column {
+    display: grid;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .terminal-center-column {
+    display: grid;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: minmax(0, 1fr) minmax(150px, 0.24fr);
+    gap: 8px;
+  }
+
+  .terminal-feed-panel,
+  .terminal-selected-panel,
+  .terminal-detail-tabs,
+  .terminal-swap-ticket {
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .terminal-feed-body,
+  .terminal-detail-body,
+  .terminal-swap-body {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .terminal-feed-body {
+    flex: 1 1 auto;
+  }
+
+  .terminal-selected-body,
+  .terminal-chart-panel {
+    min-height: 0;
+  }
+
+  .terminal-chart-svg {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 130px;
+  }
+
+  .terminal-swap-ticket {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+  }
+
+  .terminal-swap-body {
+    justify-content: space-between;
+  }
+
+  .terminal-swap-footer {
+    margin-top: 0;
+  }
+}
+
+@media (min-width: 1536px) {
+  .terminal-main-grid {
+    grid-template-columns: 300px minmax(0, 1fr) 400px;
+    gap: 10px;
+  }
+
+  .terminal-left-column,
+  .terminal-center-column {
+    gap: 10px;
+  }
+
+  .terminal-chart-svg {
+    min-height: 170px;
+  }
+}
