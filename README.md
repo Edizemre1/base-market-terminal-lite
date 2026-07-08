@@ -31,6 +31,8 @@ No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARK
 
 DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified live pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified live data is limited, and the app shows `Live data preview + demo fallback`.
 
+Chart data is read-only. In live data preview mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart safely falls back to the synthetic preview and labels it as unavailable.
+
 No API key is needed. DexScreener mode is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
 
 ## What Is Included

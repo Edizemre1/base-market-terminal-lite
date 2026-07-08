@@ -440,34 +440,46 @@ function Metric({
 function MockChart({ pair }: { pair: BasePair }) {
   const width = 720;
   const height = 250;
-  const min = Math.min(...pair.chart);
-  const max = Math.max(...pair.chart);
+  const candles = getDisplayCandles(pair);
+  const values = candles.flatMap((candle) => [
+    candle.open,
+    candle.high,
+    candle.low,
+    candle.close
+  ]);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
   const spread = max - min || 1;
-  const step = width / Math.max(pair.chart.length - 1, 1);
-  const path = pair.chart
-    .map((point, index) => {
+  const step = width / Math.max(candles.length - 1, 1);
+  const path = candles
+    .map((candle, index) => {
       const x = index * step;
-      const y = height - ((point - min) / spread) * height;
+      const y = getChartY(candle.close, min, spread, height);
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
     .join(" ");
+  const latest = candles[candles.length - 1];
+  const chartLabel = pair.chartLabel ?? "Chart preview \u00b7 live OHLCV unavailable";
 
   return (
     <div className="market-scanline border border-base-line bg-base-panel">
       <div className="flex items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
         <div>
           <p className="font-mono text-[12px] font-semibold text-base-text">
-            {pair.pair.replace(" / ", "/")} - Chart preview · OHLCV not connected
+            {pair.pair.replace(" / ", "/")} - {chartLabel}
           </p>
           <p className="font-mono text-[10px] text-base-mint">
-            Preview price {pair.price} · 24h {formatPercent(pair.change24h)}
+            O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
+            {formatChartValue(latest.low)} C {formatChartValue(latest.close)}
           </p>
           <p className="font-mono text-[10px] text-base-muted">
-            Synthetic path only - {pair.dex} (Base)
+            {pair.chartSource === "geckoterminal"
+              ? "Read-only candles - Base"
+              : `Synthetic path only - ${pair.dex} (Base)`}
           </p>
         </div>
         <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
-          Volume {formatCompactCurrency(pair.volume24h)}
+          Volume {formatCompactCurrency(latest.volume || pair.volume24h)}
         </span>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-[270px] w-full max-w-full p-2" aria-hidden="true">
@@ -483,25 +495,30 @@ function MockChart({ pair }: { pair: BasePair }) {
             strokeWidth="1"
           />
         ))}
-        {pair.chart.map((point, index) => {
+        {candles.map((candle, index) => {
           const x = index * step;
-          const y = height - ((point - min) / spread) * height;
-          const positive = index === 0 || point >= pair.chart[index - 1];
+          const openY = getChartY(candle.open, min, spread, height);
+          const closeY = getChartY(candle.close, min, spread, height);
+          const highY = getChartY(candle.high, min, spread, height);
+          const lowY = getChartY(candle.low, min, spread, height);
+          const positive = candle.close >= candle.open;
+          const bodyY = Math.min(openY, closeY);
+          const bodyHeight = Math.max(2, Math.abs(openY - closeY));
           return (
             <g key={`c-${index}`}>
               <line
                 x1={x}
                 x2={x}
-                y1={Math.max(0, y - 18)}
-                y2={Math.min(height, y + 18)}
+                y1={highY}
+                y2={lowY}
                 stroke={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
                 strokeWidth="1"
               />
               <rect
                 x={x - 3}
-                y={positive ? y - 10 : y}
+                y={bodyY}
                 width="6"
-                height="10"
+                height={bodyHeight}
                 fill={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
                 opacity="0.88"
               />
@@ -519,6 +536,44 @@ function MockChart({ pair }: { pair: BasePair }) {
       </svg>
     </div>
   );
+}
+
+function getDisplayCandles(pair: BasePair) {
+  if (pair.chartCandles && pair.chartCandles.length > 0) {
+    return pair.chartCandles;
+  }
+
+  const points = pair.chart.length > 0 ? pair.chart : [1];
+
+  return points.map((close, index) => {
+    const open = points[index - 1] ?? close;
+    const wick = Math.max(Math.abs(close - open) * 0.45, Math.abs(close) * 0.006, 0.0001);
+
+    return {
+      timestamp: index,
+      open,
+      high: Math.max(open, close) + wick,
+      low: Math.max(0, Math.min(open, close) - wick),
+      close,
+      volume: pair.volume24h / Math.max(points.length, 1)
+    };
+  });
+}
+
+function getChartY(value: number, min: number, spread: number, height: number) {
+  return height - ((value - min) / spread) * height;
+}
+
+function formatChartValue(value: number) {
+  if (value > 0 && value < 0.0001) {
+    return value.toFixed(10);
+  }
+
+  if (value > 0 && value < 1) {
+    return value.toFixed(6);
+  }
+
+  return value.toFixed(4);
 }
 
 function MiniModule({

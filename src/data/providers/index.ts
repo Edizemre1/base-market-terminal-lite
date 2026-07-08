@@ -1,4 +1,5 @@
 import type { BasePair } from "@/types/baseTerminal";
+import { getPairChart } from "./chart";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
 import type {
@@ -116,7 +117,7 @@ async function hydratePair(
   pair: BasePair
 ): Promise<BasePair> {
   const [chart, activity, liquidityDetail, risk] = await Promise.all([
-    provider.getPairChart(pair.id),
+    getPairChart(pair, provider.mode),
     provider.getActivityFeed(pair.id),
     provider.getLiquidityDetails(pair.id),
     provider.getRiskDetails(pair.id)
@@ -125,7 +126,10 @@ async function hydratePair(
   return {
     ...pair,
     dataSource: pair.dataSource ?? (provider.mode === "dexscreener" ? "dexscreener" : "mock"),
-    chart,
+    chart: chart.candles.map((candle) => candle.close),
+    chartCandles: chart.candles,
+    chartSource: chart.source,
+    chartLabel: chart.label,
     activity,
     liquidityDetail: liquidityDetail ?? pair.liquidityDetail,
     riskScore: risk?.riskScore ?? pair.riskScore,
