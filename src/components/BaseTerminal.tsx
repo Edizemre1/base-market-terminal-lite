@@ -103,7 +103,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
 
   if (!selectedPairWithChart) {
     return (
-      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
         <section className="border border-base-line bg-base-panel p-4">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Base Terminal Lite
@@ -117,14 +117,14 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   }
 
   return (
-    <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+    <main className="flex min-h-[calc(100vh-40px)] w-full flex-col overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
       {data.fallbackReason ? (
-        <div className="mb-2 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
+        <div className="mb-2 shrink-0 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
           {data.fallbackReason}
         </div>
       ) : null}
-      <section className="grid min-h-[610px] min-w-0 grid-cols-1 gap-2.5 xl:grid-cols-[300px_minmax(0,1fr)_390px] 2xl:grid-cols-[320px_minmax(0,1fr)_410px]">
-        <aside className="min-w-0 space-y-2">
+      <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
+        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-3 xl:gap-2 xl:space-y-0 xl:overflow-hidden">
           <OpportunityFeed
             id="new-pairs"
             title="New Pairs"
@@ -155,7 +155,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
           />
         </aside>
 
-        <section className="min-w-0 space-y-2">
+        <section className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(132px,0.28fr)] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
           <SelectedPairPanel
             pair={selectedPairWithChart}
             marketDataMode={data.mode}
@@ -206,8 +206,8 @@ function OpportunityFeed({
     showFallbackLabels ? pairs.filter((pair) => pair.dataSource === "mock") : [];
 
   return (
-    <section id={id} className="border border-base-line bg-base-panel">
-      <div className="flex min-h-8 items-center justify-between border-b border-base-line bg-base-raised px-2">
+    <section id={id} className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] text-base-muted">{marker}</span>
           <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
@@ -218,14 +218,14 @@ function OpportunityFeed({
           View all
         </span>
       </div>
-      <div className="grid grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+      <div className="grid shrink-0 grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
         <span>Pair</span>
         <span>Age</span>
         <span className="text-right">Liquidity</span>
         <span className="text-right">24h Vol</span>
         <span className="text-right">{kind === "momentum" ? "Score" : "Delta"}</span>
       </div>
-      <div>
+      <div className="min-h-0 xl:flex-1 xl:overflow-y-auto">
         {livePairs.map((pair) => (
           <FeedRow
             key={`${title}-${pair.id}`}
@@ -274,7 +274,7 @@ function FeedEmptyState({ kind }: { kind: FeedKind }) {
   return (
     <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
       <p className="font-mono text-base-text">No qualified pairs found.</p>
-      <p className="mt-1">Live data preview is limited right now.</p>
+      <p className="mt-1">Read-only market data is limited right now.</p>
     </div>
   );
 }
@@ -376,8 +376,8 @@ function SelectedPairPanel({
       : "+mock";
 
   return (
-    <section className="border border-base-line bg-base-panel">
-      <div className="flex min-h-10 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
+    <section className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Selected pair
@@ -416,7 +416,7 @@ function SelectedPairPanel({
         </div>
       </div>
 
-      <div className="grid gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid shrink-0 gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <Metric label={`Price (${pair.quoteToken})`} value={pair.price} detail={pair.priceUsd} />
         <Metric
           label="24h change"
@@ -438,13 +438,13 @@ function SelectedPairPanel({
         <Metric label="Risk score" value={`${pair.riskScore} / 100`} detail={pair.riskLabel} tone="mint" />
       </div>
 
-      <div className="p-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
         <MockChart
           pair={pair}
           refreshStatus={chartRefreshStatus}
           onRefreshChart={onRefreshChart}
         />
-        <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <div className="grid shrink-0 gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <MiniModule
             label="Buy / Sell Pressure"
             value={`${pair.pressure.buy}% / ${pair.pressure.sell}%`}
@@ -552,8 +552,8 @@ function MockChart({
         : undefined;
 
   return (
-    <div className="market-scanline border border-base-line bg-base-panel">
-      <div className="flex items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
+    <div className="market-scanline flex min-h-[280px] flex-1 flex-col overflow-hidden border border-base-line bg-base-panel xl:min-h-0">
+      <div className="flex shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
         <div className="min-w-0">
           <p className="font-mono text-[12px] font-semibold text-base-text">
             {pair.pair.replace(" / ", "/")} - {chartLabel}
@@ -592,7 +592,11 @@ function MockChart({
           </span>
         </div>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[270px] w-full max-w-full p-2" aria-hidden="true">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-[235px] w-full max-w-full shrink-0 p-2 xl:h-auto xl:min-h-[190px] xl:flex-1"
+        aria-hidden="true"
+      >
         {Array.from({ length: 6 }).map((_, index) => (
           <line
             key={`h-${index}`}
@@ -720,20 +724,20 @@ function MiniModule({
   const clamped = Math.max(0, Math.min(100, bar ?? 0));
 
   return (
-    <div className="min-h-[92px] border border-base-line bg-base-panel p-2">
+    <div className="min-h-[78px] border border-base-line bg-base-panel p-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
           {label}
         </p>
         {icon ? <span className="text-base-mint">{icon}</span> : null}
       </div>
-      <p className="mt-3 font-mono text-[14px] font-semibold text-base-text">{value}</p>
+      <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">{value}</p>
       {bar !== undefined ? (
         <div className="mt-2 h-1.5 bg-base-elevated">
           <div className="h-full bg-base-mint" style={{ width: `${clamped}%` }} />
         </div>
       ) : null}
-      <p className="mt-2 text-[11px] text-base-muted">{detail}</p>
+      <p className="mt-1.5 text-[10px] text-base-muted">{detail}</p>
     </div>
   );
 }
@@ -761,8 +765,8 @@ function SwapTicket({
       : "Demo mode - no transaction will be sent";
 
   return (
-    <aside className="sticky top-12 min-w-0 self-start border border-base-line bg-base-panel">
-      <div className="flex min-h-10 items-center justify-between border-b border-base-line bg-base-raised px-3">
+    <aside className="min-w-0 border border-base-line bg-base-panel xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:self-stretch xl:overflow-hidden">
+      <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Swap selected pair
@@ -772,7 +776,7 @@ function SwapTicket({
         <Settings size={14} className="text-base-muted" aria-hidden="true" />
       </div>
 
-      <div className="space-y-3 p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
         <TokenBox
           label="From"
           token={pair.quoteToken}
@@ -782,7 +786,7 @@ function SwapTicket({
           onValueChange={onAmountChange}
         />
 
-        <div className="flex justify-center">
+        <div className="flex shrink-0 justify-center">
           <span className="grid h-7 w-7 place-items-center border border-base-line bg-base-panel font-mono text-base-muted">
             v
           </span>
@@ -817,22 +821,24 @@ function SwapTicket({
           <RouteRow label="Platform fee" value="0.10% (Est. $0.33)" />
         </div>
 
-        <div className="border border-base-amber/45 bg-base-amber/10 p-2 text-[11px] leading-4 text-base-muted">
-          Low liquidity: higher price impact and slippage risk. {modeWarning}
+        <div className="mt-auto space-y-2 pt-1">
+          <div className="border border-base-amber/45 bg-base-amber/10 p-2 text-[11px] leading-4 text-base-muted">
+            Low liquidity: higher price impact and slippage risk. {modeWarning}
+          </div>
+
+          <button
+            type="button"
+            disabled
+            className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
+          >
+            <LockKeyhole size={14} aria-hidden="true" />
+            Review Swap
+          </button>
+
+          <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
+            {modeLabel}
+          </p>
         </div>
-
-        <button
-          type="button"
-          disabled
-          className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
-        >
-          <LockKeyhole size={14} aria-hidden="true" />
-          Review Swap
-        </button>
-
-        <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
-          {modeLabel}
-        </p>
       </div>
     </aside>
   );
@@ -861,8 +867,8 @@ function TokenBox({
         <span>{label}</span>
         {rightLabel ? <span className="font-mono text-base-mint">{rightLabel}</span> : null}
       </div>
-      <div className="grid min-w-0 grid-cols-[108px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[120px_minmax(0,1fr)]">
-        <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-2">
+      <div className="grid min-w-0 grid-cols-[104px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[116px_minmax(0,1fr)]">
+        <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-1.5">
           <span className="grid h-7 w-7 place-items-center rounded-full bg-base-mint/15 font-mono text-[10px] font-semibold text-base-mint">
             {token.slice(0, 2)}
           </span>
@@ -876,7 +882,7 @@ function TokenBox({
           readOnly={readOnly}
           inputMode="decimal"
           onChange={(event) => onValueChange?.(event.target.value)}
-          className="h-14 min-w-0 bg-base-panel px-3 text-right font-mono text-[18px] text-base-text outline-none 2xl:text-[20px]"
+          className="h-12 min-w-0 bg-base-panel px-3 text-right font-mono text-[17px] text-base-text outline-none 2xl:text-[19px]"
         />
       </div>
     </label>
@@ -917,8 +923,8 @@ function PairDetailTabs({
   onTabChange: (tab: DetailTab) => void;
 }) {
   return (
-    <section id="risk" className="border border-base-line bg-base-panel">
-      <div className="grid h-9 grid-cols-4 border-b border-base-line bg-base-raised">
+    <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+      <div className="grid h-8 shrink-0 grid-cols-4 border-b border-base-line bg-base-raised">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -935,7 +941,7 @@ function PairDetailTabs({
           </button>
         ))}
       </div>
-      <div className="p-3">{renderTab(pair, activeTab)}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">{renderTab(pair, activeTab)}</div>
     </section>
   );
 }
@@ -1000,7 +1006,7 @@ function renderTab(pair: BasePair, activeTab: DetailTab) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_1fr]">
+    <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr]">
       <div>
         <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
           Contract Risk
