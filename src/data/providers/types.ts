@@ -1,7 +1,10 @@
 import type { BasePair, PairActivity, PairRiskCheck } from "@/types/baseTerminal";
 
 export type MarketDataMode = "mock" | "dexscreener" | "geckoterminal";
-export type FeedStatusLabel = "MOCK FEED" | "DEXSCREENER READ-ONLY";
+export type FeedStatusLabel =
+  | "MOCK FEED"
+  | "DEXSCREENER READ-ONLY"
+  | "DEXSCREENER + MOCK FALLBACK";
 export type MaybePromise<T> = T | Promise<T>;
 
 export type PairRiskDetails = {

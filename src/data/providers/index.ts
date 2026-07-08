@@ -20,6 +20,8 @@ export type {
 } from "./types";
 
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
+const FEED_ROW_TARGET = 8;
+const DEXSCREENER_MOCK_FALLBACK_LABEL = "DexScreener + mock fallback";
 
 export function resolveMarketDataMode(
   mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
@@ -71,19 +73,13 @@ export async function getMarketTerminalSnapshot(
     const provider = await getMarketDataProvider(mode);
     const snapshot = await buildMarketTerminalSnapshot(provider);
 
-    if (snapshot.allPairs.length > 0) {
-      return snapshot;
+    if (mode === "dexscreener") {
+      return fillDexScreenerSnapshot(snapshot);
     }
 
-    return buildMarketTerminalSnapshot(
-      mockMarketDataProvider,
-      "DexScreener returned no Base pairs; using bundled mock data."
-    );
+    return snapshot;
   } catch {
-    return buildMarketTerminalSnapshot(
-      mockMarketDataProvider,
-      "DexScreener provider failed; using bundled mock data."
-    );
+    return buildDexScreenerFallbackSnapshot();
   }
 }
 
@@ -151,4 +147,83 @@ function dedupePairs(pairs: BasePair[]) {
   }
 
   return [...pairsById.values()];
+}
+
+async function fillDexScreenerSnapshot(
+  snapshot: MarketTerminalSnapshot
+): Promise<MarketTerminalSnapshot> {
+  const mockSnapshot = await buildMarketTerminalSnapshot(mockMarketDataProvider);
+
+  if (snapshot.allPairs.length === 0) {
+    return withDexScreenerFallbackLabel(mockSnapshot);
+  }
+
+  const newPairs = fillFeed(snapshot.newPairs, mockSnapshot.newPairs);
+  const volumeInflows = fillFeed(snapshot.volumeInflows, mockSnapshot.volumeInflows);
+  const momentumPairs = fillFeed(snapshot.momentumPairs, mockSnapshot.momentumPairs);
+  const allPairs = dedupePairs([...newPairs, ...volumeInflows, ...momentumPairs]);
+  const usedFallback =
+    newPairs.length > snapshot.newPairs.length ||
+    volumeInflows.length > snapshot.volumeInflows.length ||
+    momentumPairs.length > snapshot.momentumPairs.length;
+
+  if (!usedFallback) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    providerName: "DexScreener read-only Base data + mock fallback",
+    feedStatusLabel: "DEXSCREENER + MOCK FALLBACK",
+    defaultPairId: allPairs[0]?.id ?? snapshot.defaultPairId,
+    allPairs,
+    newPairs,
+    volumeInflows,
+    momentumPairs,
+    fallbackReason: DEXSCREENER_MOCK_FALLBACK_LABEL
+  };
+}
+
+async function buildDexScreenerFallbackSnapshot() {
+  const mockSnapshot = await buildMarketTerminalSnapshot(mockMarketDataProvider);
+  return withDexScreenerFallbackLabel(mockSnapshot);
+}
+
+function withDexScreenerFallbackLabel(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
+  return {
+    ...snapshot,
+    mode: "dexscreener",
+    providerName: "DexScreener read-only Base data + mock fallback",
+    feedStatusLabel: "DEXSCREENER + MOCK FALLBACK",
+    generatedAt: new Date().toISOString(),
+    fallbackReason: DEXSCREENER_MOCK_FALLBACK_LABEL
+  };
+}
+
+function fillFeed(primary: BasePair[], fallback: BasePair[]) {
+  const result = primary.slice(0, FEED_ROW_TARGET);
+  const seenIds = new Set(result.map((pair) => pair.id));
+  const seenPairKeys = new Set(result.map(getPairKey));
+
+  for (const pair of fallback) {
+    if (result.length >= FEED_ROW_TARGET) {
+      break;
+    }
+
+    const pairKey = getPairKey(pair);
+
+    if (seenIds.has(pair.id) || seenPairKeys.has(pairKey)) {
+      continue;
+    }
+
+    result.push(pair);
+    seenIds.add(pair.id);
+    seenPairKeys.add(pairKey);
+  }
+
+  return result;
+}
+
+function getPairKey(pair: BasePair) {
+  return `${pair.baseToken.toLowerCase()}-${pair.quoteToken.toLowerCase()}`;
 }

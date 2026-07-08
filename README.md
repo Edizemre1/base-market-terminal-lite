@@ -29,7 +29,7 @@ The switch updates the URL query string:
 
 No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARKET_DATA_MODE=dexscreener`, and `NEXT_PUBLIC_MARKET_DATA_MODE=mock` remain supported for compatibility, but the public app can switch data sources directly from the UI.
 
-If mode is missing, invalid, rate-limited, or DexScreener returns no usable Base pairs, the app safely falls back to bundled mock data and shows `Fallback: mock data`.
+DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. If there are not enough quality rows, the app fills remaining feed slots with bundled mock data and shows `DexScreener + mock fallback`.
 
 No API key is needed. DexScreener mode is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
 
