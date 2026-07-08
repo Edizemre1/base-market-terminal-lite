@@ -1,7 +1,8 @@
 import { StatusPill, TerminalPanel } from "@/components/TerminalWidgets";
 
 const safetyItems = [
-  "Mock Base pair data only",
+  "Mock Base pair data by default",
+  "Optional DexScreener read-only mode",
   "No wallet signing",
   "No approvals",
   "No real swaps or blockchain transactions",
@@ -14,7 +15,7 @@ const buildItems = [
   "Clickable new pair, inflow, and momentum feeds",
   "Selected pair chart, risk, liquidity, and activity modules",
   "Always-visible disabled swap ticket",
-  "Future-ready boundary for real data and routing adapters"
+  "Read-only provider boundary with mock fallback"
 ];
 
 export default function DocsPage() {
@@ -64,9 +65,10 @@ export default function DocsPage() {
 
           <TerminalPanel label="ROADMAP" title="Future integration boundaries">
             <p className="text-[11px] leading-4 text-base-muted">
-              Real Base pair discovery, wallet connection, swap routing, and fee
-              handling should be added behind explicit adapters later. This MVP
-              only renders local mock data and disabled UI states.
+              Base pair discovery can run through read-only provider adapters.
+              Wallet connection, swap routing, and fee handling should be added
+              behind explicit boundaries later. This MVP keeps execution
+              disabled and falls back to mock data when providers are unavailable.
             </p>
           </TerminalPanel>
         </div>
