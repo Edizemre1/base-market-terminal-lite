@@ -14,6 +14,16 @@ Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 - Mock/demo Base pair data only.
 - Risk labels are demo UI states, not live token safety assessments.
 
+## Data Mode
+
+Current mode is mock/demo:
+
+```bash
+NEXT_PUBLIC_MARKET_DATA_MODE=mock
+```
+
+If this value is missing, the app safely falls back to bundled mock data. The provider layer is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
+
 ## What Is Included
 
 - Single-page Base pair radar terminal.
@@ -53,7 +63,8 @@ npm run lint
 ```text
 src/app/                 App Router pages
 src/components/          Reusable UI components
-src/data/                Mock Base pair data and builder log content
+src/data/                Mock Base pair data, provider layer, and builder log content
+src/data/providers/      Read-only market data provider contract and adapters
 src/lib/                 Formatting and utility helpers
 src/types/               Shared TypeScript domain types
 ```
@@ -61,7 +72,8 @@ src/types/               Shared TypeScript domain types
 ## Future Integration Boundaries
 
 - Wallet connection: add a wallet adapter layer for account state and chain checks.
-- Real Base pair data: replace `src/data/mockBasePairs.ts` with a provider interface.
+- Real Base pair data: add read-only provider adapters behind `src/data/providers/`.
+- Provider boundary: route future real data through a private backend or indexer when credentials, rate limits, or enrichment are needed.
 - Swap routing: introduce a quote service before any transaction-building code.
 - Platform fee boundary: keep policy and calculation outside this MVP until product requirements are public and reviewed.
 - Secret management: load future provider keys only from deployment secrets, never source files.
