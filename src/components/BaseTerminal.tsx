@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useTerminalSearch } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { PairChartResult } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
@@ -18,16 +20,39 @@ const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "activity", label: "Activity" }
 ];
 
-export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
-  const [selectedPairId, setSelectedPairId] = useState(data.defaultPairId);
+export function BaseTerminal({
+  data,
+  initialPairParam
+}: {
+  data: MarketTerminalSnapshot;
+  initialPairParam?: string;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const {
+    registerPairs,
+    registerSelectedPair,
+    registerSelectPairHandler
+  } = useTerminalSearch();
+  const [selectedPairId, setSelectedPairId] = useState(
+    () => getPairFromParam(data.allPairs, initialPairParam)?.id ?? data.defaultPairId
+  );
   const [activeTab, setActiveTab] = useState<DetailTab>("risk");
   const [amount, setAmount] = useState("0.10");
   const [chartOverrides, setChartOverrides] = useState<Record<string, Partial<BasePair>>>({});
   const [chartRefreshStatus, setChartRefreshStatus] = useState<Record<string, ChartRefreshStatus>>({});
 
   useEffect(() => {
-    setSelectedPairId(data.defaultPairId);
-  }, [data.defaultPairId]);
+    const nextPair =
+      getPairFromParam(data.allPairs, initialPairParam) ??
+      data.allPairs.find((pair) => pair.id === selectedPairId) ??
+      data.allPairs.find((pair) => pair.id === data.defaultPairId) ??
+      data.allPairs[0];
+
+    if (nextPair && nextPair.id !== selectedPairId) {
+      setSelectedPairId(nextPair.id);
+    }
+  }, [data.allPairs, data.defaultPairId, initialPairParam, selectedPairId]);
 
   const selectedPair =
     data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
@@ -43,6 +68,52 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   );
   const amountNumber = Number.parseFloat(amount);
   const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
+
+  const updatePairQuery = useCallback(
+    (pair: BasePair) => {
+      const nextParams = new URLSearchParams(window.location.search);
+      nextParams.set("pair", getShareablePairKey(pair));
+
+      const nextQueryString = nextParams.toString();
+      router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, {
+        scroll: false
+      });
+    },
+    [pathname, router]
+  );
+
+  const handleSelectPairById = useCallback(
+    (pairId: string) => {
+      const nextPair = data.allPairs.find((pair) => pair.id === pairId);
+
+      if (!nextPair) {
+        return;
+      }
+
+      setSelectedPairId(nextPair.id);
+      updatePairQuery(nextPair);
+    },
+    [data.allPairs, updatePairQuery]
+  );
+
+  useEffect(() => {
+    registerPairs(data.allPairs);
+
+    return () => registerPairs([]);
+  }, [data.allPairs, registerPairs]);
+
+  useEffect(() => {
+    registerSelectedPair(selectedPairWithChart?.id);
+
+    return () => registerSelectedPair(undefined);
+  }, [registerSelectedPair, selectedPairWithChart?.id]);
+
+  useEffect(() => {
+    registerSelectPairHandler(handleSelectPairById);
+
+    return () => registerSelectPairHandler(undefined);
+  }, [handleSelectPairById, registerSelectPairHandler]);
+
   const estimatedOutput = useMemo(() => {
     if (!selectedPairWithChart) {
       return 0;
@@ -133,7 +204,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             pairs={data.newPairs}
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
-            onSelect={setSelectedPairId}
+            onSelect={handleSelectPairById}
           />
           <OpportunityFeed
             title="Volume Inflow"
@@ -142,7 +213,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             pairs={data.volumeInflows}
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
-            onSelect={setSelectedPairId}
+            onSelect={handleSelectPairById}
           />
           <OpportunityFeed
             title="Momentum"
@@ -151,7 +222,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             pairs={data.momentumPairs}
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
-            onSelect={setSelectedPairId}
+            onSelect={handleSelectPairById}
           />
         </aside>
 
@@ -179,6 +250,39 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
       </section>
     </main>
   );
+}
+
+function getPairFromParam(pairs: BasePair[], pairParam: string | undefined | null) {
+  if (!pairParam) {
+    return undefined;
+  }
+
+  const normalizedParam = normalizePairParam(pairParam);
+  const compactParam = normalizePairIdentity(pairParam);
+
+  return pairs.find((pair) =>
+    [pair.id, pair.pairAddress, pair.address, pair.pair]
+      .filter(Boolean)
+      .some((value) => {
+        const candidate = String(value);
+        return (
+          normalizePairParam(candidate) === normalizedParam ||
+          normalizePairIdentity(candidate) === compactParam
+        );
+      })
+  );
+}
+
+function getShareablePairKey(pair: BasePair) {
+  return pair.pairAddress ?? pair.id;
+}
+
+function normalizePairParam(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizePairIdentity(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function OpportunityFeed({

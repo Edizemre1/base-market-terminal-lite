@@ -12,9 +12,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { MarketDataMode } from "@/data/providers";
-import { cx } from "@/lib/format";
+import { formatCompactCurrency, cx } from "@/lib/format";
+import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
+import type { BasePair } from "@/types/baseTerminal";
 
 const navItems = [
   { href: "/", label: "Radar", icon: Radar, active: "/" },
@@ -28,91 +30,211 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text xl:h-screen xl:overflow-hidden">
-      <header className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel">
-        <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <span className="grid h-5 w-5 place-items-center rounded-full bg-base-blue text-[10px] font-bold text-white">
-              B
-            </span>
-            <span className="truncate text-[13px] font-semibold text-base-text">
-              Base Terminal Lite
-            </span>
-            <span className="border border-base-mint/45 bg-base-mint/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-              Lite
-            </span>
-          </Link>
+    <TerminalSearchProvider>
+      <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text xl:h-screen xl:overflow-hidden">
+        <header className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel">
+          <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
+            <Link href="/" className="flex min-w-0 items-center gap-2">
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-base-blue text-[10px] font-bold text-white">
+                B
+              </span>
+              <span className="truncate text-[13px] font-semibold text-base-text">
+                Base Terminal Lite
+              </span>
+              <span className="border border-base-mint/45 bg-base-mint/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
+                Lite
+              </span>
+            </Link>
 
-          <label className="relative">
-            <Search
-              size={14}
-              aria-hidden="true"
-              className="absolute left-2 top-1/2 -translate-y-1/2 text-base-muted"
-            />
-            <span className="sr-only">Search token, pair, or contract</span>
-            <input
-              type="search"
-              placeholder="Search token / pair / contract"
-              className="h-7 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint"
-            />
-          </label>
+            <TerminalSearchBox />
 
-          <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
-            <TopChip label="Base Network Online" tone="mint" />
-            <Suspense fallback={<DataSourceFallback />}>
-              <DataSourceSwitcher />
-            </Suspense>
-            <TopChip label="UTC 19:06" />
-            <TopChip label="EN / TR" />
-            <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />
+            <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
+              <TopChip label="Base Network Online" tone="mint" />
+              <Suspense fallback={<DataSourceFallback />}>
+                <DataSourceSwitcher />
+              </Suspense>
+              <TopChip label="UTC 19:06" />
+              <TopChip label="EN / TR" />
+              <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <aside className="fixed bottom-0 left-0 top-10 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
-        <nav className="space-y-1 p-1.5" aria-label="Base terminal">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = item.active === "/" ? pathname === "/" : pathname === item.active;
+        <aside className="fixed bottom-0 left-0 top-10 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
+          <nav className="space-y-1 p-1.5" aria-label="Base terminal">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = item.active === "/" ? pathname === "/" : pathname === item.active;
 
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className={cx(
+                    "flex h-8 items-center gap-2 border-l-2 px-2 text-[11px] font-medium",
+                    active
+                      ? "border-base-mint bg-base-mint/10 text-base-mint"
+                      : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
+                  )}
+                >
+                  <span className="grid h-5 w-5 shrink-0 place-items-center bg-base-elevated text-base-muted">
+                    <Icon size={13} aria-hidden="true" />
+                  </span>
+                  <span className="truncate">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="mt-auto p-1.5">
+            <div className="border border-base-line bg-base-elevated p-1.5">
+              <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
+                <CircleDot size={12} aria-hidden="true" />
+                Base Demo Network
+              </div>
+              <p className="font-mono text-[11px] text-base-text">Chain ID 8453</p>
+              <Suspense fallback={<SidebarNetworkCopy mode="mock" />}>
+                <SidebarNetworkCard />
+              </Suspense>
+            </div>
+            <p className="mt-2 text-[10px] text-base-muted">Demo data only.</p>
+          </div>
+        </aside>
+
+        <div className="min-w-0 pt-10 md:pl-[160px] xl:h-screen xl:overflow-hidden">{children}</div>
+      </div>
+    </TerminalSearchProvider>
+  );
+}
+
+function TerminalSearchBox() {
+  const { pairs, selectedPairId, selectPair } = useTerminalSearch();
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const results = useMemo(() => getSearchResults(pairs, query), [pairs, query]);
+  const shouldShowResults = open && query.trim().length > 0;
+
+  function selectResult(pairId: string) {
+    selectPair(pairId);
+    setQuery("");
+    setOpen(false);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setOpen(false);
+      return;
+    }
+
+    if (event.key === "Enter" && results[0]) {
+      event.preventDefault();
+      selectResult(results[0].id);
+    }
+  }
+
+  return (
+    <label className="relative">
+      <Search
+        size={14}
+        aria-hidden="true"
+        className="absolute left-2 top-1/2 -translate-y-1/2 text-base-muted"
+      />
+      <span className="sr-only">Search token, pair, or contract</span>
+      <input
+        type="search"
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        placeholder="Search token / pair / contract"
+        className="h-7 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint"
+      />
+      {shouldShowResults ? (
+        <div className="absolute left-0 right-0 top-[32px] z-[60] max-h-[300px] overflow-y-auto border border-base-line bg-base-panel shadow-none">
+          {results.length > 0 ? (
+            results.map((pair) => (
+              <button
+                key={pair.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectResult(pair.id)}
                 className={cx(
-                  "flex h-8 items-center gap-2 border-l-2 px-2 text-[11px] font-medium",
-                  active
-                    ? "border-base-mint bg-base-mint/10 text-base-mint"
-                    : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
+                  "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-base-line px-2 py-1.5 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+                  pair.id === selectedPairId && "bg-base-mint/10"
                 )}
               >
-                <span className="grid h-5 w-5 shrink-0 place-items-center bg-base-elevated text-base-muted">
-                  <Icon size={13} aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block truncate font-mono font-semibold text-base-text">
+                    {pair.pair}
+                  </span>
+                  <span className="block truncate text-[10px] text-base-muted">
+                    {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} · {pair.dex}
+                  </span>
                 </span>
-                <span className="truncate">{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="mt-auto p-1.5">
-          <div className="border border-base-line bg-base-elevated p-1.5">
-            <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-              <CircleDot size={12} aria-hidden="true" />
-              Base Demo Network
+                <span className="text-right font-mono text-[10px] text-base-muted">
+                  <span className="block text-base-text">
+                    {formatCompactCurrency(pair.liquidity)}
+                  </span>
+                  <span>{formatCompactCurrency(pair.volume24h)}</span>
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="px-2 py-2 font-mono text-[11px] text-base-muted">
+              No loaded pair matches.
             </div>
-            <p className="font-mono text-[11px] text-base-text">Chain ID 8453</p>
-            <Suspense fallback={<SidebarNetworkCopy mode="mock" />}>
-              <SidebarNetworkCard />
-            </Suspense>
-          </div>
-          <p className="mt-2 text-[10px] text-base-muted">Demo data only.</p>
+          )}
         </div>
-      </aside>
-
-      <div className="min-w-0 pt-10 md:pl-[160px] xl:h-screen xl:overflow-hidden">{children}</div>
-    </div>
+      ) : null}
+    </label>
   );
+}
+
+function getSearchResults(pairs: BasePair[], query: string) {
+  const normalizedQuery = normalizeSearch(query);
+
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  return pairs
+    .filter((pair) => getSearchPairShape(pair).haystack.includes(normalizedQuery))
+    .slice(0, 8);
+}
+
+function getSearchPairShape(pair: {
+  id: string;
+  pairAddress?: string;
+  address: string;
+  pair: string;
+  baseToken: string;
+  quoteToken: string;
+  project: string;
+  dex: string;
+}) {
+  return {
+    haystack: [
+      pair.id,
+      pair.pairAddress,
+      pair.address,
+      pair.pair,
+      pair.baseToken,
+      pair.quoteToken,
+      pair.project,
+      pair.dex
+    ]
+      .filter(Boolean)
+      .map((value) => normalizeSearch(String(value)))
+      .join(" ")
+  };
+}
+
+function normalizeSearch(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function DataSourceSwitcher() {
