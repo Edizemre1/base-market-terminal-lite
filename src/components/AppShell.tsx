@@ -27,14 +27,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-base-black text-base-text">
+    <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
       <header className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel">
-        <div className="grid h-full grid-cols-[220px_minmax(260px,620px)_1fr] items-center gap-3 px-3">
-          <Link href="/" className="flex items-center gap-2">
+        <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
+          <Link href="/" className="flex min-w-0 items-center gap-2">
             <span className="grid h-5 w-5 place-items-center rounded-full bg-base-blue text-[10px] font-bold text-white">
               B
             </span>
-            <span className="text-[14px] font-semibold text-base-text">
+            <span className="truncate text-[13px] font-semibold text-base-text">
               Base Terminal Lite
             </span>
             <span className="border border-base-mint/45 bg-base-mint/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
@@ -56,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
           </label>
 
-          <div className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
+          <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
             <TopChip label="Base Network Online" tone="mint" />
             <TopChip label="Mock Feed" tone="blue" />
             <TopChip label="UTC 19:06" />
@@ -66,8 +66,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-10 z-40 hidden w-[176px] border-r border-base-line bg-base-panel md:flex md:flex-col">
-        <nav className="space-y-1 p-2" aria-label="Base terminal">
+      <aside className="fixed bottom-0 left-0 top-10 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
+        <nav className="space-y-1 p-1.5" aria-label="Base terminal">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = item.active === "/" ? pathname === "/" : pathname === item.active;
@@ -77,22 +77,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={item.label}
                 href={item.href}
                 className={cx(
-                  "flex h-9 items-center gap-2 border-l-2 px-2 text-[12px] font-medium",
+                  "flex h-8 items-center gap-2 border-l-2 px-2 text-[11px] font-medium",
                   active
                     ? "border-base-mint bg-base-mint/10 text-base-mint"
                     : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
                 )}
               >
-                <span className="grid h-5 w-5 place-items-center bg-base-elevated text-base-muted">
+                <span className="grid h-5 w-5 shrink-0 place-items-center bg-base-elevated text-base-muted">
                   <Icon size={13} aria-hidden="true" />
                 </span>
-                {item.label}
+                <span className="truncate">{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
-        <div className="mt-auto p-3">
+        <div className="mt-auto p-2">
           <div className="border border-base-line bg-base-elevated p-2">
             <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
               <CircleDot size={12} aria-hidden="true" />
@@ -107,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="pt-10 md:pl-[176px]">{children}</div>
+      <div className="min-w-0 pt-10 md:pl-[160px]">{children}</div>
     </div>
   );
 }
@@ -130,7 +130,7 @@ function TopChip({
   return (
     <span
       className={cx(
-        "hidden h-6 items-center gap-1 whitespace-nowrap border px-2 sm:inline-flex",
+        "hidden h-6 min-w-0 max-w-[150px] items-center gap-1 whitespace-nowrap border px-1.5 lg:inline-flex",
         toneClassName[tone]
       )}
     >
