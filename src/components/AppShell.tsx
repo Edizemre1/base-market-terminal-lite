@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
+    <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text xl:h-screen xl:overflow-hidden">
       <header className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel">
         <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
           <Link href="/" className="flex min-w-0 items-center gap-2">
@@ -95,9 +95,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-auto p-2">
-          <div className="border border-base-line bg-base-elevated p-2">
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
+        <div className="mt-auto p-1.5">
+          <div className="border border-base-line bg-base-elevated p-1.5">
+            <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
               <CircleDot size={12} aria-hidden="true" />
               Base Demo Network
             </div>
@@ -106,11 +106,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               <SidebarNetworkCard />
             </Suspense>
           </div>
-          <p className="mt-3 text-[11px] text-base-muted">Demo data only.</p>
+          <p className="mt-2 text-[10px] text-base-muted">Demo data only.</p>
         </div>
       </aside>
 
-      <div className="min-w-0 pt-10 md:pl-[160px]">{children}</div>
+      <div className="min-w-0 pt-10 md:pl-[160px] xl:h-screen xl:overflow-hidden">{children}</div>
     </div>
   );
 }
