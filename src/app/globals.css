@@ -42,11 +42,13 @@
 
 html {
   background: rgb(var(--color-bg));
+  overflow-x: hidden;
 }
 
 body {
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   background: rgb(var(--color-bg));
   color: rgb(var(--color-text));
   font-family:

@@ -309,9 +309,9 @@ export const marketStats: MarketStat[] = [
     tone: "amber"
   },
   {
-    label: "Live trading",
+    label: "Execution",
     value: "Off",
-    detail: "UI preview only",
+    detail: "Disabled preview only",
     tone: "rose"
   }
 ];

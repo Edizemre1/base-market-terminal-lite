@@ -2,13 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, Settings, ShieldCheck, Star } from "lucide-react";
-import {
-  getDefaultPair,
-  getMomentumPairs,
-  getNewPairs,
-  getVolumeInflowPairs,
-  mockBasePairs
-} from "@/data/mockBasePairs";
+import type { MarketTerminalSnapshot } from "@/data/providers";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -22,30 +16,48 @@ const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "activity", label: "Activity" }
 ];
 
-export function BaseTerminal() {
-  const [selectedPairId, setSelectedPairId] = useState(getDefaultPair().id);
+export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
+  const [selectedPairId, setSelectedPairId] = useState(data.defaultPairId);
   const [activeTab, setActiveTab] = useState<DetailTab>("risk");
   const [amount, setAmount] = useState("0.10");
   const selectedPair =
-    mockBasePairs.find((pair) => pair.id === selectedPairId) ?? getDefaultPair();
-
+    data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
   const amountNumber = Number.parseFloat(amount);
   const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
   const estimatedOutput = useMemo(() => {
+    if (!selectedPair) {
+      return 0;
+    }
+
     const base = selectedPair.liquidity / Math.max(selectedPair.riskScore, 1);
     return cleanAmount * base * selectedPair.volumeMultiple;
   }, [cleanAmount, selectedPair]);
 
+  if (!selectedPair) {
+    return (
+      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+        <section className="border border-base-line bg-base-panel p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
+            Base Terminal Lite
+          </p>
+          <p className="mt-2 font-mono text-sm text-base-text">
+            No demo pairs are available from the active read-only provider.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-[calc(100vh-40px)] bg-base-black p-2">
-      <section className="grid min-h-[610px] gap-2 xl:grid-cols-[340px_minmax(0,1fr)_360px]">
-        <aside className="space-y-2">
+    <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
+      <section className="grid min-h-[610px] min-w-0 grid-cols-1 gap-2.5 xl:grid-cols-[300px_minmax(0,1fr)_390px] 2xl:grid-cols-[320px_minmax(0,1fr)_410px]">
+        <aside className="min-w-0 space-y-2">
           <OpportunityFeed
             id="new-pairs"
             title="New Pairs"
             marker="A"
             kind="new"
-            pairs={getNewPairs()}
+            pairs={data.newPairs}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -53,7 +65,7 @@ export function BaseTerminal() {
             title="Volume Inflow"
             marker="B"
             kind="inflow"
-            pairs={getVolumeInflowPairs()}
+            pairs={data.volumeInflows}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
@@ -61,13 +73,13 @@ export function BaseTerminal() {
             title="Momentum"
             marker="C"
             kind="momentum"
-            pairs={getMomentumPairs()}
+            pairs={data.momentumPairs}
             selectedPairId={selectedPair.id}
             onSelect={setSelectedPairId}
           />
         </aside>
 
-        <section className="space-y-2">
+        <section className="min-w-0 space-y-2">
           <SelectedPairPanel pair={selectedPair} />
           <PairDetailTabs
             pair={selectedPair}
@@ -117,7 +129,7 @@ function OpportunityFeed({
           View all
         </span>
       </div>
-      <div className="grid grid-cols-[1fr_44px_72px_74px_56px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+      <div className="grid grid-cols-[minmax(0,1fr)_42px_68px_70px_58px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
         <span>Pair</span>
         <span>Age</span>
         <span className="text-right">Liquidity</span>
@@ -131,13 +143,13 @@ function OpportunityFeed({
             type="button"
             onClick={() => onSelect(pair.id)}
             className={cx(
-              "grid h-8 w-full grid-cols-[1fr_44px_72px_74px_56px] items-center border-b border-base-line px-2 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+              "grid h-8 w-full grid-cols-[minmax(0,1fr)_42px_68px_70px_58px] items-center border-b border-base-line px-2 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
               selectedPairId === pair.id && "bg-base-mint/10"
             )}
           >
-            <span className="flex items-center gap-1.5 font-mono font-semibold text-base-text">
-              <span className="h-1.5 w-1.5 rounded-full bg-base-mint" />
-              {pair.pair}
+            <span className="flex min-w-0 items-center gap-1.5 font-mono font-semibold text-base-text">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-base-mint" />
+              <span className="truncate">{pair.pair}</span>
             </span>
             <span className="font-mono text-base-muted">{pair.age}</span>
             <span className="text-right font-mono text-base-text">
@@ -169,20 +181,20 @@ function SelectedPairPanel({ pair }: { pair: BasePair }) {
   return (
     <section className="border border-base-line bg-base-panel">
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Selected pair
           </p>
-          <div className="mt-1 flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-base-text">{pair.pair}</h1>
-            <Star size={14} className="text-base-mint" aria-hidden="true" />
-            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="truncate text-lg font-semibold text-base-text">{pair.pair}</h1>
+            <Star size={14} className="shrink-0 text-base-mint" aria-hidden="true" />
+            <span className="max-w-[150px] truncate border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
               {pair.address}
             </span>
-            <Copy size={12} className="text-base-muted" aria-hidden="true" />
+            <Copy size={12} className="shrink-0 text-base-muted" aria-hidden="true" />
           </div>
         </div>
-        <div className="hidden items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted md:flex">
+        <div className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted md:flex">
           {["5m", "15m", "1h", "4h", "1d"].map((period) => (
             <span
               key={period}
@@ -202,7 +214,7 @@ function SelectedPairPanel({ pair }: { pair: BasePair }) {
         </div>
       </div>
 
-      <div className="grid gap-1 border-b border-base-line p-2 md:grid-cols-6">
+      <div className="grid gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <Metric label={`Price (${pair.quoteToken})`} value={pair.price} detail={pair.priceUsd} />
         <Metric
           label="24h change"
@@ -218,7 +230,7 @@ function SelectedPairPanel({ pair }: { pair: BasePair }) {
 
       <div className="p-2">
         <MockChart pair={pair} />
-        <div className="mt-2 grid gap-1 md:grid-cols-6">
+        <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <MiniModule
             label="Buy / Sell Pressure"
             value={`${pair.pressure.buy}% / ${pair.pressure.sell}%`}
@@ -317,7 +329,7 @@ function MockChart({ pair }: { pair: BasePair }) {
           Volume {formatCompactCurrency(pair.volume24h)}
         </span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[270px] w-full p-2" aria-hidden="true">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[270px] w-full max-w-full p-2" aria-hidden="true">
         {Array.from({ length: 6 }).map((_, index) => (
           <line
             key={`h-${index}`}
@@ -414,7 +426,7 @@ function SwapTicket({
   estimatedOutput: number;
 }) {
   return (
-    <aside className="sticky top-12 self-start border border-base-line bg-base-panel">
+    <aside className="sticky top-12 min-w-0 self-start border border-base-line bg-base-panel">
       <div className="flex min-h-10 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
@@ -515,13 +527,13 @@ function TokenBox({
         <span>{label}</span>
         {rightLabel ? <span className="font-mono text-base-mint">{rightLabel}</span> : null}
       </div>
-      <div className="grid grid-cols-[120px_1fr] border border-base-line bg-base-panel">
-        <div className="flex items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-2">
+      <div className="grid min-w-0 grid-cols-[108px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[120px_minmax(0,1fr)]">
+        <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-2">
           <span className="grid h-7 w-7 place-items-center rounded-full bg-base-mint/15 font-mono text-[10px] font-semibold text-base-mint">
             {token.slice(0, 2)}
           </span>
-          <div>
-            <p className="font-mono text-[13px] font-semibold text-base-text">{token}</p>
+          <div className="min-w-0">
+            <p className="truncate font-mono text-[13px] font-semibold text-base-text">{token}</p>
             <p className="text-[10px] text-base-muted">{sublabel}</p>
           </div>
         </div>
@@ -530,7 +542,7 @@ function TokenBox({
           readOnly={readOnly}
           inputMode="decimal"
           onChange={(event) => onValueChange?.(event.target.value)}
-          className="h-14 bg-base-panel px-3 text-right font-mono text-[20px] text-base-text outline-none"
+          className="h-14 min-w-0 bg-base-panel px-3 text-right font-mono text-[18px] text-base-text outline-none 2xl:text-[20px]"
         />
       </div>
     </label>
@@ -547,11 +559,11 @@ function RouteRow({
   tone?: "default" | "mint";
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-base-line py-1 last:border-b-0">
-      <span className="text-[11px] text-base-muted">{label}</span>
+    <div className="flex min-w-0 items-start justify-between gap-2 border-b border-base-line py-1 last:border-b-0">
+      <span className="min-w-0 text-[11px] text-base-muted">{label}</span>
       <span
         className={cx(
-          "font-mono text-[11px] font-semibold",
+          "max-w-[62%] break-words text-right font-mono text-[11px] font-semibold leading-4",
           tone === "mint" ? "text-base-mint" : "text-base-text"
         )}
       >
@@ -572,14 +584,14 @@ function PairDetailTabs({
 }) {
   return (
     <section id="risk" className="border border-base-line bg-base-panel">
-      <div className="flex h-9 items-center border-b border-base-line bg-base-raised">
+      <div className="grid h-9 grid-cols-4 border-b border-base-line bg-base-raised">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => onTabChange(tab.id)}
             className={cx(
-              "h-full min-w-28 border-r border-base-line px-3 text-[11px] font-semibold uppercase tracking-[0.14em]",
+              "h-full min-w-0 border-r border-base-line px-2 text-[11px] font-semibold uppercase tracking-[0.14em] last:border-r-0",
               activeTab === tab.id
                 ? "bg-base-panel text-base-mint"
                 : "text-base-muted hover:text-base-text"
