@@ -51,8 +51,8 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   return (
     <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
       {data.fallbackReason ? (
-        <div className="mb-2 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-base-amber">
-          Fallback: mock data
+        <div className="mb-2 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
+          {data.fallbackReason}
         </div>
       ) : null}
       <section className="grid min-h-[610px] min-w-0 grid-cols-1 gap-2.5 xl:grid-cols-[300px_minmax(0,1fr)_390px] 2xl:grid-cols-[320px_minmax(0,1fr)_410px]">
@@ -341,10 +341,13 @@ function MockChart({ pair }: { pair: BasePair }) {
       <div className="flex items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
         <div>
           <p className="font-mono text-[12px] font-semibold text-base-text">
-            {pair.pair.replace(" / ", "/")} - 1h - {pair.dex} (Base)
+            {pair.pair.replace(" / ", "/")} - 1h chart preview - {pair.dex} (Base)
           </p>
           <p className="font-mono text-[10px] text-base-mint">
             O {pair.price} H {pair.price} L {pair.price} C {pair.price} {formatPercent(pair.change24h)}
+          </p>
+          <p className="font-mono text-[10px] text-base-muted">
+            Synthetic preview path; live OHLCV is not connected.
           </p>
         </div>
         <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
