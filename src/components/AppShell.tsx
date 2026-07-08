@@ -102,9 +102,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               Base Demo Network
             </div>
             <p className="font-mono text-[11px] text-base-text">Chain ID 8453</p>
-            <p className="mt-1 text-[11px] leading-4 text-base-muted">
-              Mock pairs only. No transactions are sent.
-            </p>
+            <Suspense fallback={<SidebarNetworkCopy mode="mock" />}>
+              <SidebarNetworkCard />
+            </Suspense>
           </div>
           <p className="mt-3 text-[11px] text-base-muted">Demo data only.</p>
         </div>
@@ -184,6 +184,23 @@ function DataSourceFallback() {
       Mock Feed
     </span>
   );
+}
+
+function SidebarNetworkCard() {
+  const searchParams = useSearchParams();
+  const activeMode: MarketDataMode =
+    searchParams.get("data") === "dexscreener" ? "dexscreener" : "mock";
+
+  return <SidebarNetworkCopy mode={activeMode} />;
+}
+
+function SidebarNetworkCopy({ mode }: { mode: MarketDataMode }) {
+  const copy =
+    mode === "dexscreener"
+      ? "DexScreener read-only mode. Some rows may use mock fallback."
+      : "Mock/demo pairs only. No transactions are sent.";
+
+  return <p className="mt-1 text-[11px] leading-4 text-base-muted">{copy}</p>;
 }
 
 function TopChip({

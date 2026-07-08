@@ -9,6 +9,7 @@ const FEED_LIMIT = 8;
 const MIN_LIQUIDITY_USD = 10_000;
 const MIN_VOLUME_24H_USD = 5_000;
 const MIN_VOLUME_INFLOW_24H_USD = 10_000;
+const MAX_NEW_PAIR_AGE_MINUTES = 7 * 24 * 60;
 const CURATED_BASE_QUERIES = [
   "WETH USDC",
   "AERO USDC",
@@ -75,7 +76,9 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
     name: "DexScreener read-only Base data",
     readOnly: true,
     getNewPairs: () => {
-      const source = normalizedProfilePairs.length > 0 ? normalizedProfilePairs : allPairs;
+      const freshProfilePairs = normalizedProfilePairs.filter(isFreshPair);
+      const freshPairs = allPairs.filter(isFreshPair);
+      const source = freshProfilePairs.length > 0 ? freshProfilePairs : freshPairs;
       return [...source]
         .sort(
           (left, right) =>
@@ -227,6 +230,7 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const priceUsd = toNumber(pair.priceUsd);
 
   return {
+    dataSource: "dexscreener",
     id: pairAddress.toLowerCase(),
     pair: `${baseToken.symbol} / ${quoteToken.symbol}`,
     baseToken: baseToken.symbol,
@@ -462,6 +466,10 @@ function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
 
 function hasMinimumMarketQuality(pair: BasePair, minVolume24h = MIN_VOLUME_24H_USD) {
   return pair.liquidity > MIN_LIQUIDITY_USD && pair.volume24h > minVolume24h;
+}
+
+function isFreshPair(pair: BasePair) {
+  return pair.ageMinutes > 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
 }
 
 function getDexPairQualityScore(pair: DexPair) {
