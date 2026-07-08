@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import type { MarketDataMode } from "@/data/providers";
 import { cx } from "@/lib/format";
 
 const navItems = [
@@ -23,8 +24,16 @@ const navItems = [
   { href: "/docs", label: "Docs", icon: BookOpenText, active: "/docs" }
 ] as const;
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  marketDataMode = "mock"
+}: {
+  children: ReactNode;
+  marketDataMode?: MarketDataMode;
+}) {
   const pathname = usePathname();
+  const feedLabel =
+    marketDataMode === "dexscreener" ? "DexScreener Read-Only" : "Mock Feed";
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
@@ -58,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
             <TopChip label="Base Network Online" tone="mint" />
-            <TopChip label="Mock Feed" tone="blue" />
+            <TopChip label={feedLabel} tone="blue" />
             <TopChip label="UTC 19:06" />
             <TopChip label="EN / TR" />
             <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />

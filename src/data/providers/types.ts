@@ -1,6 +1,8 @@
 import type { BasePair, PairActivity, PairRiskCheck } from "@/types/baseTerminal";
 
 export type MarketDataMode = "mock" | "dexscreener" | "geckoterminal";
+export type FeedStatusLabel = "MOCK FEED" | "DEXSCREENER READ-ONLY";
+export type MaybePromise<T> = T | Promise<T>;
 
 export type PairRiskDetails = {
   riskScore: number;
@@ -18,23 +20,25 @@ export type MarketDataProvider = {
   mode: MarketDataMode;
   name: string;
   readOnly: true;
-  getNewPairs: () => BasePair[];
-  getVolumeInflows: () => BasePair[];
-  getMomentumPairs: () => BasePair[];
-  getPairById: (id: string) => BasePair | undefined;
-  getPairChart: (id: string) => number[];
-  getRiskDetails: (id: string) => PairRiskDetails | undefined;
-  getLiquidityDetails: (id: string) => PairLiquidityDetails | undefined;
-  getActivityFeed: (id: string) => PairActivity[];
+  getNewPairs: () => MaybePromise<BasePair[]>;
+  getVolumeInflows: () => MaybePromise<BasePair[]>;
+  getMomentumPairs: () => MaybePromise<BasePair[]>;
+  getPairById: (id: string) => MaybePromise<BasePair | undefined>;
+  getPairChart: (id: string) => MaybePromise<number[]>;
+  getRiskDetails: (id: string) => MaybePromise<PairRiskDetails | undefined>;
+  getLiquidityDetails: (id: string) => MaybePromise<PairLiquidityDetails | undefined>;
+  getActivityFeed: (id: string) => MaybePromise<PairActivity[]>;
 };
 
 export type MarketTerminalSnapshot = {
   mode: MarketDataMode;
   providerName: string;
+  feedStatusLabel: FeedStatusLabel;
   generatedAt: string;
   defaultPairId: string;
   allPairs: BasePair[];
   newPairs: BasePair[];
   volumeInflows: BasePair[];
   momentumPairs: BasePair[];
+  fallbackReason?: string;
 };
