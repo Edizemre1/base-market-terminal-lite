@@ -7,9 +7,10 @@ export const mockChartProvider: PairChartProvider = {
   readOnly: true,
   getPairChart: (pair) => ({
     source: "synthetic",
-    label: "Chart preview \u00b7 live OHLCV unavailable",
+    label: "Chart preview \u00b7 OHLCV unavailable",
+    updatedAt: new Date().toISOString(),
     candles: buildSyntheticCandles(pair),
-    unavailableReason: "Live OHLCV is not connected for this pair."
+    unavailableReason: "Read-only OHLCV is not connected for this pair."
   })
 };
 

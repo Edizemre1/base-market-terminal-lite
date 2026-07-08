@@ -47,7 +47,8 @@ export const geckoTerminalChartProvider: PairChartProvider = {
 
       return {
         source: "geckoterminal",
-        label: "OHLCV read-only",
+        label: "OHLCV read-only \u00b7 cached chart",
+        updatedAt: new Date().toISOString(),
         candles
       };
     } catch {

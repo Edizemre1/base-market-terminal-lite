@@ -41,6 +41,8 @@ export type BasePair = {
   chartCandles?: PairChartCandle[];
   chartSource?: PairChartSource;
   chartLabel?: string;
+  chartUpdatedAt?: string;
+  chartUnavailableReason?: string;
   pressure: {
     buy: number;
     sell: number;

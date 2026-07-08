@@ -20,7 +20,7 @@ Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 Default mode is mock/demo. Use the topbar data source switch to choose between:
 
 - `MOCK FEED`
-- `LIVE DATA PREVIEW`
+- `READ-ONLY MARKET DATA`
 
 The switch updates the URL query string:
 
@@ -29,11 +29,11 @@ The switch updates the URL query string:
 
 No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARKET_DATA_MODE=dexscreener`, and `NEXT_PUBLIC_MARKET_DATA_MODE=mock` remain supported for compatibility, but the public app can switch data sources directly from the UI.
 
-DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified live pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified live data is limited, and the app shows `Live data preview + demo fallback`.
+DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified read-only pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified read-only data is limited, and the app shows `Read-only market data + demo fallback`.
 
-Chart data is read-only. In live data preview mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart safely falls back to the synthetic preview and labels it as unavailable.
+Chart data is read-only and cached, not streaming. In read-only market data mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart safely falls back to the synthetic preview and labels it as unavailable.
 
-No API key is needed. DexScreener mode is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
+No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, or transaction building.
 
 ## What Is Included
 
