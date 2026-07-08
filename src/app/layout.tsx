@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
-import { resolveMarketDataMode } from "@/data/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <AppShell marketDataMode={resolveMarketDataMode()}>{children}</AppShell>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

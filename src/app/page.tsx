@@ -1,8 +1,17 @@
 import { BaseTerminal } from "@/components/BaseTerminal";
-import { getMarketTerminalSnapshot } from "@/data/providers";
+import { getMarketTerminalSnapshot, resolveUrlMarketDataMode } from "@/data/providers";
 
 export const revalidate = 60;
 
-export default async function HomePage() {
-  return <BaseTerminal data={await getMarketTerminalSnapshot()} />;
+type PageProps = {
+  searchParams?: Promise<{
+    data?: string | string[];
+  }>;
+};
+
+export default async function HomePage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const mode = resolveUrlMarketDataMode(params?.data);
+
+  return <BaseTerminal data={await getMarketTerminalSnapshot(mode)} />;
 }
