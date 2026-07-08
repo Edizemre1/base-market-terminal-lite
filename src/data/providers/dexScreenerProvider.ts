@@ -231,6 +231,7 @@ function normalizePair(pair: DexPair): BasePair | undefined {
 
   return {
     dataSource: "dexscreener",
+    pairAddress: pairAddress.toLowerCase(),
     id: pairAddress.toLowerCase(),
     pair: `${baseToken.symbol} / ${quoteToken.symbol}`,
     baseToken: baseToken.symbol,

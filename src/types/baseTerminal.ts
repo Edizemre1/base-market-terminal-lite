@@ -1,3 +1,5 @@
+import type { PairChartCandle, PairChartSource } from "@/data/providers/chart/types";
+
 export type PairRiskCheck = {
   label: string;
   value: string;
@@ -14,6 +16,7 @@ export type PairActivity = {
 
 export type BasePair = {
   dataSource?: "mock" | "dexscreener";
+  pairAddress?: string;
   id: string;
   pair: string;
   baseToken: string;
@@ -35,6 +38,9 @@ export type BasePair = {
   riskScore: number;
   riskLabel: string;
   chart: number[];
+  chartCandles?: PairChartCandle[];
+  chartSource?: PairChartSource;
+  chartLabel?: string;
   pressure: {
     buy: number;
     sell: number;
