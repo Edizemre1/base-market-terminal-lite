@@ -172,7 +172,7 @@ function TerminalSearchBox() {
                     {pair.pair}
                   </span>
                   <span className="block truncate text-[10px] text-base-muted">
-                    {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} · {pair.dex}
+                    {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} - {pair.dex}
                   </span>
                 </span>
                 <span className="text-right font-mono text-[10px] text-base-muted">

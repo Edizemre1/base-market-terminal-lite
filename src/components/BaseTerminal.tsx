@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
 import { useTerminalSearch } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { PairChartResult } from "@/data/providers/chart/types";
@@ -27,8 +26,6 @@ export function BaseTerminal({
   data: MarketTerminalSnapshot;
   initialPairParam?: string;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const {
     registerPairs,
     registerSelectedPair,
@@ -61,7 +58,7 @@ export function BaseTerminal({
       selectedPair
         ? {
             ...selectedPair,
-            ...chartOverrides[selectedPair.id]
+            ...chartOverrides[getChartCacheKey(selectedPair)]
           }
         : undefined,
     [chartOverrides, selectedPair]
@@ -71,15 +68,16 @@ export function BaseTerminal({
 
   const updatePairQuery = useCallback(
     (pair: BasePair) => {
-      const nextParams = new URLSearchParams(window.location.search);
-      nextParams.set("pair", getShareablePairKey(pair));
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set("pair", getShareablePairKey(pair));
 
-      const nextQueryString = nextParams.toString();
-      router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, {
-        scroll: false
-      });
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+      );
     },
-    [pathname, router]
+    []
   );
 
   const handleSelectPairById = useCallback(
@@ -94,6 +92,59 @@ export function BaseTerminal({
       updatePairQuery(nextPair);
     },
     [data.allPairs, updatePairQuery]
+  );
+
+  const refreshPairChart = useCallback(
+    async (pair: BasePair) => {
+      const chartKey = getChartCacheKey(pair);
+      setChartRefreshStatus((current) => ({ ...current, [chartKey]: "refreshing" }));
+
+      try {
+        const response = await fetch("/api/chart", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: pair.id,
+            mode: data.mode,
+            dataSource: pair.dataSource,
+            pairAddress: pair.pairAddress,
+            chart: pair.chart,
+            volume24h: pair.volume24h
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error("Chart refresh failed");
+        }
+
+        const result = (await response.json()) as PairChartResult;
+        const expectedReadOnlyOhlcv =
+          data.mode === "dexscreener" &&
+          pair.dataSource === "dexscreener" &&
+          Boolean(pair.pairAddress);
+
+        if (expectedReadOnlyOhlcv && result.source !== "geckoterminal") {
+          setChartRefreshStatus((current) => ({ ...current, [chartKey]: "using-last" }));
+          return;
+        }
+
+        setChartOverrides((current) => ({
+          ...current,
+          [chartKey]: {
+            chart: result.candles.map((candle) => candle.close),
+            chartCandles: result.candles,
+            chartSource: result.source,
+            chartLabel: result.label,
+            chartUpdatedAt: result.updatedAt,
+            chartUnavailableReason: result.unavailableReason
+          }
+        }));
+        setChartRefreshStatus((current) => ({ ...current, [chartKey]: "updated" }));
+      } catch {
+        setChartRefreshStatus((current) => ({ ...current, [chartKey]: "using-last" }));
+      }
+    },
+    [data.mode]
   );
 
   useEffect(() => {
@@ -114,6 +165,14 @@ export function BaseTerminal({
     return () => registerSelectPairHandler(undefined);
   }, [handleSelectPairById, registerSelectPairHandler]);
 
+  useEffect(() => {
+    if (!selectedPair) {
+      return;
+    }
+
+    void refreshPairChart(selectedPair);
+  }, [refreshPairChart, selectedPair]);
+
   const estimatedOutput = useMemo(() => {
     if (!selectedPairWithChart) {
       return 0;
@@ -122,55 +181,6 @@ export function BaseTerminal({
     const base = selectedPairWithChart.liquidity / Math.max(selectedPairWithChart.riskScore, 1);
     return cleanAmount * base * selectedPairWithChart.volumeMultiple;
   }, [cleanAmount, selectedPairWithChart]);
-
-  async function handleRefreshChart(pair: BasePair) {
-    setChartRefreshStatus((current) => ({ ...current, [pair.id]: "refreshing" }));
-
-    try {
-      const response = await fetch("/api/chart", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          id: pair.id,
-          mode: data.mode,
-          dataSource: pair.dataSource,
-          pairAddress: pair.pairAddress,
-          chart: pair.chart,
-          volume24h: pair.volume24h
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("Chart refresh failed");
-      }
-
-      const result = (await response.json()) as PairChartResult;
-      const expectedReadOnlyOhlcv =
-        data.mode === "dexscreener" &&
-        pair.dataSource === "dexscreener" &&
-        Boolean(pair.pairAddress);
-
-      if (expectedReadOnlyOhlcv && result.source !== "geckoterminal") {
-        setChartRefreshStatus((current) => ({ ...current, [pair.id]: "using-last" }));
-        return;
-      }
-
-      setChartOverrides((current) => ({
-        ...current,
-        [pair.id]: {
-          chart: result.candles.map((candle) => candle.close),
-          chartCandles: result.candles,
-          chartSource: result.source,
-          chartLabel: result.label,
-          chartUpdatedAt: result.updatedAt,
-          chartUnavailableReason: result.unavailableReason
-        }
-      }));
-      setChartRefreshStatus((current) => ({ ...current, [pair.id]: "updated" }));
-    } catch {
-      setChartRefreshStatus((current) => ({ ...current, [pair.id]: "using-last" }));
-    }
-  }
 
   if (!selectedPairWithChart) {
     return (
@@ -230,8 +240,10 @@ export function BaseTerminal({
           <SelectedPairPanel
             pair={selectedPairWithChart}
             marketDataMode={data.mode}
-            chartRefreshStatus={chartRefreshStatus[selectedPairWithChart.id] ?? "idle"}
-            onRefreshChart={handleRefreshChart}
+            chartRefreshStatus={
+              chartRefreshStatus[getChartCacheKey(selectedPairWithChart)] ?? "idle"
+            }
+            onRefreshChart={refreshPairChart}
           />
           <PairDetailTabs
             pair={selectedPairWithChart}
@@ -274,6 +286,10 @@ function getPairFromParam(pairs: BasePair[], pairParam: string | undefined | nul
 }
 
 function getShareablePairKey(pair: BasePair) {
+  return pair.pairAddress ?? pair.id;
+}
+
+function getChartCacheKey(pair: BasePair) {
   return pair.pairAddress ?? pair.id;
 }
 
@@ -649,7 +665,9 @@ function MockChart({
   const latest = candles[candles.length - 1];
   const chartLabel = pair.chartLabel ?? "Chart preview \u00b7 OHLCV unavailable";
   const statusMessage =
-    refreshStatus === "using-last"
+    refreshStatus === "refreshing"
+      ? "Updating chart..."
+      : refreshStatus === "using-last"
       ? "Using last available chart"
       : pair.chartUnavailableReason && pair.chartSource !== "geckoterminal"
         ? "Using synthetic fallback"
