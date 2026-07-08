@@ -21,6 +21,7 @@ export type PairChartResult = {
   candles: PairChartCandle[];
   source: PairChartSource;
   label: string;
+  updatedAt: string;
   unavailableReason?: string;
 };
 

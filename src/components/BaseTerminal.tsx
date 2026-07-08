@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Copy, LockKeyhole, Settings, ShieldCheck, Star } from "lucide-react";
+import { Copy, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
+import type { PairChartResult } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
 type FeedKind = "new" | "inflow" | "momentum";
 type DetailTab = "overview" | "risk" | "liquidity" | "activity";
+type ChartRefreshStatus = "idle" | "refreshing" | "updated" | "using-last";
 
 const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -20,6 +22,8 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   const [selectedPairId, setSelectedPairId] = useState(data.defaultPairId);
   const [activeTab, setActiveTab] = useState<DetailTab>("risk");
   const [amount, setAmount] = useState("0.10");
+  const [chartOverrides, setChartOverrides] = useState<Record<string, Partial<BasePair>>>({});
+  const [chartRefreshStatus, setChartRefreshStatus] = useState<Record<string, ChartRefreshStatus>>({});
 
   useEffect(() => {
     setSelectedPairId(data.defaultPairId);
@@ -27,18 +31,77 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
 
   const selectedPair =
     data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
+  const selectedPairWithChart = useMemo(
+    () =>
+      selectedPair
+        ? {
+            ...selectedPair,
+            ...chartOverrides[selectedPair.id]
+          }
+        : undefined,
+    [chartOverrides, selectedPair]
+  );
   const amountNumber = Number.parseFloat(amount);
   const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
   const estimatedOutput = useMemo(() => {
-    if (!selectedPair) {
+    if (!selectedPairWithChart) {
       return 0;
     }
 
-    const base = selectedPair.liquidity / Math.max(selectedPair.riskScore, 1);
-    return cleanAmount * base * selectedPair.volumeMultiple;
-  }, [cleanAmount, selectedPair]);
+    const base = selectedPairWithChart.liquidity / Math.max(selectedPairWithChart.riskScore, 1);
+    return cleanAmount * base * selectedPairWithChart.volumeMultiple;
+  }, [cleanAmount, selectedPairWithChart]);
 
-  if (!selectedPair) {
+  async function handleRefreshChart(pair: BasePair) {
+    setChartRefreshStatus((current) => ({ ...current, [pair.id]: "refreshing" }));
+
+    try {
+      const response = await fetch("/api/chart", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: pair.id,
+          mode: data.mode,
+          dataSource: pair.dataSource,
+          pairAddress: pair.pairAddress,
+          chart: pair.chart,
+          volume24h: pair.volume24h
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Chart refresh failed");
+      }
+
+      const result = (await response.json()) as PairChartResult;
+      const expectedReadOnlyOhlcv =
+        data.mode === "dexscreener" &&
+        pair.dataSource === "dexscreener" &&
+        Boolean(pair.pairAddress);
+
+      if (expectedReadOnlyOhlcv && result.source !== "geckoterminal") {
+        setChartRefreshStatus((current) => ({ ...current, [pair.id]: "using-last" }));
+        return;
+      }
+
+      setChartOverrides((current) => ({
+        ...current,
+        [pair.id]: {
+          chart: result.candles.map((candle) => candle.close),
+          chartCandles: result.candles,
+          chartSource: result.source,
+          chartLabel: result.label,
+          chartUpdatedAt: result.updatedAt,
+          chartUnavailableReason: result.unavailableReason
+        }
+      }));
+      setChartRefreshStatus((current) => ({ ...current, [pair.id]: "updated" }));
+    } catch {
+      setChartRefreshStatus((current) => ({ ...current, [pair.id]: "using-last" }));
+    }
+  }
+
+  if (!selectedPairWithChart) {
     return (
       <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2">
         <section className="border border-base-line bg-base-panel p-4">
@@ -69,7 +132,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             kind="new"
             pairs={data.newPairs}
             showFallbackLabels={data.mode === "dexscreener"}
-            selectedPairId={selectedPair.id}
+            selectedPairId={selectedPairWithChart.id}
             onSelect={setSelectedPairId}
           />
           <OpportunityFeed
@@ -78,7 +141,7 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             kind="inflow"
             pairs={data.volumeInflows}
             showFallbackLabels={data.mode === "dexscreener"}
-            selectedPairId={selectedPair.id}
+            selectedPairId={selectedPairWithChart.id}
             onSelect={setSelectedPairId}
           />
           <OpportunityFeed
@@ -87,22 +150,27 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
             kind="momentum"
             pairs={data.momentumPairs}
             showFallbackLabels={data.mode === "dexscreener"}
-            selectedPairId={selectedPair.id}
+            selectedPairId={selectedPairWithChart.id}
             onSelect={setSelectedPairId}
           />
         </aside>
 
         <section className="min-w-0 space-y-2">
-          <SelectedPairPanel pair={selectedPair} marketDataMode={data.mode} />
+          <SelectedPairPanel
+            pair={selectedPairWithChart}
+            marketDataMode={data.mode}
+            chartRefreshStatus={chartRefreshStatus[selectedPairWithChart.id] ?? "idle"}
+            onRefreshChart={handleRefreshChart}
+          />
           <PairDetailTabs
-            pair={selectedPair}
+            pair={selectedPairWithChart}
             activeTab={activeTab}
             onTabChange={setActiveTab}
           />
         </section>
 
         <SwapTicket
-          pair={selectedPair}
+          pair={selectedPairWithChart}
           marketDataMode={data.mode}
           amount={amount}
           onAmountChange={setAmount}
@@ -289,10 +357,14 @@ function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
 
 function SelectedPairPanel({
   pair,
-  marketDataMode
+  marketDataMode,
+  chartRefreshStatus,
+  onRefreshChart
 }: {
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
+  chartRefreshStatus: ChartRefreshStatus;
+  onRefreshChart: (pair: BasePair) => void;
 }) {
   const isDemoFallbackSelected =
     marketDataMode === "dexscreener" && pair.dataSource === "mock";
@@ -367,7 +439,11 @@ function SelectedPairPanel({
       </div>
 
       <div className="p-2">
-        <MockChart pair={pair} />
+        <MockChart
+          pair={pair}
+          refreshStatus={chartRefreshStatus}
+          onRefreshChart={onRefreshChart}
+        />
         <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <MiniModule
             label="Buy / Sell Pressure"
@@ -437,7 +513,15 @@ function Metric({
   );
 }
 
-function MockChart({ pair }: { pair: BasePair }) {
+function MockChart({
+  pair,
+  refreshStatus,
+  onRefreshChart
+}: {
+  pair: BasePair;
+  refreshStatus: ChartRefreshStatus;
+  onRefreshChart: (pair: BasePair) => void;
+}) {
   const width = 720;
   const height = 250;
   const candles = getDisplayCandles(pair);
@@ -459,12 +543,18 @@ function MockChart({ pair }: { pair: BasePair }) {
     })
     .join(" ");
   const latest = candles[candles.length - 1];
-  const chartLabel = pair.chartLabel ?? "Chart preview \u00b7 live OHLCV unavailable";
+  const chartLabel = pair.chartLabel ?? "Chart preview \u00b7 OHLCV unavailable";
+  const statusMessage =
+    refreshStatus === "using-last"
+      ? "Using last available chart"
+      : pair.chartUnavailableReason && pair.chartSource !== "geckoterminal"
+        ? "Using synthetic fallback"
+        : undefined;
 
   return (
     <div className="market-scanline border border-base-line bg-base-panel">
       <div className="flex items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
-        <div>
+        <div className="min-w-0">
           <p className="font-mono text-[12px] font-semibold text-base-text">
             {pair.pair.replace(" / ", "/")} - {chartLabel}
           </p>
@@ -477,10 +567,30 @@ function MockChart({ pair }: { pair: BasePair }) {
               ? "Read-only candles - Base"
               : `Synthetic path only - ${pair.dex} (Base)`}
           </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-base-muted">
+            <span>Last updated {formatChartTimestamp(pair.chartUpdatedAt)}</span>
+            {statusMessage ? <span className="text-base-amber">{statusMessage}</span> : null}
+          </div>
         </div>
-        <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
-          Volume {formatCompactCurrency(latest.volume || pair.volume24h)}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onRefreshChart(pair)}
+            disabled={refreshStatus === "refreshing"}
+            className="inline-flex h-6 items-center gap-1 border border-base-line bg-base-elevated px-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-base-muted hover:border-base-mint hover:text-base-mint disabled:cursor-not-allowed disabled:opacity-60"
+            title="Refresh cached chart data"
+          >
+            <RefreshCw
+              size={11}
+              className={cx(refreshStatus === "refreshing" && "animate-spin")}
+              aria-hidden="true"
+            />
+            {refreshStatus === "refreshing" ? "Refreshing" : "Refresh"}
+          </button>
+          <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
+            Volume {formatCompactCurrency(latest.volume || pair.volume24h)}
+          </span>
+        </div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-[270px] w-full max-w-full p-2" aria-hidden="true">
         {Array.from({ length: 6 }).map((_, index) => (
@@ -574,6 +684,24 @@ function formatChartValue(value: number) {
   }
 
   return value.toFixed(4);
+}
+
+function formatChartTimestamp(value: string | undefined) {
+  if (!value) {
+    return "cached";
+  }
+
+  const timestamp = new Date(value);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return "cached";
+  }
+
+  return timestamp.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
 }
 
 function MiniModule({

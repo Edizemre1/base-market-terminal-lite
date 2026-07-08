@@ -3,8 +3,8 @@ import type { BasePair, PairActivity, PairRiskCheck } from "@/types/baseTerminal
 export type MarketDataMode = "mock" | "dexscreener" | "geckoterminal";
 export type FeedStatusLabel =
   | "MOCK FEED"
-  | "LIVE DATA PREVIEW"
-  | "LIVE DATA PREVIEW + DEMO FALLBACK";
+  | "READ-ONLY MARKET DATA"
+  | "READ-ONLY MARKET DATA + DEMO FALLBACK";
 export type MaybePromise<T> = T | Promise<T>;
 
 export type PairRiskDetails = {

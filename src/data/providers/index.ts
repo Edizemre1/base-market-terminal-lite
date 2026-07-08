@@ -22,7 +22,7 @@ export type {
 
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
 const FEED_ROW_TARGET = 8;
-const LIVE_DATA_FALLBACK_LABEL = "Live data preview + demo fallback";
+const READ_ONLY_DATA_FALLBACK_LABEL = "Read-only market data + demo fallback";
 
 export function resolveMarketDataMode(
   mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
@@ -50,7 +50,7 @@ export function resolveUrlMarketDataMode(
 export function getMarketFeedStatusLabel(
   mode: MarketDataMode = resolveMarketDataMode()
 ): FeedStatusLabel {
-  return mode === "dexscreener" ? "LIVE DATA PREVIEW" : "MOCK FEED";
+  return mode === "dexscreener" ? "READ-ONLY MARKET DATA" : "MOCK FEED";
 }
 
 export async function getMarketDataProvider(
@@ -130,6 +130,8 @@ async function hydratePair(
     chartCandles: chart.candles,
     chartSource: chart.source,
     chartLabel: chart.label,
+    chartUpdatedAt: chart.updatedAt,
+    chartUnavailableReason: chart.unavailableReason,
     activity,
     liquidityDetail: liquidityDetail ?? pair.liquidityDetail,
     riskScore: risk?.riskScore ?? pair.riskScore,
@@ -176,14 +178,14 @@ async function fillDexScreenerSnapshot(
 
   return {
     ...snapshot,
-    providerName: "Read-only Base market preview + demo fallback",
-    feedStatusLabel: "LIVE DATA PREVIEW + DEMO FALLBACK",
+    providerName: "Read-only Base market data + demo fallback",
+    feedStatusLabel: "READ-ONLY MARKET DATA + DEMO FALLBACK",
     defaultPairId,
     allPairs,
     newPairs,
     volumeInflows,
     momentumPairs,
-    fallbackReason: LIVE_DATA_FALLBACK_LABEL
+    fallbackReason: READ_ONLY_DATA_FALLBACK_LABEL
   };
 }
 
@@ -201,15 +203,15 @@ function withDexScreenerFallbackLabel(snapshot: MarketTerminalSnapshot): MarketT
   return {
     ...snapshot,
     mode: "dexscreener",
-    providerName: "Read-only Base market preview + demo fallback",
-    feedStatusLabel: "LIVE DATA PREVIEW + DEMO FALLBACK",
+    providerName: "Read-only Base market data + demo fallback",
+    feedStatusLabel: "READ-ONLY MARKET DATA + DEMO FALLBACK",
     generatedAt: new Date().toISOString(),
     defaultPairId: allPairs[0]?.id ?? "",
     allPairs,
     newPairs,
     volumeInflows,
     momentumPairs,
-    fallbackReason: LIVE_DATA_FALLBACK_LABEL
+    fallbackReason: READ_ONLY_DATA_FALLBACK_LABEL
   };
 }
 
