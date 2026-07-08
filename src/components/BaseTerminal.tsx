@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
-import { useTerminalSearch } from "@/components/TerminalSearchContext";
+import { useTerminalSearch, type PinnedPair } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { PairChartResult } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
@@ -29,7 +29,11 @@ export function BaseTerminal({
   const {
     registerPairs,
     registerSelectedPair,
-    registerSelectPairHandler
+    registerSelectPairHandler,
+    pinnedPairs,
+    isPairPinned,
+    togglePinnedPair,
+    unpinPinnedPair
   } = useTerminalSearch();
   const [selectedPairId, setSelectedPairId] = useState(
     () => getPairFromParam(data.allPairs, initialPairParam)?.id ?? data.defaultPairId
@@ -205,7 +209,13 @@ export function BaseTerminal({
         </div>
       ) : null}
       <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
-        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-3 xl:gap-2 xl:space-y-0 xl:overflow-hidden">
+        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(92px,0.72fr)_repeat(3,minmax(0,1fr))] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
+          <PinnedPairsPanel
+            pairs={pinnedPairs}
+            selectedPairId={selectedPairWithChart.id}
+            onSelect={handleSelectPairById}
+            onUnpin={unpinPinnedPair}
+          />
           <OpportunityFeed
             id="new-pairs"
             title="New Pairs"
@@ -215,6 +225,8 @@ export function BaseTerminal({
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
+            isPairPinned={isPairPinned}
+            onTogglePin={togglePinnedPair}
           />
           <OpportunityFeed
             title="Volume Inflow"
@@ -224,6 +236,8 @@ export function BaseTerminal({
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
+            isPairPinned={isPairPinned}
+            onTogglePin={togglePinnedPair}
           />
           <OpportunityFeed
             title="Momentum"
@@ -233,6 +247,8 @@ export function BaseTerminal({
             showFallbackLabels={data.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
+            isPairPinned={isPairPinned}
+            onTogglePin={togglePinnedPair}
           />
         </aside>
 
@@ -301,6 +317,89 @@ function normalizePairIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function PinnedPairsPanel({
+  pairs,
+  selectedPairId,
+  onSelect,
+  onUnpin
+}: {
+  pairs: PinnedPair[];
+  selectedPairId: string;
+  onSelect: (id: string) => void;
+  onUnpin: (key: string) => void;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
+        <div className="flex items-center gap-2">
+          <Star size={11} className="text-base-mint" fill="currentColor" aria-hidden="true" />
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
+            Pinned
+          </h2>
+        </div>
+        <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+          local
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {pairs.length === 0 ? (
+          <div className="px-2 py-3 text-[11px] text-base-muted">
+            <p className="font-mono text-base-text">No pinned pairs.</p>
+            <p className="mt-1">Use the star on rows or search results.</p>
+          </div>
+        ) : (
+          pairs.map((pair) => (
+            <div
+              key={pair.key}
+              className={cx(
+                "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-base-line px-2 py-1.5 text-[11px] last:border-b-0",
+                pair.currentPairId === selectedPairId && "bg-base-mint/10",
+                pair.stale && "bg-base-amber/5"
+              )}
+            >
+              <button
+                type="button"
+                disabled={!pair.currentPairId}
+                onClick={() => pair.currentPairId && onSelect(pair.currentPairId)}
+                className="min-w-0 text-left disabled:cursor-not-allowed"
+              >
+                <span className="block truncate font-mono font-semibold text-base-text">
+                  {pair.pair}
+                </span>
+                <span
+                  className={cx(
+                    "block truncate text-[10px]",
+                    pair.stale ? "font-mono text-base-amber" : "text-base-muted"
+                  )}
+                >
+                  {pair.stale ? "Stale - not in current feed" : pair.dex}
+                </span>
+              </button>
+              <span className="text-right font-mono text-[10px]">
+                <span className="block text-base-text">{pair.price}</span>
+                <span className={pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"}>
+                  {formatPercent(pair.change24h)}
+                </span>
+                <span className="block text-[9px] text-base-muted">
+                  L {formatCompactCurrency(pair.liquidity || pair.volume24h)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onUnpin(pair.key)}
+                className="grid h-6 w-6 place-items-center border border-base-line bg-base-elevated text-base-mint hover:border-base-rose hover:text-base-rose"
+                aria-label={`Unpin ${pair.pair}`}
+              >
+                <Star size={12} fill="currentColor" aria-hidden="true" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 function OpportunityFeed({
   id,
   title,
@@ -309,7 +408,9 @@ function OpportunityFeed({
   pairs,
   showFallbackLabels,
   selectedPairId,
-  onSelect
+  onSelect,
+  isPairPinned,
+  onTogglePin
 }: {
   id?: string;
   title: string;
@@ -319,6 +420,8 @@ function OpportunityFeed({
   showFallbackLabels: boolean;
   selectedPairId: string;
   onSelect: (id: string) => void;
+  isPairPinned: (pair: BasePair) => boolean;
+  onTogglePin: (pair: BasePair) => void;
 }) {
   const livePairs =
     showFallbackLabels ? pairs.filter((pair) => pair.dataSource !== "mock") : pairs;
@@ -353,6 +456,8 @@ function OpportunityFeed({
             pair={pair}
             selectedPairId={selectedPairId}
             onSelect={onSelect}
+            isPinned={isPairPinned(pair)}
+            onTogglePin={onTogglePin}
           />
         ))}
 
@@ -374,6 +479,8 @@ function OpportunityFeed({
             selectedPairId={selectedPairId}
             onSelect={onSelect}
             isFallbackRow
+            isPinned={isPairPinned(pair)}
+            onTogglePin={onTogglePin}
           />
         ))}
       </div>
@@ -404,64 +511,83 @@ function FeedRow({
   pair,
   selectedPairId,
   onSelect,
+  isPinned,
+  onTogglePin,
   isFallbackRow = false
 }: {
   kind: FeedKind;
   pair: BasePair;
   selectedPairId: string;
   onSelect: (id: string) => void;
+  isPinned: boolean;
+  onTogglePin: (pair: BasePair) => void;
   isFallbackRow?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(pair.id)}
+    <div
       className={cx(
-        "grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center border-b border-base-line px-2 py-1 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+        "relative border-b border-base-line last:border-b-0",
         selectedPairId === pair.id && "bg-base-mint/10"
       )}
     >
-      <span className="flex min-w-0 items-start gap-1.5">
-        <span
-          className={cx(
-            "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-            isFallbackRow ? "bg-base-amber" : "bg-base-mint"
-          )}
-        />
-        <span className="min-w-0">
-          <span className="block truncate font-mono font-semibold text-base-text">
-            {pair.pair}
-          </span>
+      <button
+        type="button"
+        onClick={() => onSelect(pair.id)}
+        className="grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center px-2 py-1 pr-8 text-left text-[11px] hover:bg-base-mint/5"
+      >
+        <span className="flex min-w-0 items-start gap-1.5">
           <span
             className={cx(
-              "block truncate text-[9px] leading-3",
-              isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+              "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+              isFallbackRow ? "bg-base-amber" : "bg-base-mint"
             )}
-          >
-            {getFeedRowSubtitle(pair, isFallbackRow)}
+          />
+          <span className="min-w-0">
+            <span className="block truncate font-mono font-semibold text-base-text">
+              {pair.pair}
+            </span>
+            <span
+              className={cx(
+                "block truncate text-[9px] leading-3",
+                isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+              )}
+            >
+              {getFeedRowSubtitle(pair, isFallbackRow)}
+            </span>
           </span>
         </span>
-      </span>
-      <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
-      <span className="text-right font-mono text-[10px] text-base-text">
-        {formatCompactCurrency(pair.liquidity)}
-      </span>
-      <span className="text-right font-mono text-[10px] text-base-text">
-        {formatCompactCurrency(pair.volume24h)}
-      </span>
-      <span
+        <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
+        <span className="text-right font-mono text-[10px] text-base-text">
+          {formatCompactCurrency(pair.liquidity)}
+        </span>
+        <span className="text-right font-mono text-[10px] text-base-text">
+          {formatCompactCurrency(pair.volume24h)}
+        </span>
+        <span
+          className={cx(
+            "text-right font-mono text-[10px]",
+            pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+          )}
+        >
+          {kind === "momentum"
+            ? pair.momentumScore
+            : kind === "inflow"
+              ? `+${formatCompactCurrency(pair.inflow24h)}`
+              : formatPercent(pair.change24h)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onTogglePin(pair)}
         className={cx(
-          "text-right font-mono text-[10px]",
-          pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+          "absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint",
+          isPinned && "border-base-mint/45 bg-base-mint/10 text-base-mint"
         )}
+        aria-label={isPinned ? `Unpin ${pair.pair}` : `Pin ${pair.pair}`}
       >
-        {kind === "momentum"
-          ? pair.momentumScore
-          : kind === "inflow"
-            ? `+${formatCompactCurrency(pair.inflow24h)}`
-            : formatPercent(pair.change24h)}
-      </span>
-    </button>
+        <Star size={12} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
