@@ -20,7 +20,7 @@ Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 Default mode is mock/demo. Use the topbar data source switch to choose between:
 
 - `MOCK FEED`
-- `DEXSCREENER READ-ONLY`
+- `LIVE DATA PREVIEW`
 
 The switch updates the URL query string:
 
@@ -29,7 +29,7 @@ The switch updates the URL query string:
 
 No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARKET_DATA_MODE=dexscreener`, and `NEXT_PUBLIC_MARKET_DATA_MODE=mock` remain supported for compatibility, but the public app can switch data sources directly from the UI.
 
-DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. If there are not enough quality rows, the app fills remaining feed slots with bundled mock data and shows `DexScreener + mock fallback`.
+DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified live pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified live data is limited, and the app shows `Live data preview + demo fallback`.
 
 No API key is needed. DexScreener mode is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
 

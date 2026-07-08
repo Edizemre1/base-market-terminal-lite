@@ -21,7 +21,7 @@ export type {
 
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
 const FEED_ROW_TARGET = 8;
-const DEXSCREENER_MOCK_FALLBACK_LABEL = "DexScreener + mock fallback";
+const LIVE_DATA_FALLBACK_LABEL = "Live data preview + demo fallback";
 
 export function resolveMarketDataMode(
   mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
@@ -49,7 +49,7 @@ export function resolveUrlMarketDataMode(
 export function getMarketFeedStatusLabel(
   mode: MarketDataMode = resolveMarketDataMode()
 ): FeedStatusLabel {
-  return mode === "dexscreener" ? "DEXSCREENER READ-ONLY" : "MOCK FEED";
+  return mode === "dexscreener" ? "LIVE DATA PREVIEW" : "MOCK FEED";
 }
 
 export async function getMarketDataProvider(
@@ -154,34 +154,32 @@ async function fillDexScreenerSnapshot(
   snapshot: MarketTerminalSnapshot
 ): Promise<MarketTerminalSnapshot> {
   const mockSnapshot = await buildMarketTerminalSnapshot(mockMarketDataProvider);
-
-  if (snapshot.allPairs.length === 0) {
-    return withDexScreenerFallbackLabel(mockSnapshot);
-  }
-
-  const newPairs = fillFeed(snapshot.newPairs, mockSnapshot.newPairs);
+  const newPairs = snapshot.newPairs;
   const volumeInflows = fillFeed(snapshot.volumeInflows, mockSnapshot.volumeInflows);
   const momentumPairs = fillFeed(snapshot.momentumPairs, mockSnapshot.momentumPairs);
   const allPairs = dedupePairs([...newPairs, ...volumeInflows, ...momentumPairs]);
   const usedFallback =
-    newPairs.length > snapshot.newPairs.length ||
     volumeInflows.length > snapshot.volumeInflows.length ||
     momentumPairs.length > snapshot.momentumPairs.length;
+  const defaultPairId = getDefaultPairId({ newPairs, volumeInflows, momentumPairs });
 
   if (!usedFallback) {
-    return snapshot;
+    return {
+      ...snapshot,
+      defaultPairId
+    };
   }
 
   return {
     ...snapshot,
-    providerName: "DexScreener read-only Base data + mock fallback",
-    feedStatusLabel: "DEXSCREENER + MOCK FALLBACK",
-    defaultPairId: allPairs[0]?.id ?? snapshot.defaultPairId,
+    providerName: "Read-only Base market preview + demo fallback",
+    feedStatusLabel: "LIVE DATA PREVIEW + DEMO FALLBACK",
+    defaultPairId,
     allPairs,
     newPairs,
     volumeInflows,
     momentumPairs,
-    fallbackReason: DEXSCREENER_MOCK_FALLBACK_LABEL
+    fallbackReason: LIVE_DATA_FALLBACK_LABEL
   };
 }
 
@@ -191,13 +189,23 @@ async function buildDexScreenerFallbackSnapshot() {
 }
 
 function withDexScreenerFallbackLabel(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
+  const newPairs: BasePair[] = [];
+  const volumeInflows = snapshot.volumeInflows.slice(0, FEED_ROW_TARGET);
+  const momentumPairs = snapshot.momentumPairs.slice(0, FEED_ROW_TARGET);
+  const allPairs = dedupePairs([...volumeInflows, ...momentumPairs]);
+
   return {
     ...snapshot,
     mode: "dexscreener",
-    providerName: "DexScreener read-only Base data + mock fallback",
-    feedStatusLabel: "DEXSCREENER + MOCK FALLBACK",
+    providerName: "Read-only Base market preview + demo fallback",
+    feedStatusLabel: "LIVE DATA PREVIEW + DEMO FALLBACK",
     generatedAt: new Date().toISOString(),
-    fallbackReason: DEXSCREENER_MOCK_FALLBACK_LABEL
+    defaultPairId: allPairs[0]?.id ?? "",
+    allPairs,
+    newPairs,
+    volumeInflows,
+    momentumPairs,
+    fallbackReason: LIVE_DATA_FALLBACK_LABEL
   };
 }
 
@@ -227,4 +235,29 @@ function fillFeed(primary: BasePair[], fallback: BasePair[]) {
 
 function getPairKey(pair: BasePair) {
   return `${pair.baseToken.toLowerCase()}-${pair.quoteToken.toLowerCase()}`;
+}
+
+function getDefaultPairId({
+  newPairs,
+  volumeInflows,
+  momentumPairs
+}: {
+  newPairs: BasePair[];
+  volumeInflows: BasePair[];
+  momentumPairs: BasePair[];
+}) {
+  const livePair =
+    newPairs.find(isLivePair) ??
+    volumeInflows.find(isLivePair) ??
+    momentumPairs.find(isLivePair);
+
+  if (livePair) {
+    return livePair.id;
+  }
+
+  return volumeInflows[0]?.id ?? momentumPairs[0]?.id ?? "";
+}
+
+function isLivePair(pair: BasePair) {
+  return pair.dataSource === "dexscreener";
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, Settings, ShieldCheck, Star } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
@@ -20,6 +20,11 @@ export function BaseTerminal({ data }: { data: MarketTerminalSnapshot }) {
   const [selectedPairId, setSelectedPairId] = useState(data.defaultPairId);
   const [activeTab, setActiveTab] = useState<DetailTab>("risk");
   const [amount, setAmount] = useState("0.10");
+
+  useEffect(() => {
+    setSelectedPairId(data.defaultPairId);
+  }, [data.defaultPairId]);
+
   const selectedPair =
     data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
   const amountNumber = Number.parseFloat(amount);
@@ -127,6 +132,11 @@ function OpportunityFeed({
   selectedPairId: string;
   onSelect: (id: string) => void;
 }) {
+  const livePairs =
+    showFallbackLabels ? pairs.filter((pair) => pair.dataSource !== "mock") : pairs;
+  const fallbackPairs =
+    showFallbackLabels ? pairs.filter((pair) => pair.dataSource === "mock") : [];
+
   return (
     <section id={id} className="border border-base-line bg-base-panel">
       <div className="flex min-h-8 items-center justify-between border-b border-base-line bg-base-raised px-2">
@@ -148,64 +158,122 @@ function OpportunityFeed({
         <span className="text-right">{kind === "momentum" ? "Score" : "Delta"}</span>
       </div>
       <div>
-        {pairs.map((pair) => {
-          const isFallbackRow = showFallbackLabels && pair.dataSource === "mock";
+        {livePairs.map((pair) => (
+          <FeedRow
+            key={`${title}-${pair.id}`}
+            kind={kind}
+            pair={pair}
+            selectedPairId={selectedPairId}
+            onSelect={onSelect}
+          />
+        ))}
 
-          return (
-            <button
-              key={`${title}-${pair.id}`}
-              type="button"
-              onClick={() => onSelect(pair.id)}
-              className={cx(
-                "grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center border-b border-base-line px-2 py-1 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
-                selectedPairId === pair.id && "bg-base-mint/10"
-              )}
-            >
-              <span className="flex min-w-0 items-start gap-1.5">
-                <span
-                  className={cx(
-                    "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
-                    isFallbackRow ? "bg-base-amber" : "bg-base-mint"
-                  )}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate font-mono font-semibold text-base-text">
-                    {pair.pair}
-                  </span>
-                  <span
-                    className={cx(
-                      "block truncate text-[9px] leading-3",
-                      isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
-                    )}
-                  >
-                    {getFeedRowSubtitle(pair, isFallbackRow)}
-                  </span>
-                </span>
-              </span>
-              <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
-              <span className="text-right font-mono text-[10px] text-base-text">
-                {formatCompactCurrency(pair.liquidity)}
-              </span>
-              <span className="text-right font-mono text-[10px] text-base-text">
-                {formatCompactCurrency(pair.volume24h)}
-              </span>
-              <span
-                className={cx(
-                  "text-right font-mono text-[10px]",
-                  pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
-                )}
-              >
-                {kind === "momentum"
-                  ? pair.momentumScore
-                  : kind === "inflow"
-                    ? `+${formatCompactCurrency(pair.inflow24h)}`
-                    : formatPercent(pair.change24h)}
-              </span>
-            </button>
-          );
-        })}
+        {livePairs.length === 0 && fallbackPairs.length === 0 ? (
+          <FeedEmptyState kind={kind} />
+        ) : null}
+
+        {fallbackPairs.length > 0 ? (
+          <div className="border-b border-base-line bg-base-amber/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-base-amber">
+            Demo fallback
+          </div>
+        ) : null}
+
+        {fallbackPairs.map((pair) => (
+          <FeedRow
+            key={`${title}-fallback-${pair.id}`}
+            kind={kind}
+            pair={pair}
+            selectedPairId={selectedPairId}
+            onSelect={onSelect}
+            isFallbackRow
+          />
+        ))}
       </div>
     </section>
+  );
+}
+
+function FeedEmptyState({ kind }: { kind: FeedKind }) {
+  if (kind === "new") {
+    return (
+      <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
+        <p className="font-mono text-base-text">No qualified new Base pairs found.</p>
+        <p className="mt-1">Try Volume Inflow or Momentum.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
+      <p className="font-mono text-base-text">No qualified pairs found.</p>
+      <p className="mt-1">Live data preview is limited right now.</p>
+    </div>
+  );
+}
+
+function FeedRow({
+  kind,
+  pair,
+  selectedPairId,
+  onSelect,
+  isFallbackRow = false
+}: {
+  kind: FeedKind;
+  pair: BasePair;
+  selectedPairId: string;
+  onSelect: (id: string) => void;
+  isFallbackRow?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(pair.id)}
+      className={cx(
+        "grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center border-b border-base-line px-2 py-1 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
+        selectedPairId === pair.id && "bg-base-mint/10"
+      )}
+    >
+      <span className="flex min-w-0 items-start gap-1.5">
+        <span
+          className={cx(
+            "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+            isFallbackRow ? "bg-base-amber" : "bg-base-mint"
+          )}
+        />
+        <span className="min-w-0">
+          <span className="block truncate font-mono font-semibold text-base-text">
+            {pair.pair}
+          </span>
+          <span
+            className={cx(
+              "block truncate text-[9px] leading-3",
+              isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+            )}
+          >
+            {getFeedRowSubtitle(pair, isFallbackRow)}
+          </span>
+        </span>
+      </span>
+      <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
+      <span className="text-right font-mono text-[10px] text-base-text">
+        {formatCompactCurrency(pair.liquidity)}
+      </span>
+      <span className="text-right font-mono text-[10px] text-base-text">
+        {formatCompactCurrency(pair.volume24h)}
+      </span>
+      <span
+        className={cx(
+          "text-right font-mono text-[10px]",
+          pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+        )}
+      >
+        {kind === "momentum"
+          ? pair.momentumScore
+          : kind === "inflow"
+            ? `+${formatCompactCurrency(pair.inflow24h)}`
+            : formatPercent(pair.change24h)}
+      </span>
+    </button>
   );
 }
 
@@ -226,9 +294,11 @@ function SelectedPairPanel({
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
 }) {
+  const isDemoFallbackSelected =
+    marketDataMode === "dexscreener" && pair.dataSource === "mock";
   const readOnlyDetail =
     marketDataMode === "dexscreener"
-      ? pair.dataSource === "mock"
+      ? isDemoFallbackSelected
         ? "Mock fallback"
         : "Read-only feed"
       : "+mock";
@@ -246,6 +316,11 @@ function SelectedPairPanel({
             <span className="max-w-[150px] truncate border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
               {pair.address}
             </span>
+            {isDemoFallbackSelected ? (
+              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
+                Demo fallback selected
+              </span>
+            ) : null}
             <Copy size={12} className="shrink-0 text-base-muted" aria-hidden="true" />
           </div>
         </div>
