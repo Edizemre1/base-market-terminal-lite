@@ -17,21 +17,21 @@ Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
 
 ## Data Mode
 
-Default mode is mock/demo:
+Default mode is mock/demo. Use the topbar data source switch to choose between:
 
-```bash
-MARKET_DATA_MODE=mock
-```
+- `MOCK FEED`
+- `DEXSCREENER READ-ONLY`
 
-DexScreener read-only mode is opt-in:
+The switch updates the URL query string:
 
-```bash
-MARKET_DATA_MODE=dexscreener
-```
+- Mock mode: `/`
+- DexScreener mode: `/?data=dexscreener`
 
-`NEXT_PUBLIC_MARKET_DATA_MODE=mock` is still supported for compatibility. If mode is missing, invalid, rate-limited, or DexScreener returns no usable Base pairs, the app safely falls back to bundled mock data.
+No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARKET_DATA_MODE=dexscreener`, and `NEXT_PUBLIC_MARKET_DATA_MODE=mock` remain supported for compatibility, but the public app can switch data sources directly from the UI.
 
-No API key is needed. The provider layer is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
+If mode is missing, invalid, rate-limited, or DexScreener returns no usable Base pairs, the app safely falls back to bundled mock data and shows `Fallback: mock data`.
+
+No API key is needed. DexScreener mode is read-only and does not enable live trading, wallet actions, approvals, or transaction building.
 
 ## What Is Included
 
