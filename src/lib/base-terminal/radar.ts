@@ -58,7 +58,17 @@ export const RADAR_AGE_OPTIONS: Array<{ value: number | undefined; label: string
 ];
 
 export function getInitialRadarState() {
-  return readRadarStateFromUrl() ?? readRadarStateFromStorage() ?? DEFAULT_RADAR_STATE;
+  const urlState = readRadarStateFromUrl();
+
+  if (urlState) {
+    return urlState;
+  }
+
+  if (isReadOnlyDemoUrl()) {
+    return DEFAULT_RADAR_STATE;
+  }
+
+  return readRadarStateFromStorage() ?? DEFAULT_RADAR_STATE;
 }
 
 export function readRadarStateFromUrl() {
@@ -67,9 +77,7 @@ export function readRadarStateFromUrl() {
   }
 
   const params = new URLSearchParams(window.location.search);
-  const hasRadarParam = ["rliq", "rvol", "rage", "rmin", "rmax", "rpin", "rhide", "rsort"].some(
-    (key) => params.has(key)
-  );
+  const hasRadarParam = hasRadarUrlParam(params);
 
   if (!hasRadarParam) {
     return undefined;
@@ -85,6 +93,22 @@ export function readRadarStateFromUrl() {
     hideStale: params.get("rhide") === "1",
     sort: parseRadarSort(params.get("rsort") ?? "feed")
   });
+}
+
+function hasRadarUrlParam(params: URLSearchParams) {
+  return ["rliq", "rvol", "rage", "rmin", "rmax", "rpin", "rhide", "rsort"].some((key) =>
+    params.has(key)
+  );
+}
+
+function isReadOnlyDemoUrl() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return params.get("data") === "dexscreener" && !hasRadarUrlParam(params);
 }
 
 export function readRadarStateFromStorage() {

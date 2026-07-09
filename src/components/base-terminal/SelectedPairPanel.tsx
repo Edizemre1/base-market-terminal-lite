@@ -35,61 +35,61 @@ export function SelectedPairPanel({
       data-testid="selected-pair-panel"
     >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2">
           <PairAvatarStack
             baseSymbol={pair.baseToken}
             quoteSymbol={pair.quoteToken}
             baseLogoUrl={pair.tokenLogoUrl}
             quoteLogoUrl={pair.quoteTokenLogoUrl}
-            size="lg"
+            size="md"
           />
           <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Selected market
-          </p>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            <h1
-              className="truncate text-[17px] font-semibold leading-5 text-base-text"
-              data-testid="selected-pair-title"
-            >
-              {pair.pair}
-            </h1>
-            <span className="border border-base-mint/35 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-mint">
-              {pair.dexName ?? pair.dex}
-            </span>
-            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-muted">
-              {pair.dataSource === "mock" ? "Demo data" : "Read-only data"}
-            </span>
-            <span className="max-w-[150px] truncate border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
-              {pair.address}
-            </span>
-            {isDemoFallbackSelected ? (
-              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
-                Demo fallback selected
-              </span>
-            ) : null}
-            {pair.stale ? (
-              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
-                {pair.staleReason ?? "Stale selected pair"}
-              </span>
-            ) : null}
-            {outsideCurrentFilter ? (
-              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
-                Outside current filter
-              </span>
-            ) : null}
-            {pair.sourceUrl ? (
-              <a
-                href={pair.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="grid h-5 w-5 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
-                aria-label={`Open ${pair.pair} source`}
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
+              Selected market
+            </p>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+              <h1
+                className="truncate text-[15px] font-semibold leading-5 text-base-text"
+                data-testid="selected-pair-title"
               >
-                <ExternalLink size={11} aria-hidden="true" />
-              </a>
-            ) : null}
-          </div>
+                {pair.pair}
+              </h1>
+              <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
+                {pair.dexName ?? pair.dex}
+              </span>
+              <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
+                {pair.dataSource === "mock" ? "Demo data" : "Read-only data"}
+              </span>
+              <span className="max-w-[128px] truncate border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] text-base-muted">
+                {pair.address}
+              </span>
+              {isDemoFallbackSelected ? (
+                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
+                  Demo fallback selected
+                </span>
+              ) : null}
+              {pair.stale ? (
+                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
+                  {pair.staleReason ?? "Stale selected pair"}
+                </span>
+              ) : null}
+              {outsideCurrentFilter ? (
+                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
+                  Outside current filter
+                </span>
+              ) : null}
+              {pair.sourceUrl ? (
+                <a
+                  href={pair.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="grid h-5 w-5 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
+                  aria-label={`Open ${pair.pair} source`}
+                >
+                  <ExternalLink size={11} aria-hidden="true" />
+                </a>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted md:flex">
