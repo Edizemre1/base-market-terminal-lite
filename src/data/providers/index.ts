@@ -23,6 +23,13 @@ export type {
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
 const FEED_ROW_TARGET = 8;
 const READ_ONLY_DATA_FALLBACK_LABEL = "Read-only data + demo fallback";
+const NEUTRAL_DEFAULT_PAIR_ORDER = [
+  ["WETH", "USDC"],
+  ["USDC", "WETH"],
+  ["AERO", "USDC"],
+  ["WETH", "USDBC"],
+  ["CBBTC", "WETH"]
+] as const;
 
 export function resolveMarketDataMode(
   mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
@@ -240,7 +247,7 @@ function fillFeed(primary: BasePair[], fallback: BasePair[]) {
 }
 
 function getPairKey(pair: BasePair) {
-  return `${pair.baseToken.toLowerCase()}-${pair.quoteToken.toLowerCase()}`;
+  return `${normalizePairToken(pair.baseToken)}-${normalizePairToken(pair.quoteToken)}`;
 }
 
 function getDefaultPairId({
@@ -255,11 +262,7 @@ function getDefaultPairId({
   const orderedPairs = [...newPairs, ...volumeInflows, ...momentumPairs];
   const liveOhlcvPairs = orderedPairs.filter(isLivePairWithOhlcv);
   const preferredOhlcvPair =
-    liveOhlcvPairs.find(
-      (pair) =>
-        pair.baseToken.toUpperCase() === "VIRTUAL" &&
-        pair.quoteToken.toUpperCase() === "WETH"
-    ) ?? liveOhlcvPairs[0];
+    findPreferredNeutralPair(liveOhlcvPairs) ?? getHighestQualityPair(liveOhlcvPairs);
 
   if (preferredOhlcvPair) {
     return preferredOhlcvPair.id;
@@ -283,4 +286,32 @@ function isLivePair(pair: BasePair) {
 
 function isLivePairWithOhlcv(pair: BasePair) {
   return isLivePair(pair) && pair.chartSource === "geckoterminal";
+}
+
+function findPreferredNeutralPair(pairs: BasePair[]) {
+  for (const [baseToken, quoteToken] of NEUTRAL_DEFAULT_PAIR_ORDER) {
+    const match = pairs.find(
+      (pair) =>
+        normalizePairToken(pair.baseToken) === baseToken &&
+        normalizePairToken(pair.quoteToken) === quoteToken
+    );
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return undefined;
+}
+
+function getHighestQualityPair(pairs: BasePair[]) {
+  return [...pairs].sort((left, right) => getPairQualityScore(right) - getPairQualityScore(left))[0];
+}
+
+function getPairQualityScore(pair: BasePair) {
+  return pair.liquidity * 0.65 + pair.volume24h * 0.35;
+}
+
+function normalizePairToken(symbol: string) {
+  return symbol.trim().replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
