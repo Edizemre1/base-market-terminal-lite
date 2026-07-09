@@ -14,11 +14,32 @@ export type PairActivity = {
   wallet: string;
 };
 
+export type PairTxnWindow = {
+  buys: number;
+  sells: number;
+};
+
 export type BasePair = {
   dataSource?: "mock" | "dexscreener";
   stale?: boolean;
   staleReason?: string;
   pairAddress?: string;
+  baseTokenAddress?: string;
+  quoteTokenAddress?: string;
+  chainId?: string;
+  dexId?: string;
+  dexName?: string;
+  sourceUrl?: string;
+  priceNative?: string;
+  priceUsdValue?: number;
+  liquidityUsd?: number;
+  volumes?: Partial<Record<"m5" | "h1" | "h6" | "h24", number>>;
+  priceChanges?: Partial<Record<"m5" | "h1" | "h6" | "h24", number>>;
+  txns?: Partial<Record<"m5" | "h1" | "h6" | "h24", PairTxnWindow>>;
+  fdv?: number;
+  marketCap?: number;
+  pairCreatedAt?: string;
+  pairCreatedAtMs?: number;
   id: string;
   pair: string;
   baseToken: string;

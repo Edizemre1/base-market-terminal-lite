@@ -259,7 +259,7 @@ function toPinnedPair(pair: BasePair): PinnedPair {
     pair: pair.pair,
     baseToken: pair.baseToken,
     quoteToken: pair.quoteToken,
-    dex: pair.dex,
+    dex: pair.dexName ?? pair.dex,
     price: pair.price,
     priceUsd: pair.priceUsd,
     change24h: pair.change24h,

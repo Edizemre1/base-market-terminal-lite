@@ -43,7 +43,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "100%", ok: true },
       { label: "Holder concentration", value: "18.6%", ok: true },
       { label: "Deployer activity", value: "Low", ok: true },
-      { label: "Safety score", value: "27 / 100", ok: true }
+      { label: "Demo score", value: "27 / 100", ok: true }
     ],
     liquidityDetail: {
       poolLiquidity: "$184.2K",
@@ -99,7 +99,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "84%", ok: true },
       { label: "Holder concentration", value: "24.4%", ok: true },
       { label: "Deployer activity", value: "Medium", ok: false },
-      { label: "Safety score", value: "36 / 100", ok: true }
+      { label: "Demo score", value: "36 / 100", ok: true }
     ],
     liquidityDetail: {
       poolLiquidity: "$92.7K",
@@ -155,7 +155,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "92%", ok: true },
       { label: "Holder concentration", value: "21.1%", ok: true },
       { label: "Deployer activity", value: "Low", ok: true },
-      { label: "Safety score", value: "31 / 100", ok: true }
+      { label: "Demo score", value: "31 / 100", ok: true }
     ],
     liquidityDetail: {
       poolLiquidity: "$76.3K",
@@ -211,7 +211,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "71%", ok: false },
       { label: "Holder concentration", value: "33.8%", ok: false },
       { label: "Deployer activity", value: "Medium", ok: false },
-      { label: "Safety score", value: "54 / 100", ok: false }
+      { label: "Demo score", value: "54 / 100", ok: false }
     ],
     liquidityDetail: {
       poolLiquidity: "$61.9K",
@@ -267,7 +267,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "80%", ok: true },
       { label: "Holder concentration", value: "26.9%", ok: true },
       { label: "Deployer activity", value: "Medium", ok: false },
-      { label: "Safety score", value: "42 / 100", ok: true }
+      { label: "Demo score", value: "42 / 100", ok: true }
     ],
     liquidityDetail: {
       poolLiquidity: "$88.1K",
@@ -323,7 +323,7 @@ export const mockBasePairs: BasePair[] = [
       { label: "LP lock", value: "76%", ok: false },
       { label: "Holder concentration", value: "29.2%", ok: true },
       { label: "Deployer activity", value: "Medium", ok: false },
-      { label: "Safety score", value: "47 / 100", ok: true }
+      { label: "Demo score", value: "47 / 100", ok: true }
     ],
     liquidityDetail: {
       poolLiquidity: "$141.6K",

@@ -35,10 +35,13 @@ type DexPair = {
   chainId?: string;
   dexId?: string;
   pairAddress?: string;
+  url?: string;
   baseToken?: DexToken;
   quoteToken?: DexToken;
   priceNative?: string;
   priceUsd?: string | null;
+  fdv?: number | null;
+  marketCap?: number | null;
   txns?: Record<string, DexTxnWindow | undefined>;
   volume?: Record<string, number | undefined>;
   priceChange?: Record<string, number | undefined> | null;
@@ -228,10 +231,29 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const momentumScore = getMomentumScore({ change24h, liquidity, volume24h, totalTxns });
   const priceNative = pair.priceNative ?? pair.priceUsd ?? "0";
   const priceUsd = toNumber(pair.priceUsd);
+  const fdv = toNumber(pair.fdv);
+  const marketCap = toNumber(pair.marketCap);
+  const pairCreatedAtMs = toNumber(pair.pairCreatedAt);
 
   return {
     dataSource: "dexscreener",
     pairAddress: pairAddress.toLowerCase(),
+    baseTokenAddress: baseToken.address?.toLowerCase(),
+    quoteTokenAddress: quoteToken.address?.toLowerCase(),
+    chainId: pair.chainId,
+    dexId: pair.dexId,
+    dexName: formatDexName(pair.dexId),
+    sourceUrl: pair.url ?? `https://dexscreener.com/base/${pairAddress}`,
+    priceNative,
+    priceUsdValue: priceUsd,
+    liquidityUsd: liquidity,
+    volumes: normalizeNumberWindows(pair.volume),
+    priceChanges: normalizeSignedNumberWindows(pair.priceChange ?? undefined),
+    txns: normalizeTxnWindows(pair.txns),
+    fdv: fdv > 0 ? fdv : undefined,
+    marketCap: marketCap > 0 ? marketCap : undefined,
+    pairCreatedAt: pairCreatedAtMs > 0 ? new Date(pairCreatedAtMs).toISOString() : undefined,
+    pairCreatedAtMs: pairCreatedAtMs > 0 ? pairCreatedAtMs : undefined,
     id: pairAddress.toLowerCase(),
     pair: `${baseToken.symbol} / ${quoteToken.symbol}`,
     baseToken: baseToken.symbol,
@@ -239,7 +261,7 @@ function normalizePair(pair: DexPair): BasePair | undefined {
     project: baseToken.name ?? `${baseToken.symbol} on Base`,
     address: shortenAddress(baseToken.address ?? pairAddress),
     route: `${quoteToken.symbol} / ${baseToken.symbol}`,
-    dex: pair.dexId ?? "DexScreener",
+    dex: formatDexName(pair.dexId),
     age: formatAgeLabel(ageMinutes),
     ageMinutes,
     price: formatNativePrice(priceNative),
@@ -309,7 +331,7 @@ function getDerivedRiskDetailsFromValues(riskScore: number): PairRiskDetails {
       { label: "LP lock", value: "Unknown", ok: false },
       { label: "Holder concentration", value: "Not provided", ok: false },
       { label: "Deployer activity", value: "Not provided", ok: false },
-      { label: "Safety score", value: `${riskScore} / 100 derived UI`, ok: false }
+      { label: "Demo score", value: `${riskScore} / 100 derived UI`, ok: false }
     ]
   };
 }
@@ -338,6 +360,64 @@ function getActivityRow(
     value: formatUsd(toNumber(volume)),
     wallet: `${symbol} aggregate`
   };
+}
+
+function normalizeNumberWindows(windows: Record<string, number | undefined> | undefined | null) {
+  return {
+    m5: getPositiveWindowValue(windows?.m5),
+    h1: getPositiveWindowValue(windows?.h1),
+    h6: getPositiveWindowValue(windows?.h6),
+    h24: getPositiveWindowValue(windows?.h24)
+  };
+}
+
+function normalizeSignedNumberWindows(
+  windows: Record<string, number | undefined> | undefined | null
+) {
+  return {
+    m5: getFiniteWindowValue(windows?.m5),
+    h1: getFiniteWindowValue(windows?.h1),
+    h6: getFiniteWindowValue(windows?.h6),
+    h24: getFiniteWindowValue(windows?.h24)
+  };
+}
+
+function normalizeTxnWindows(windows: Record<string, DexTxnWindow | undefined> | undefined) {
+  return {
+    m5: normalizeTxnWindow(windows?.m5),
+    h1: normalizeTxnWindow(windows?.h1),
+    h6: normalizeTxnWindow(windows?.h6),
+    h24: normalizeTxnWindow(windows?.h24)
+  };
+}
+
+function normalizeTxnWindow(window: DexTxnWindow | undefined) {
+  if (!window) {
+    return undefined;
+  }
+
+  const buys = toNumber(window.buys);
+  const sells = toNumber(window.sells);
+
+  if (buys <= 0 && sells <= 0) {
+    return undefined;
+  }
+
+  return { buys, sells };
+}
+
+function getPositiveWindowValue(value: number | undefined) {
+  const parsed = toNumber(value);
+  return parsed > 0 ? parsed : undefined;
+}
+
+function getFiniteWindowValue(value: number | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function getDerivedRiskScore({
@@ -555,6 +635,18 @@ function formatUsd(value: number, maximumFractionDigits = 1) {
 
 function formatSigned(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatDexName(dexId: string | undefined) {
+  if (!dexId) {
+    return "DexScreener";
+  }
+
+  return dexId
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function shortenAddress(address: string) {
