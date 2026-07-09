@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { cx } from "@/lib/format";
 
 type TokenAvatarProps = {
@@ -16,16 +17,40 @@ const sizeClassNames = {
   lg: "h-9 w-9 text-[12px]"
 };
 
-export function BaseNetworkIcon({ className }: { className?: string }) {
+export function MergenMark({ className }: { className?: string }) {
   return (
     <span
       className={cx(
-        "inline-flex h-5 min-w-9 shrink-0 items-center justify-center border border-base-blue/25 bg-base-blue/5 px-1 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-base-electric",
+        "inline-flex h-7 w-5 shrink-0 items-center justify-center",
         className
       )}
+      aria-label="Mergen.finance"
+    >
+      <Image
+        src="/brand/mergen-mark.svg"
+        alt=""
+        width={20}
+        height={27}
+        className="h-full w-auto object-contain"
+        priority
+      />
+    </span>
+  );
+}
+
+export function BaseNetworkIcon({ className }: { className?: string }) {
+  return (
+    <span
+      className={cx("inline-flex h-5 w-5 shrink-0 items-center justify-center", className)}
       aria-label="Base network"
     >
-      BASE
+      <Image
+        src="/brand/base-logo.png"
+        alt=""
+        width={20}
+        height={20}
+        className="h-full w-full object-contain"
+      />
     </span>
   );
 }

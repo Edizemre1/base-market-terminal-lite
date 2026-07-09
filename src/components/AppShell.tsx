@@ -16,7 +16,7 @@ import { Suspense, useMemo, useState, type KeyboardEvent, type ReactNode } from 
 import type { MarketDataMode } from "@/data/providers";
 import { formatCompactCurrency, cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
-import { BaseNetworkIcon, PairAvatarStack } from "@/components/TokenIdentity";
+import { BaseNetworkIcon, MergenMark, PairAvatarStack } from "@/components/TokenIdentity";
 import type { BasePair } from "@/types/baseTerminal";
 import { APP_VERSION } from "@/lib/appInfo";
 
@@ -38,11 +38,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(196px,232px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
-            <Link href="/" className="flex min-w-0 items-center gap-2">
-              <span className="grid h-6 w-6 shrink-0 place-items-center border border-base-mint/45 bg-base-mint/10 font-mono text-[11px] font-semibold text-base-mint">
-                M
-              </span>
+          <div className="grid h-full grid-cols-[minmax(206px,242px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
+            <Link href="/" className="flex min-w-0 items-center gap-2.5">
+              <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
                 <span
                   className="block truncate text-[13px] font-semibold leading-4 text-base-text"
@@ -62,7 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <TopChip
                 label="Base Mainnet"
                 tone="mint"
-                icon={<BaseNetworkIcon className="h-4 min-w-8 text-[8px]" />}
+                icon={<BaseNetworkIcon className="h-4 w-4" />}
               />
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
@@ -107,12 +105,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-text">
                   Built on Base
                 </p>
-                <BaseNetworkIcon className="h-4 min-w-8 text-[8px]" />
+                <BaseNetworkIcon className="h-5 w-5" />
               </div>
               <p className="text-[11px] leading-4 text-base-muted">
-                Public read-only swap terminal using Base ecosystem market data.
+                Public read-only demo powered by Base ecosystem market data.
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-1 font-mono text-[10px]">
+              <div className="mt-2 grid grid-cols-1 gap-1 font-mono text-[10px]">
+                <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
+                  Network
+                  <span className="block text-base-text">Base Mainnet</span>
+                </span>
                 <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
                   Chain
                   <span className="block text-base-text">8453</span>
@@ -125,6 +127,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Suspense fallback={<SidebarNetworkCopy mode="mock" />}>
                 <SidebarNetworkCard />
               </Suspense>
+              <p className="mt-2 border-t border-base-line pt-2 text-[10px] leading-4 text-base-muted">
+                No wallet connection. No transactions can be executed.
+              </p>
             </div>
             <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-base-muted">
               <span>Public demo.</span>

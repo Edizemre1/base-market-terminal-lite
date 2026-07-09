@@ -252,6 +252,19 @@ function getDefaultPairId({
   volumeInflows: BasePair[];
   momentumPairs: BasePair[];
 }) {
+  const orderedPairs = [...newPairs, ...volumeInflows, ...momentumPairs];
+  const liveOhlcvPairs = orderedPairs.filter(isLivePairWithOhlcv);
+  const preferredOhlcvPair =
+    liveOhlcvPairs.find(
+      (pair) =>
+        pair.baseToken.toUpperCase() === "VIRTUAL" &&
+        pair.quoteToken.toUpperCase() === "WETH"
+    ) ?? liveOhlcvPairs[0];
+
+  if (preferredOhlcvPair) {
+    return preferredOhlcvPair.id;
+  }
+
   const livePair =
     newPairs.find(isLivePair) ??
     volumeInflows.find(isLivePair) ??
@@ -266,4 +279,8 @@ function getDefaultPairId({
 
 function isLivePair(pair: BasePair) {
   return pair.dataSource === "dexscreener";
+}
+
+function isLivePairWithOhlcv(pair: BasePair) {
+  return isLivePair(pair) && pair.chartSource === "geckoterminal";
 }
