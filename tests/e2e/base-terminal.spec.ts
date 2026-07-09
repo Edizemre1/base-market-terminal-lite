@@ -88,6 +88,27 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
     await expect(page.getByTestId("review-swap-button")).toBeDisabled();
   });
+
+  test("status and health surfaces expose safe read-only metadata", async ({ page, request }) => {
+    const response = await request.get("/api/health");
+    expect(response.ok()).toBeTruthy();
+    const health = await response.json();
+
+    expect(health).toMatchObject({
+      ok: true,
+      app: "Base Terminal Lite",
+      version: "0.1.0",
+      readOnly: true
+    });
+    expect(JSON.stringify(health).toLowerCase()).not.toContain("secret");
+    expect(JSON.stringify(health).toLowerCase()).not.toContain("api_key");
+
+    await page.goto("/status");
+    await expect(page.getByRole("heading", { name: "Public demo status" })).toBeVisible();
+    await expect(page.getByText("No transaction execution")).toBeVisible();
+    await expect(page.getByText("No API keys or secrets are exposed")).toBeVisible();
+    await expect(page.getByText("CI smoke tests")).toBeVisible();
+  });
 });
 
 async function expectTerminalShell(page: Page) {

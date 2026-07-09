@@ -1,8 +1,12 @@
 # Base Terminal Lite
 
-Standalone public MVP for a focused Base on-chain swap/radar terminal. The app defaults to local mock data and can optionally use read-only public DexScreener data for Base pairs.
+Standalone public MVP for a focused read-only Base on-chain swap/radar terminal. The app defaults to local mock data and can optionally use read-only public DexScreener data for Base pairs.
 
 Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
+
+Public status: `/status`
+
+Health endpoint: `/api/health`
 
 ## Safety Boundaries
 
@@ -44,6 +48,12 @@ Selected pair details can show public read-only provider fields such as addresse
 Radar filters, sorting, and presets are local read-only views over the loaded provider snapshot. Presets are transparent filter/sort combinations, not financial advice, private scoring, or trading recommendations.
 
 No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, or transaction building.
+
+## Public Demo Boundary
+
+Base Terminal Lite is a public read-only demo. Private or production transaction work belongs behind separate reviewed boundaries. Builder Code/ERC-8021 attribution belongs to later private transaction work, not this public demo yet.
+
+See [Public Demo Boundary](docs/public-demo-boundary.md) for the concise public/private boundary.
 
 ## What Is Included
 
@@ -87,6 +97,7 @@ npm run test:e2e
 ```text
 src/app/                 App Router pages
 src/components/          Reusable UI components
+docs/                    Public demo boundary notes
 src/data/                Mock Base pair data, provider layer, and builder log content
 src/data/providers/      Read-only market data provider contract and adapters
 src/lib/                 Formatting and utility helpers
