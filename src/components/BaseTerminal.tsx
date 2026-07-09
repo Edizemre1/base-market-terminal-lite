@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
-import { useTerminalSearch, type PinnedPair } from "@/components/TerminalSearchContext";
+import {
+  useTerminalSearch,
+  type PinnedPair,
+  type ProviderHealthState
+} from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { PairChartResult } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatNumber, formatPercent } from "@/lib/format";
@@ -11,6 +15,9 @@ import type { BasePair } from "@/types/baseTerminal";
 type FeedKind = "new" | "inflow" | "momentum";
 type DetailTab = "overview" | "risk" | "liquidity" | "activity";
 type ChartRefreshStatus = "idle" | "refreshing" | "updated" | "using-last";
+
+const SNAPSHOT_REFRESH_MS = 60_000;
+const SNAPSHOT_STALE_MS = 3 * SNAPSHOT_REFRESH_MS;
 
 const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -28,6 +35,7 @@ export function BaseTerminal({
 }) {
   const {
     registerPairs,
+    registerProviderHealth,
     registerSelectedPair,
     registerSelectPairHandler,
     pinnedPairs,
@@ -35,6 +43,7 @@ export function BaseTerminal({
     togglePinnedPair,
     unpinPinnedPair
   } = useTerminalSearch();
+  const [snapshotData, setSnapshotData] = useState(data);
   const [selectedPairId, setSelectedPairId] = useState(
     () => getPairFromParam(data.allPairs, initialPairParam)?.id ?? data.defaultPairId
   );
@@ -42,21 +51,38 @@ export function BaseTerminal({
   const [amount, setAmount] = useState("0.10");
   const [chartOverrides, setChartOverrides] = useState<Record<string, Partial<BasePair>>>({});
   const [chartRefreshStatus, setChartRefreshStatus] = useState<Record<string, ChartRefreshStatus>>({});
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() =>
+    buildProviderHealth(data, "idle")
+  );
+  const snapshotRef = useRef(snapshotData);
+  const selectedPairRef = useRef<BasePair | undefined>(undefined);
+  const snapshotRefreshInFlightRef = useRef(false);
+  const snapshotRefreshRequestIdRef = useRef(0);
+  const chartRefreshRequestIds = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    setSnapshotData(data);
+    setProviderHealth(buildProviderHealth(data, "idle"));
+  }, [data]);
+
+  useEffect(() => {
+    snapshotRef.current = snapshotData;
+  }, [snapshotData]);
 
   useEffect(() => {
     const nextPair =
-      getPairFromParam(data.allPairs, initialPairParam) ??
-      data.allPairs.find((pair) => pair.id === selectedPairId) ??
-      data.allPairs.find((pair) => pair.id === data.defaultPairId) ??
-      data.allPairs[0];
+      getPairFromParam(snapshotData.allPairs, initialPairParam) ??
+      snapshotData.allPairs.find((pair) => pair.id === selectedPairId) ??
+      snapshotData.allPairs.find((pair) => pair.id === snapshotData.defaultPairId) ??
+      snapshotData.allPairs[0];
 
     if (nextPair && nextPair.id !== selectedPairId) {
       setSelectedPairId(nextPair.id);
     }
-  }, [data.allPairs, data.defaultPairId, initialPairParam, selectedPairId]);
+  }, [snapshotData.allPairs, snapshotData.defaultPairId, initialPairParam, selectedPairId]);
 
   const selectedPair =
-    data.allPairs.find((pair) => pair.id === selectedPairId) ?? data.allPairs[0];
+    snapshotData.allPairs.find((pair) => pair.id === selectedPairId) ?? snapshotData.allPairs[0];
   const selectedPairWithChart = useMemo(
     () =>
       selectedPair
@@ -86,7 +112,7 @@ export function BaseTerminal({
 
   const handleSelectPairById = useCallback(
     (pairId: string) => {
-      const nextPair = data.allPairs.find((pair) => pair.id === pairId);
+      const nextPair = snapshotRef.current.allPairs.find((pair) => pair.id === pairId);
 
       if (!nextPair) {
         return;
@@ -95,12 +121,75 @@ export function BaseTerminal({
       setSelectedPairId(nextPair.id);
       updatePairQuery(nextPair);
     },
-    [data.allPairs, updatePairQuery]
+    [updatePairQuery]
   );
+
+  const refreshProviderSnapshot = useCallback(async () => {
+    if (snapshotRefreshInFlightRef.current) {
+      return;
+    }
+
+    const requestId = snapshotRefreshRequestIdRef.current + 1;
+    snapshotRefreshRequestIdRef.current = requestId;
+    snapshotRefreshInFlightRef.current = true;
+    setProviderHealth((current) =>
+      current
+        ? { ...current, status: "refreshing", failureReason: undefined }
+        : buildProviderHealth(snapshotRef.current, "refreshing")
+    );
+
+    try {
+      const mode = snapshotRef.current.mode === "dexscreener" ? "dexscreener" : "mock";
+      const response = await fetch(`/api/market-snapshot?data=${mode}`, {
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error("Snapshot refresh failed");
+      }
+
+      const nextSnapshot = (await response.json()) as MarketTerminalSnapshot;
+
+      if (snapshotRefreshRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      if (shouldKeepCurrentSnapshotOnRefresh(snapshotRef.current, nextSnapshot)) {
+        throw new Error("Provider returned fallback-only refresh");
+      }
+
+      const snapshotWithSelection = preserveSelectedPair(nextSnapshot, selectedPairRef.current);
+      setSnapshotData(snapshotWithSelection);
+      setProviderHealth(buildProviderHealth(snapshotWithSelection, "idle"));
+    } catch {
+      if (snapshotRefreshRequestIdRef.current === requestId) {
+        setProviderHealth((current) =>
+          current
+            ? {
+                ...current,
+                status: "failed",
+                stale: true,
+                failureReason: "Refresh failed; using last good data."
+              }
+            : buildProviderHealth(
+                snapshotRef.current,
+                "failed",
+                "Refresh failed; using last good data."
+              )
+        );
+      }
+    } finally {
+      if (snapshotRefreshRequestIdRef.current === requestId) {
+        snapshotRefreshInFlightRef.current = false;
+      }
+    }
+  }, []);
 
   const refreshPairChart = useCallback(
     async (pair: BasePair) => {
       const chartKey = getChartCacheKey(pair);
+      const requestId = (chartRefreshRequestIds.current[chartKey] ?? 0) + 1;
+      chartRefreshRequestIds.current[chartKey] = requestId;
       setChartRefreshStatus((current) => ({ ...current, [chartKey]: "refreshing" }));
 
       try {
@@ -109,7 +198,7 @@ export function BaseTerminal({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             id: pair.id,
-            mode: data.mode,
+            mode: snapshotRef.current.mode,
             dataSource: pair.dataSource,
             pairAddress: pair.pairAddress,
             chart: pair.chart,
@@ -123,9 +212,13 @@ export function BaseTerminal({
 
         const result = (await response.json()) as PairChartResult;
         const expectedReadOnlyOhlcv =
-          data.mode === "dexscreener" &&
+          snapshotRef.current.mode === "dexscreener" &&
           pair.dataSource === "dexscreener" &&
           Boolean(pair.pairAddress);
+
+        if (chartRefreshRequestIds.current[chartKey] !== requestId) {
+          return;
+        }
 
         if (expectedReadOnlyOhlcv && result.source !== "geckoterminal") {
           setChartRefreshStatus((current) => ({ ...current, [chartKey]: "using-last" }));
@@ -145,23 +238,35 @@ export function BaseTerminal({
         }));
         setChartRefreshStatus((current) => ({ ...current, [chartKey]: "updated" }));
       } catch {
-        setChartRefreshStatus((current) => ({ ...current, [chartKey]: "using-last" }));
+        if (chartRefreshRequestIds.current[chartKey] === requestId) {
+          setChartRefreshStatus((current) => ({ ...current, [chartKey]: "using-last" }));
+        }
       }
     },
-    [data.mode]
+    []
   );
 
   useEffect(() => {
-    registerPairs(data.allPairs);
+    registerPairs(snapshotData.allPairs);
 
     return () => registerPairs([]);
-  }, [data.allPairs, registerPairs]);
+  }, [snapshotData.allPairs, registerPairs]);
+
+  useEffect(() => {
+    registerProviderHealth(providerHealth);
+
+    return () => registerProviderHealth(undefined);
+  }, [providerHealth, registerProviderHealth]);
 
   useEffect(() => {
     registerSelectedPair(selectedPairWithChart?.id);
 
     return () => registerSelectedPair(undefined);
   }, [registerSelectedPair, selectedPairWithChart?.id]);
+
+  useEffect(() => {
+    selectedPairRef.current = selectedPairWithChart;
+  }, [selectedPairWithChart]);
 
   useEffect(() => {
     registerSelectPairHandler(handleSelectPairById);
@@ -176,6 +281,18 @@ export function BaseTerminal({
 
     void refreshPairChart(selectedPair);
   }, [refreshPairChart, selectedPair]);
+
+  useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshProviderSnapshot();
+    }, SNAPSHOT_REFRESH_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [refreshProviderSnapshot, snapshotData.mode]);
 
   const estimatedOutput = useMemo(() => {
     if (!selectedPairWithChart) {
@@ -203,9 +320,9 @@ export function BaseTerminal({
 
   return (
     <main className="flex min-h-[calc(100vh-40px)] w-full flex-col overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
-      {data.fallbackReason ? (
+      {snapshotData.fallbackReason ? (
         <div className="mb-2 shrink-0 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
-          {data.fallbackReason}
+          {snapshotData.fallbackReason}
         </div>
       ) : null}
       <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
@@ -221,8 +338,8 @@ export function BaseTerminal({
             title="New Pairs"
             marker="A"
             kind="new"
-            pairs={data.newPairs}
-            showFallbackLabels={data.mode === "dexscreener"}
+            pairs={snapshotData.newPairs}
+            showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
             isPairPinned={isPairPinned}
@@ -232,8 +349,8 @@ export function BaseTerminal({
             title="Volume Inflow"
             marker="B"
             kind="inflow"
-            pairs={data.volumeInflows}
-            showFallbackLabels={data.mode === "dexscreener"}
+            pairs={snapshotData.volumeInflows}
+            showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
             isPairPinned={isPairPinned}
@@ -243,8 +360,8 @@ export function BaseTerminal({
             title="Momentum"
             marker="C"
             kind="momentum"
-            pairs={data.momentumPairs}
-            showFallbackLabels={data.mode === "dexscreener"}
+            pairs={snapshotData.momentumPairs}
+            showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
             isPairPinned={isPairPinned}
@@ -255,7 +372,7 @@ export function BaseTerminal({
         <section className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(132px,0.28fr)] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
           <SelectedPairPanel
             pair={selectedPairWithChart}
-            marketDataMode={data.mode}
+            marketDataMode={snapshotData.mode}
             chartRefreshStatus={
               chartRefreshStatus[getChartCacheKey(selectedPairWithChart)] ?? "idle"
             }
@@ -270,7 +387,7 @@ export function BaseTerminal({
 
         <SwapTicket
           pair={selectedPairWithChart}
-          marketDataMode={data.mode}
+          marketDataMode={snapshotData.mode}
           amount={amount}
           onAmountChange={setAmount}
           estimatedOutput={estimatedOutput}
@@ -315,6 +432,95 @@ function normalizePairParam(value: string) {
 
 function normalizePairIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function buildProviderHealth(
+  snapshot: MarketTerminalSnapshot,
+  status: ProviderHealthState["status"],
+  failureReason?: string
+): ProviderHealthState {
+  const lastSuccessAt = getSnapshotLastSuccessAt(snapshot);
+
+  return {
+    mode: snapshot.mode,
+    providerName: snapshot.providerName,
+    feedStatusLabel: snapshot.feedStatusLabel,
+    status,
+    lastSuccessAt,
+    stale: status === "failed" || isSnapshotStale(lastSuccessAt),
+    fallbackReason: snapshot.fallbackReason,
+    failureReason
+  };
+}
+
+function getSnapshotLastSuccessAt(snapshot: MarketTerminalSnapshot) {
+  return snapshot.generatedAt === "mock-static" ? undefined : snapshot.generatedAt;
+}
+
+function isSnapshotStale(lastSuccessAt: string | undefined) {
+  if (!lastSuccessAt) {
+    return false;
+  }
+
+  const timestamp = new Date(lastSuccessAt);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return false;
+  }
+
+  return Date.now() - timestamp.getTime() > SNAPSHOT_STALE_MS;
+}
+
+function preserveSelectedPair(
+  snapshot: MarketTerminalSnapshot,
+  selectedPair: BasePair | undefined
+): MarketTerminalSnapshot {
+  if (
+    !selectedPair ||
+    snapshot.allPairs.some((pair) => pairsRepresentSamePair(pair, selectedPair))
+  ) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    allPairs: [
+      {
+        ...selectedPair,
+        stale: true,
+        staleReason: "Not in latest provider snapshot"
+      },
+      ...snapshot.allPairs
+    ]
+  };
+}
+
+function shouldKeepCurrentSnapshotOnRefresh(
+  currentSnapshot: MarketTerminalSnapshot,
+  nextSnapshot: MarketTerminalSnapshot
+) {
+  return (
+    currentSnapshot.mode === "dexscreener" &&
+    nextSnapshot.mode === "dexscreener" &&
+    hasLiveProviderPairs(currentSnapshot) &&
+    !hasLiveProviderPairs(nextSnapshot) &&
+    Boolean(nextSnapshot.fallbackReason)
+  );
+}
+
+function hasLiveProviderPairs(snapshot: MarketTerminalSnapshot) {
+  return snapshot.allPairs.some((pair) => pair.dataSource === "dexscreener");
+}
+
+function pairsRepresentSamePair(left: BasePair, right: BasePair) {
+  const leftPairAddress = left.pairAddress?.toLowerCase();
+  const rightPairAddress = right.pairAddress?.toLowerCase();
+
+  return (
+    left.id === right.id ||
+    (Boolean(leftPairAddress && rightPairAddress) && leftPairAddress === rightPairAddress) ||
+    normalizePairIdentity(left.pair) === normalizePairIdentity(right.pair)
+  );
 }
 
 function PinnedPairsPanel({
@@ -637,6 +843,11 @@ function SelectedPairPanel({
             {isDemoFallbackSelected ? (
               <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
                 Demo fallback selected
+              </span>
+            ) : null}
+            {pair.stale ? (
+              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
+                {pair.staleReason ?? "Stale selected pair"}
               </span>
             ) : null}
             <Copy size={12} className="shrink-0 text-base-muted" aria-hidden="true" />

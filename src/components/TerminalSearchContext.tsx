@@ -9,10 +9,24 @@ import {
   useState,
   type ReactNode
 } from "react";
+import type { FeedStatusLabel, MarketDataMode } from "@/data/providers/types";
 import type { BasePair } from "@/types/baseTerminal";
 
 type SelectPairHandler = (pairId: string) => void;
 const PINNED_PAIRS_STORAGE_KEY = "base-terminal-lite:pinned-pairs";
+
+export type ProviderRefreshStatus = "idle" | "refreshing" | "failed";
+
+export type ProviderHealthState = {
+  mode: MarketDataMode;
+  providerName: string;
+  feedStatusLabel: FeedStatusLabel;
+  status: ProviderRefreshStatus;
+  lastSuccessAt?: string;
+  stale: boolean;
+  fallbackReason?: string;
+  failureReason?: string;
+};
 
 export type PinnedPair = {
   key: string;
@@ -36,8 +50,10 @@ export type PinnedPair = {
 type TerminalSearchContextValue = {
   pairs: BasePair[];
   pinnedPairs: PinnedPair[];
+  providerHealth: ProviderHealthState | undefined;
   selectedPairId: string | undefined;
   registerPairs: (pairs: BasePair[]) => void;
+  registerProviderHealth: (health: ProviderHealthState | undefined) => void;
   registerSelectedPair: (pairId: string | undefined) => void;
   registerSelectPairHandler: (handler: SelectPairHandler | undefined) => void;
   selectPair: (pairId: string) => void;
@@ -52,6 +68,7 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
   const [pairs, setPairs] = useState<BasePair[]>([]);
   const [selectedPairId, setSelectedPairId] = useState<string>();
   const [selectPairHandler, setSelectPairHandler] = useState<SelectPairHandler>();
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthState>();
   const [pinnedSnapshots, setPinnedSnapshots] = useState<PinnedPair[]>([]);
   const [pinsLoaded, setPinsLoaded] = useState(false);
 
@@ -73,6 +90,10 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
 
   const registerPairs = useCallback((nextPairs: BasePair[]) => {
     setPairs(nextPairs);
+  }, []);
+
+  const registerProviderHealth = useCallback((health: ProviderHealthState | undefined) => {
+    setProviderHealth(health);
   }, []);
 
   const pinnedPairs = useMemo(
@@ -135,8 +156,10 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
     () => ({
       pairs,
       pinnedPairs,
+      providerHealth,
       selectedPairId,
       registerPairs,
+      registerProviderHealth,
       registerSelectedPair,
       registerSelectPairHandler,
       selectPair,
@@ -147,8 +170,10 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
     [
       pairs,
       pinnedPairs,
+      providerHealth,
       selectedPairId,
       registerPairs,
+      registerProviderHealth,
       registerSelectedPair,
       registerSelectPairHandler,
       selectPair,
@@ -265,7 +290,7 @@ function toStoredPinnedPair(pair: PinnedPair) {
 }
 
 function findCurrentPair(pairs: BasePair[], pinnedPair: PinnedPair) {
-  return pairs.find((pair) => pairsMatchPinnedPair(pair, pinnedPair));
+  return pairs.find((pair) => !pair.stale && pairsMatchPinnedPair(pair, pinnedPair));
 }
 
 function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {

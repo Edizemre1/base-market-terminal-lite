@@ -16,6 +16,8 @@ export type PairActivity = {
 
 export type BasePair = {
   dataSource?: "mock" | "dexscreener";
+  stale?: boolean;
+  staleReason?: string;
   pairAddress?: string;
   id: string;
   pair: string;

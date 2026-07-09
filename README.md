@@ -37,6 +37,8 @@ Topbar search is local and read-only over the loaded provider snapshot. Selected
 
 Watchlist pins are browser-local and stored in `localStorage`. There is no account, backend, trading, or transaction execution attached to pinned pairs.
 
+In read-only market data mode, the terminal refreshes provider snapshots about every 60 seconds without reloading the page. The last good snapshot remains visible if a provider refresh fails, and compact stale/failed states show when data is old or unavailable.
+
 No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, or transaction building.
 
 ## What Is Included
