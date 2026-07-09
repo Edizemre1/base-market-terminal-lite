@@ -3,7 +3,7 @@ import { Copy, ExternalLink, LockKeyhole, RefreshCw, Settings } from "lucide-rea
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { ChartTimeframe } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
-import { BaseNetworkIcon, PairAvatarStack } from "@/components/TokenIdentity";
+import { PairAvatarStack } from "@/components/TokenIdentity";
 import type { BasePair } from "@/types/baseTerminal";
 import type { ChartRefreshStatus } from "@/components/base-terminal/types";
 
@@ -55,8 +55,7 @@ export function SelectedPairPanel({
               {pair.pair}
             </h1>
             <span className="inline-flex items-center gap-1 border border-base-blue/25 bg-base-blue/5 px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-electric">
-              <BaseNetworkIcon className="h-3 w-3" />
-              Base
+              Base Mainnet
             </span>
             <span className="border border-base-mint/35 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-mint">
               {pair.dexName ?? pair.dex}
@@ -235,6 +234,8 @@ function ChartPanel({
   const priceHeight = 198;
   const volumeTop = 214;
   const volumeHeight = 42;
+  const hasReadOnlyOhlcv =
+    pair.chartSource === "geckoterminal" && (pair.chartCandles?.length ?? 0) > 0;
   const candles = useMemo(() => getDisplayCandles(pair), [pair]);
   const visibleCandles = useMemo(
     () => candles.slice(-getVisibleCandleCount(timeframe)),
@@ -263,14 +264,18 @@ function ChartPanel({
   const latest = candles[candles.length - 1];
   const previous = candles[candles.length - 2] ?? latest;
   const lastMove = latest.close - previous.close;
-  const chartLabel = pair.chartLabel ?? "Chart preview \u00b7 OHLCV unavailable";
+  const chartLabel = hasReadOnlyOhlcv
+    ? (pair.chartLabel ?? "OHLCV read-only \u00b7 cached chart")
+    : pair.dataSource === "mock"
+      ? "Mock preview data"
+      : "OHLCV unavailable";
   const statusMessage =
     refreshStatus === "refreshing"
       ? "Updating chart..."
       : refreshStatus === "using-last"
       ? "Using last available chart"
-      : pair.chartUnavailableReason && pair.chartSource !== "geckoterminal"
-        ? "Using synthetic fallback"
+      : !hasReadOnlyOhlcv
+        ? "Synthetic fallback - not real market data"
         : undefined;
 
   return (
@@ -286,15 +291,21 @@ function ChartPanel({
               {chartLabel}
             </span>
           </p>
-          <p className="mt-1 font-mono text-[10px] text-base-mint">
-            O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
-            {formatChartValue(latest.low)} C {formatChartValue(latest.close)} V{" "}
-            {formatCompactCurrency(latest.volume || pair.volume24h)}
-          </p>
+          {hasReadOnlyOhlcv ? (
+            <p className="mt-1 font-mono text-[10px] text-base-mint">
+              O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
+              {formatChartValue(latest.low)} C {formatChartValue(latest.close)} V{" "}
+              {formatCompactCurrency(latest.volume || pair.volume24h)}
+            </p>
+          ) : (
+            <p className="mt-1 font-mono text-[10px] text-base-amber">
+              Synthetic fallback - not real market data
+            </p>
+          )}
           <p className="font-mono text-[10px] text-base-muted">
-            {pair.chartSource === "geckoterminal"
+            {hasReadOnlyOhlcv
               ? "Read-only candles - Base"
-              : `Synthetic path only - ${pair.dex} (Base)`}
+              : pair.chartUnavailableReason ?? "OHLCV unavailable for this selected pair"}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-base-muted">
             <span>Last updated {formatChartTimestamp(pair.chartUpdatedAt)}</span>
@@ -336,16 +347,24 @@ function ChartPanel({
             />
             {refreshStatus === "refreshing" ? "Refreshing" : "Refresh chart"}
           </button>
-          <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
-            Last {formatChartValue(latest.close)}
+          <span
+            className={cx(
+              "border px-1.5 py-0.5 font-mono text-[10px]",
+              hasReadOnlyOhlcv
+                ? "border-base-mint/40 bg-base-mint/10 text-base-mint"
+                : "border-base-amber/45 bg-base-amber/10 text-base-amber"
+            )}
+          >
+            {hasReadOnlyOhlcv ? `Last ${formatChartValue(latest.close)}` : "Preview only"}
           </span>
         </div>
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="pointer-events-none h-[250px] w-full max-w-full shrink-0 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1"
-        aria-hidden="true"
-      >
+      {hasReadOnlyOhlcv ? (
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="pointer-events-none h-[250px] w-full max-w-full shrink-0 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1"
+          aria-hidden="true"
+        >
         <defs>
           <linearGradient id={`chart-fill-${pair.id}`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgb(var(--color-mint))" stopOpacity="0.18" />
@@ -449,7 +468,104 @@ function ChartPanel({
           {lastMove >= 0 ? "+" : ""}
           {formatChartValue(lastMove)}
         </text>
+        </svg>
+      ) : (
+        <ChartUnavailablePlaceholder
+          pair={pair}
+          statusMessage={statusMessage}
+          timeframe={timeframe}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChartUnavailablePlaceholder({
+  pair,
+  statusMessage,
+  timeframe
+}: {
+  pair: BasePair;
+  statusMessage?: string;
+  timeframe: ChartTimeframe;
+}) {
+  const headline = pair.dataSource === "mock" ? "Mock preview data" : "OHLCV unavailable";
+  const reason =
+    pair.chartUnavailableReason ??
+    "Read-only OHLCV is not available for this selected pair yet.";
+
+  return (
+    <div className="relative flex h-[250px] w-full max-w-full shrink-0 overflow-hidden border-t border-base-line bg-base-elevated/30 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1">
+      <div
+        className="pointer-events-none absolute inset-2 border border-dashed border-base-amber/45 bg-base-amber/5"
+        aria-hidden="true"
+      />
+      <svg
+        viewBox="0 0 820 270"
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-75"
+        aria-hidden="true"
+      >
+        {Array.from({ length: 6 }).map((_, index) => (
+          <line
+            key={`placeholder-h-${index}`}
+            x1="0"
+            x2="820"
+            y1={32 + index * 38}
+            y2={32 + index * 38}
+            stroke="rgb(var(--color-line))"
+            strokeDasharray="3 8"
+            strokeOpacity="0.6"
+          />
+        ))}
+        {Array.from({ length: 8 }).map((_, index) => (
+          <rect
+            key={`placeholder-block-${index}`}
+            x={70 + index * 84}
+            y={104 + (index % 3) * 12}
+            width="36"
+            height="22"
+            fill="none"
+            stroke="rgb(var(--color-amber))"
+            strokeDasharray="5 5"
+            strokeOpacity="0.5"
+          />
+        ))}
+        <path
+          d="M120 72 L700 198 M120 198 L700 72"
+          fill="none"
+          stroke="rgb(var(--color-amber))"
+          strokeDasharray="10 12"
+          strokeOpacity="0.32"
+          strokeWidth="2"
+        />
+        <text
+          x="410"
+          y="148"
+          textAnchor="middle"
+          className="fill-base-amber font-mono text-[28px] font-semibold uppercase opacity-20"
+        >
+          DEMO
+        </text>
       </svg>
+      <div className="relative z-10 m-auto max-w-[430px] border border-base-amber/40 bg-base-panel/95 px-4 py-3 text-center">
+        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-base-amber">
+          {headline}
+        </p>
+        <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">
+          Synthetic fallback - not real market data
+        </p>
+        <p className="mt-2 text-[11px] leading-5 text-base-muted">{reason}</p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
+          <span className="border border-base-line bg-base-elevated px-1.5 py-0.5">
+            {timeframe.toUpperCase()} placeholder
+          </span>
+          {statusMessage ? (
+            <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 text-base-amber">
+              {statusMessage}
+            </span>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

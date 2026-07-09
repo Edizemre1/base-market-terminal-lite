@@ -325,6 +325,6 @@ function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
   }
 
   return pair.project && pair.project !== pair.baseToken
-    ? `${pair.project} - ${pair.dex}`
-    : pair.dex;
+    ? pair.project
+    : "Read-only Base pair";
 }

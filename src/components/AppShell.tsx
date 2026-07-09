@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
             <Link href="/" className="flex min-w-0 items-center gap-2">
-              <BaseNetworkIcon className="h-5 w-5" />
+              <BaseNetworkIcon />
               <span className="truncate text-[13px] font-semibold text-base-text">
                 Base Terminal Lite
               </span>
@@ -55,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <TopChip
                 label="Base Network Online"
                 tone="mint"
-                icon={<BaseNetworkIcon className="h-3.5 w-3.5" />}
+                icon={<BaseNetworkIcon className="h-4 min-w-8 text-[8px]" />}
               />
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
@@ -97,7 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mt-auto p-1.5">
             <div className="border border-base-line bg-base-elevated p-1.5">
               <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-                <BaseNetworkIcon className="h-4 w-4" />
+                <BaseNetworkIcon className="h-4 min-w-8 text-[8px]" />
                 Base Demo Network
               </div>
               <p className="font-mono text-[11px] text-base-text">Chain ID 8453</p>

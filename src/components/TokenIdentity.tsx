@@ -20,18 +20,12 @@ export function BaseNetworkIcon({ className }: { className?: string }) {
   return (
     <span
       className={cx(
-        "inline-grid place-items-center overflow-hidden rounded-full bg-base-blue",
-        className ?? "h-5 w-5"
+        "inline-flex h-5 min-w-9 shrink-0 items-center justify-center border border-base-blue/25 bg-base-blue/5 px-1 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-base-electric",
+        className
       )}
       aria-label="Base network"
     >
-      <svg viewBox="0 0 32 32" className="h-full w-full" aria-hidden="true">
-        <circle cx="16" cy="16" r="16" fill="#0052FF" />
-        <path
-          d="M16.08 25.6c5.1 0 9.3-4.02 9.58-9.05h-6.2a3.55 3.55 0 1 1-.06-1.28h6.26c-.38-4.93-4.54-8.87-9.58-8.87a9.6 9.6 0 0 0 0 19.2Z"
-          fill="white"
-        />
-      </svg>
+      BASE
     </span>
   );
 }
