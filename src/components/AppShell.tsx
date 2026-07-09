@@ -229,6 +229,8 @@ function getSearchResults(pairs: BasePair[], query: string) {
 function getSearchPairShape(pair: {
   id: string;
   pairAddress?: string;
+  baseTokenAddress?: string;
+  quoteTokenAddress?: string;
   address: string;
   pair: string;
   baseToken: string;
@@ -240,6 +242,8 @@ function getSearchPairShape(pair: {
     haystack: [
       pair.id,
       pair.pairAddress,
+      pair.baseTokenAddress,
+      pair.quoteTokenAddress,
       pair.address,
       pair.pair,
       pair.baseToken,
