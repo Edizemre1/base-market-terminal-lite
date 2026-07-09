@@ -1,9 +1,18 @@
 import type { BasePair, PairActivity } from "@/types/baseTerminal";
+import {
+  fetchJsonWithTimeout,
+  readArray,
+  readHttpUrl,
+  readNumber,
+  readRecord,
+  readString
+} from "./responseValidation";
 import type { MarketDataProvider, PairRiskDetails } from "./types";
 
 const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const BASE_CHAIN_ID = "base";
 const REVALIDATE_SECONDS = 60;
+const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_PROFILE_TOKENS = 12;
 const FEED_LIMIT = 8;
 const MIN_LIQUIDITY_USD = 10_000;
@@ -53,10 +62,6 @@ type DexPair = {
   pairCreatedAt?: number | null;
 };
 
-type DexSearchResponse = {
-  pairs?: DexPair[] | null;
-};
-
 type DexTokenProfile = {
   chainId?: string;
   tokenAddress?: string;
@@ -66,6 +71,28 @@ type DexPairBucket = {
   searchPairs: DexPair[];
   profilePairs: DexPair[];
 };
+
+export function parseDexSearchResponse(payload: unknown): DexPair[] {
+  const response = readRecord(payload);
+  return response ? parseDexPairList(response.pairs) : [];
+}
+
+export function parseDexTokenProfiles(payload: unknown): DexTokenProfile[] {
+  return readArray(payload)
+    .map(toDexTokenProfile)
+    .filter((profile): profile is DexTokenProfile => Boolean(profile));
+}
+
+export function parseDexPairList(payload: unknown): DexPair[] {
+  return readArray(payload)
+    .map(toDexPair)
+    .filter((pair): pair is DexPair => Boolean(pair));
+}
+
+export function normalizeDexScreenerPair(payload: unknown): BasePair | undefined {
+  const pair = toDexPair(payload);
+  return pair ? normalizePair(pair) : undefined;
+}
 
 export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
   const { searchPairs, profilePairs } = await loadDexScreenerPairs();
@@ -131,10 +158,10 @@ async function loadDexScreenerPairs(): Promise<DexPairBucket> {
 async function loadCuratedSearchPairs() {
   const searchResults = await Promise.all(
     CURATED_BASE_QUERIES.map(async (query) => {
-      const response = await fetchDexJson<DexSearchResponse>(
+      const response = await fetchDexJson(
         `/latest/dex/search?q=${encodeURIComponent(query)}`
       );
-      return filterBasePairs(response?.pairs ?? []);
+      return filterBasePairs(parseDexSearchResponse(response));
     })
   );
 
@@ -142,16 +169,20 @@ async function loadCuratedSearchPairs() {
 }
 
 async function loadProfilePairs() {
-  const profiles = await fetchDexJson<DexTokenProfile[]>("/token-profiles/latest/v1");
-  const baseProfiles = (profiles ?? [])
+  const profiles = parseDexTokenProfiles(
+    await fetchDexJson("/token-profiles/latest/v1")
+  );
+  const baseProfiles = profiles
     .filter((profile) => profile.chainId === BASE_CHAIN_ID && profile.tokenAddress)
     .slice(0, MAX_PROFILE_TOKENS);
   const pairResults = await Promise.all(
     baseProfiles.map(async (profile) => {
-      const pairs = await fetchDexJson<DexPair[]>(
-        `/token-pairs/v1/${BASE_CHAIN_ID}/${profile.tokenAddress}`
+      const pairs = parseDexPairList(
+        await fetchDexJson(
+          `/token-pairs/v1/${BASE_CHAIN_ID}/${profile.tokenAddress}`
+        )
       );
-      return selectProfilePairs(filterBasePairs(pairs ?? []));
+      return selectProfilePairs(filterBasePairs(pairs));
     })
   );
 
@@ -159,27 +190,156 @@ async function loadProfilePairs() {
 }
 
 async function fetchPairById(pairId: string) {
-  const response = await fetchDexJson<DexSearchResponse>(
+  const response = await fetchDexJson(
     `/latest/dex/pairs/${BASE_CHAIN_ID}/${pairId}`
   );
-  return filterBasePairs(response?.pairs ?? [])[0];
+  return filterBasePairs(parseDexSearchResponse(response))[0];
 }
 
-async function fetchDexJson<T>(path: string): Promise<T | undefined> {
-  try {
-    const response = await fetch(`${DEXSCREENER_API_BASE}${path}`, {
+async function fetchDexJson(path: string): Promise<unknown | undefined> {
+  return fetchJsonWithTimeout(
+    `${DEXSCREENER_API_BASE}${path}`,
+    {
       headers: { accept: "application/json" },
       next: { revalidate: REVALIDATE_SECONDS }
-    } as RequestInit & { next: { revalidate: number } });
+    },
+    REQUEST_TIMEOUT_MS
+  );
+}
 
-    if (!response.ok) {
-      return undefined;
-    }
+function toDexPair(payload: unknown): DexPair | undefined {
+  const pair = readRecord(payload);
 
-    return (await response.json()) as T;
-  } catch {
+  if (!pair) {
     return undefined;
   }
+
+  const normalized = {
+    chainId: readString(pair.chainId),
+    dexId: readString(pair.dexId),
+    pairAddress: readString(pair.pairAddress),
+    url: readHttpUrl(pair.url),
+    baseToken: toDexToken(pair.baseToken),
+    quoteToken: toDexToken(pair.quoteToken),
+    priceNative: readString(pair.priceNative),
+    priceUsd: readString(pair.priceUsd) ?? readNumber(pair.priceUsd)?.toString() ?? null,
+    fdv: readNumber(pair.fdv) ?? null,
+    marketCap: readNumber(pair.marketCap) ?? null,
+    txns: toDexTxnWindows(pair.txns),
+    volume: toNumberWindows(pair.volume),
+    priceChange: toNumberWindows(pair.priceChange) ?? null,
+    liquidity: toDexLiquidity(pair.liquidity),
+    pairCreatedAt: readNumber(pair.pairCreatedAt) ?? null
+  };
+
+  if (
+    !normalized.chainId &&
+    !normalized.pairAddress &&
+    !normalized.baseToken &&
+    !normalized.quoteToken
+  ) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+function toDexToken(payload: unknown): DexToken | undefined {
+  const token = readRecord(payload);
+
+  if (!token) {
+    return undefined;
+  }
+
+  const address = readString(token.address);
+  const name = readString(token.name);
+  const symbol = readString(token.symbol);
+
+  if (!address && !name && !symbol) {
+    return undefined;
+  }
+
+  return { address, name, symbol };
+}
+
+function toDexTokenProfile(payload: unknown): DexTokenProfile | undefined {
+  const profile = readRecord(payload);
+
+  if (!profile) {
+    return undefined;
+  }
+
+  const chainId = readString(profile.chainId);
+  const tokenAddress = readString(profile.tokenAddress);
+
+  if (!chainId && !tokenAddress) {
+    return undefined;
+  }
+
+  return { chainId, tokenAddress };
+}
+
+function toDexLiquidity(payload: unknown): DexPair["liquidity"] {
+  const liquidity = readRecord(payload);
+
+  if (!liquidity) {
+    return null;
+  }
+
+  return {
+    usd: readNumber(liquidity.usd) ?? null,
+    base: readNumber(liquidity.base) ?? null,
+    quote: readNumber(liquidity.quote) ?? null
+  };
+}
+
+function toNumberWindows(payload: unknown): Record<string, number | undefined> | undefined {
+  const windows = readRecord(payload);
+
+  if (!windows) {
+    return undefined;
+  }
+
+  const normalized: Record<string, number | undefined> = {};
+
+  for (const key of ["m5", "h1", "h6", "h24"]) {
+    normalized[key] = readNumber(windows[key]);
+  }
+
+  return normalized;
+}
+
+function toDexTxnWindows(payload: unknown): Record<string, DexTxnWindow | undefined> | undefined {
+  const windows = readRecord(payload);
+
+  if (!windows) {
+    return undefined;
+  }
+
+  const normalized: Record<string, DexTxnWindow | undefined> = {};
+
+  for (const key of ["m5", "h1", "h6", "h24"]) {
+    normalized[key] = toDexTxnWindow(windows[key]);
+  }
+
+  return normalized;
+}
+
+function toDexTxnWindow(payload: unknown): DexTxnWindow | undefined {
+  const window = readRecord(payload);
+
+  if (!window) {
+    return undefined;
+  }
+
+  const buys = readNumber(window.buys);
+  const sells = readNumber(window.sells);
+
+  if (buys === undefined && sells === undefined) {
+    return undefined;
+  }
+
+  return { buys, sells };
 }
 
 function filterBasePairs(pairs: DexPair[], minVolume24h = MIN_VOLUME_24H_USD) {

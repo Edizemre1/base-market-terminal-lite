@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint .",
+    "test:providers": "playwright test -c playwright.provider.config.ts",
     "test:e2e": "playwright test",
     "test": "npm run test:e2e"
   },
