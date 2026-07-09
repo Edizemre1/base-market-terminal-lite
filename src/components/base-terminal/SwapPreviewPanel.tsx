@@ -94,8 +94,8 @@ export function SwapTicket({
         </div>
 
         <div className="mt-auto space-y-2 pt-1">
-          <div className="border border-base-amber/45 bg-base-amber/10 p-2.5 text-[11px] leading-4 text-base-muted">
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-base-amber">
+          <div className="border border-base-line border-l-base-amber bg-base-elevated p-2.5 text-[11px] leading-4 text-base-muted">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-base-text">
               Read-only boundary
             </p>
             <p className="mt-1">

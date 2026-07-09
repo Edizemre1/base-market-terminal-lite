@@ -233,6 +233,9 @@ function ChartPanel({
   const priceHeight = 198;
   const volumeTop = 214;
   const volumeHeight = 42;
+  const plotLeft = 10;
+  const plotRight = 66;
+  const plotWidth = width - plotLeft - plotRight;
   const hasReadOnlyOhlcv =
     pair.chartSource === "geckoterminal" && (pair.chartCandles?.length ?? 0) > 0;
   const candles = useMemo(() => getDisplayCandles(pair), [pair]);
@@ -249,20 +252,22 @@ function ChartPanel({
   const min = Math.min(...values);
   const max = Math.max(...values);
   const spread = max - min || 1;
-  const step = width / Math.max(visibleCandles.length - 1, 1);
+  const step = plotWidth / Math.max(visibleCandles.length - 1, 1);
   const candleWidth = Math.max(3, Math.min(8, step * 0.56));
   const maxVolume = Math.max(...visibleCandles.map((candle) => candle.volume), 1);
   const closePath = visibleCandles
     .map((candle, index) => {
-      const x = index * step;
+      const x = plotLeft + index * step;
       const y = getChartY(candle.close, min, spread, priceHeight);
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
     .join(" ");
-  const areaPath = `${closePath} L ${width} ${priceHeight} L 0 ${priceHeight} Z`;
+  const areaPath = `${closePath} L ${plotLeft + plotWidth} ${priceHeight} L ${plotLeft} ${priceHeight} Z`;
   const latest = candles[candles.length - 1];
   const previous = candles[candles.length - 2] ?? latest;
   const lastMove = latest.close - previous.close;
+  const currentPriceY = getChartY(latest.close, min, spread, priceHeight);
+  const axisTicks = [max, min + spread / 2, min];
   const chartLabel = hasReadOnlyOhlcv
     ? (pair.chartLabel ?? "OHLCV read-only \u00b7 cached chart")
     : pair.dataSource === "mock"
@@ -274,7 +279,7 @@ function ChartPanel({
       : refreshStatus === "using-last"
       ? "Using last available chart"
       : !hasReadOnlyOhlcv
-        ? "Synthetic fallback - not real market data"
+        ? "Demo chart preview - not real market data"
         : undefined;
 
   return (
@@ -298,7 +303,7 @@ function ChartPanel({
             </p>
           ) : (
             <p className="mt-1 font-mono text-[10px] text-base-amber">
-              Synthetic fallback - not real market data
+              Demo chart preview - not real market data
             </p>
           )}
           <p className="font-mono text-[10px] text-base-muted">
@@ -373,31 +378,50 @@ function ChartPanel({
         {Array.from({ length: 5 }).map((_, index) => (
           <line
             key={`h-${index}`}
-            x1="0"
-            x2={width}
+            x1={plotLeft}
+            x2={plotLeft + plotWidth}
             y1={(priceHeight / 4) * index}
             y2={(priceHeight / 4) * index}
             stroke="rgb(var(--color-line))"
-            strokeOpacity="0.65"
+            strokeOpacity={index === 0 || index === 4 ? "0.9" : "0.48"}
             strokeWidth="1"
           />
         ))}
         {Array.from({ length: 8 }).map((_, index) => (
           <line
             key={`v-${index}`}
-            x1={(width / 7) * index}
-            x2={(width / 7) * index}
+            x1={plotLeft + (plotWidth / 7) * index}
+            x2={plotLeft + (plotWidth / 7) * index}
             y1="0"
             y2={volumeTop + volumeHeight}
             stroke="rgb(var(--color-line))"
-            strokeOpacity="0.28"
+            strokeOpacity="0.24"
             strokeWidth="1"
           />
         ))}
+        <line
+          x1={plotLeft}
+          x2={plotLeft + plotWidth}
+          y1={volumeTop}
+          y2={volumeTop}
+          stroke="rgb(var(--color-line))"
+          strokeOpacity="0.85"
+        />
+        {axisTicks.map((value, index) => (
+          <text
+            key={`axis-${index}`}
+            x={width - 6}
+            y={Math.max(10, Math.min(priceHeight - 2, getChartY(value, min, spread, priceHeight) + 3))}
+            textAnchor="end"
+            className="fill-base-muted font-mono text-[9px]"
+          >
+            {formatChartValue(value)}
+          </text>
+        ))}
         <path d={areaPath} fill={`url(#chart-fill-${pair.id})`} />
-        <path d={closePath} fill="none" stroke="rgb(var(--color-mint))" strokeWidth="1.2" opacity="0.75" />
+        <path d={closePath} fill="none" stroke="rgb(var(--color-mint))" strokeWidth="1" opacity="0.5" />
         {visibleCandles.map((candle, index) => {
-          const x = index * step;
+          const x = plotLeft + index * step;
           const openY = getChartY(candle.open, min, spread, priceHeight);
           const closeY = getChartY(candle.close, min, spread, priceHeight);
           const highY = getChartY(candle.high, min, spread, priceHeight);
@@ -414,7 +438,8 @@ function ChartPanel({
                 y1={highY}
                 y2={lowY}
                 stroke={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
-                strokeWidth="1"
+                strokeOpacity="0.92"
+                strokeWidth="1.1"
               />
               <rect
                 x={x - candleWidth / 2}
@@ -422,7 +447,7 @@ function ChartPanel({
                 width={candleWidth}
                 height={bodyHeight}
                 fill={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
-                opacity="0.88"
+                opacity={positive ? "0.86" : "0.78"}
               />
               <rect
                 x={x - candleWidth / 2}
@@ -430,23 +455,31 @@ function ChartPanel({
                 width={candleWidth}
                 height={volumeBarHeight}
                 fill={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
-                opacity={positive ? "0.24" : "0.18"}
+                opacity={positive ? "0.28" : "0.2"}
               />
             </g>
           );
         })}
         <line
-          x1="0"
-          x2={width}
-          y1={getChartY(latest.close, min, spread, priceHeight)}
-          y2={getChartY(latest.close, min, spread, priceHeight)}
+          x1={plotLeft}
+          x2={plotLeft + plotWidth}
+          y1={currentPriceY}
+          y2={currentPriceY}
           stroke="rgb(var(--color-mint))"
-          strokeDasharray="4 4"
-          strokeOpacity="0.5"
+          strokeDasharray="3 5"
+          strokeOpacity="0.58"
+        />
+        <rect
+          x={width - 62}
+          y={Math.max(2, Math.min(priceHeight - 16, currentPriceY - 8))}
+          width="58"
+          height="16"
+          fill="rgb(var(--color-mint))"
+          opacity="0.14"
         />
         <text
-          x={width - 4}
-          y={Math.max(12, getChartY(latest.close, min, spread, priceHeight) - 5)}
+          x={width - 6}
+          y={Math.max(12, Math.min(priceHeight - 4, currentPriceY + 3))}
           textAnchor="end"
           className="fill-base-mint font-mono text-[10px] font-semibold"
         >
@@ -488,15 +521,15 @@ function ChartUnavailablePlaceholder({
   statusMessage?: string;
   timeframe: ChartTimeframe;
 }) {
-  const headline = pair.dataSource === "mock" ? "Mock preview data" : "OHLCV unavailable";
+  const headline = "Demo chart preview";
   const reason =
     pair.chartUnavailableReason ??
     "Read-only OHLCV is not available for this selected pair yet.";
 
   return (
-    <div className="relative flex h-[250px] w-full max-w-full shrink-0 overflow-hidden border-t border-base-line bg-base-elevated/30 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1">
+    <div className="relative flex h-[250px] w-full max-w-full shrink-0 overflow-hidden border-t border-base-line bg-base-elevated/40 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1">
       <div
-        className="pointer-events-none absolute inset-2 border border-dashed border-base-amber/45 bg-base-amber/5"
+        className="pointer-events-none absolute inset-2 border border-dashed border-base-line bg-base-panel/45"
         aria-hidden="true"
       />
       <svg
@@ -504,6 +537,12 @@ function ChartUnavailablePlaceholder({
         className="pointer-events-none absolute inset-0 h-full w-full opacity-75"
         aria-hidden="true"
       >
+        <defs>
+          <linearGradient id={`demo-preview-${pair.id}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgb(var(--color-mint))" stopOpacity="0.13" />
+            <stop offset="100%" stopColor="rgb(var(--color-mint))" stopOpacity="0" />
+          </linearGradient>
+        </defs>
         {Array.from({ length: 6 }).map((_, index) => (
           <line
             key={`placeholder-h-${index}`}
@@ -512,46 +551,36 @@ function ChartUnavailablePlaceholder({
             y1={32 + index * 38}
             y2={32 + index * 38}
             stroke="rgb(var(--color-line))"
-            strokeDasharray="3 8"
-            strokeOpacity="0.6"
-          />
-        ))}
-        {Array.from({ length: 8 }).map((_, index) => (
-          <rect
-            key={`placeholder-block-${index}`}
-            x={70 + index * 84}
-            y={104 + (index % 3) * 12}
-            width="36"
-            height="22"
-            fill="none"
-            stroke="rgb(var(--color-amber))"
-            strokeDasharray="5 5"
-            strokeOpacity="0.5"
+            strokeOpacity="0.62"
           />
         ))}
         <path
-          d="M120 72 L700 198 M120 198 L700 72"
+          d="M52 178 C126 151 167 163 225 134 S332 118 396 130 S520 153 594 112 S700 82 768 92 L768 214 L52 214 Z"
+          fill={`url(#demo-preview-${pair.id})`}
+        />
+        <path
+          d="M52 178 C126 151 167 163 225 134 S332 118 396 130 S520 153 594 112 S700 82 768 92"
           fill="none"
-          stroke="rgb(var(--color-amber))"
-          strokeDasharray="10 12"
-          strokeOpacity="0.32"
-          strokeWidth="2"
+          stroke="rgb(var(--color-mint))"
+          strokeDasharray="7 7"
+          strokeOpacity="0.45"
+          strokeWidth="1.6"
         />
         <text
           x="410"
           y="148"
           textAnchor="middle"
-          className="fill-base-amber font-mono text-[28px] font-semibold uppercase opacity-20"
+          className="fill-base-muted font-mono text-[26px] font-semibold uppercase opacity-20"
         >
-          DEMO
+          DEMO PREVIEW
         </text>
       </svg>
-      <div className="relative z-10 m-auto max-w-[430px] border border-base-amber/40 bg-base-panel/95 px-4 py-3 text-center">
-        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-base-amber">
+      <div className="relative z-10 m-auto max-w-[440px] border border-base-line bg-base-panel/95 px-4 py-3 text-center">
+        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-base-muted">
           {headline}
         </p>
         <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">
-          Synthetic fallback - not real market data
+          Demo chart preview - not real market data
         </p>
         <p className="mt-2 text-[11px] leading-5 text-base-muted">{reason}</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
@@ -559,7 +588,7 @@ function ChartUnavailablePlaceholder({
             {timeframe.toUpperCase()} placeholder
           </span>
           {statusMessage ? (
-            <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 text-base-amber">
+            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 text-base-muted">
               {statusMessage}
             </span>
           ) : null}
