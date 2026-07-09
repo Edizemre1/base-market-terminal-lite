@@ -18,6 +18,7 @@ import type { MarketDataMode } from "@/data/providers";
 import { formatCompactCurrency, cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
 import type { BasePair } from "@/types/baseTerminal";
+import { APP_VERSION } from "@/lib/appInfo";
 
 const navItems = [
   { href: "/", label: "Radar", icon: Radar, active: "/" },
@@ -102,7 +103,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <SidebarNetworkCard />
               </Suspense>
             </div>
-            <p className="mt-2 text-[10px] text-base-muted">Demo data only.</p>
+            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-base-muted">
+              <span>Demo data only.</span>
+              <Link
+                href="/status"
+                className="font-mono uppercase tracking-[0.1em] hover:text-base-mint"
+                data-testid="app-version-label"
+              >
+                Status v{APP_VERSION}
+              </Link>
+            </div>
           </div>
         </aside>
 
