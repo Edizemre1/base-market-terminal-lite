@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction
+} from "react";
 import { Copy, ExternalLink, LockKeyhole, RefreshCw, Settings, ShieldCheck, Star } from "lucide-react";
 import {
   useTerminalSearch,
@@ -15,9 +24,58 @@ import type { BasePair } from "@/types/baseTerminal";
 type FeedKind = "new" | "inflow" | "momentum";
 type DetailTab = "overview" | "risk" | "liquidity" | "activity";
 type ChartRefreshStatus = "idle" | "refreshing" | "updated" | "using-last";
+type RadarSort =
+  | "feed"
+  | "liquidity-desc"
+  | "volume-desc"
+  | "change-desc"
+  | "change-asc"
+  | "newest"
+  | "oldest";
+type RadarPreset = "fresh" | "liquid" | "momentum" | "volatile" | "watched";
+
+type RadarState = {
+  minLiquidityUsd: number;
+  minVolume24hUsd: number;
+  maxAgeMinutes: number | undefined;
+  minChange24h: number | undefined;
+  maxChange24h: number | undefined;
+  onlyPinned: boolean;
+  hideStale: boolean;
+  sort: RadarSort;
+};
 
 const SNAPSHOT_REFRESH_MS = 60_000;
 const SNAPSHOT_STALE_MS = 3 * SNAPSHOT_REFRESH_MS;
+const RADAR_FILTER_STORAGE_KEY = "base-terminal-lite:radar-filters";
+const DEFAULT_RADAR_STATE: RadarState = {
+  minLiquidityUsd: 0,
+  minVolume24hUsd: 0,
+  maxAgeMinutes: undefined,
+  minChange24h: undefined,
+  maxChange24h: undefined,
+  onlyPinned: false,
+  hideStale: false,
+  sort: "feed"
+};
+const RADAR_SORT_OPTIONS: Array<{ value: RadarSort; label: string }> = [
+  { value: "feed", label: "Default" },
+  { value: "liquidity-desc", label: "Liquidity" },
+  { value: "volume-desc", label: "Volume" },
+  { value: "change-desc", label: "24h Up" },
+  { value: "change-asc", label: "24h Down" },
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" }
+];
+const RADAR_LIQUIDITY_OPTIONS = [0, 10_000, 50_000, 100_000, 500_000];
+const RADAR_VOLUME_OPTIONS = [0, 5_000, 10_000, 50_000, 100_000];
+const RADAR_AGE_OPTIONS: Array<{ value: number | undefined; label: string }> = [
+  { value: undefined, label: "Any" },
+  { value: 60, label: "1h" },
+  { value: 24 * 60, label: "24h" },
+  { value: 7 * 24 * 60, label: "7d" },
+  { value: 30 * 24 * 60, label: "30d" }
+];
 
 const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -54,6 +112,8 @@ export function BaseTerminal({
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() =>
     buildProviderHealth(data, "idle")
   );
+  const [radarState, setRadarState] = useState<RadarState>(DEFAULT_RADAR_STATE);
+  const [radarStateLoaded, setRadarStateLoaded] = useState(false);
   const snapshotRef = useRef(snapshotData);
   const selectedPairRef = useRef<BasePair | undefined>(undefined);
   const snapshotRefreshInFlightRef = useRef(false);
@@ -68,6 +128,20 @@ export function BaseTerminal({
   useEffect(() => {
     snapshotRef.current = snapshotData;
   }, [snapshotData]);
+
+  useEffect(() => {
+    setRadarState(getInitialRadarState());
+    setRadarStateLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!radarStateLoaded || typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(RADAR_FILTER_STORAGE_KEY, JSON.stringify(radarState));
+    writeRadarStateToUrl(radarState);
+  }, [radarState, radarStateLoaded]);
 
   useEffect(() => {
     const nextPair =
@@ -95,6 +169,46 @@ export function BaseTerminal({
   );
   const amountNumber = Number.parseFloat(amount);
   const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
+  const filteredNewPairs = useMemo(
+    () =>
+      sortRadarPairs(
+        snapshotData.newPairs.filter((pair) => pairMatchesRadarState(pair, radarState, isPairPinned)),
+        radarState.sort
+      ),
+    [isPairPinned, radarState, snapshotData.newPairs]
+  );
+  const filteredVolumeInflows = useMemo(
+    () =>
+      sortRadarPairs(
+        snapshotData.volumeInflows.filter((pair) =>
+          pairMatchesRadarState(pair, radarState, isPairPinned)
+        ),
+        radarState.sort
+      ),
+    [isPairPinned, radarState, snapshotData.volumeInflows]
+  );
+  const filteredMomentumPairs = useMemo(
+    () =>
+      sortRadarPairs(
+        snapshotData.momentumPairs.filter((pair) =>
+          pairMatchesRadarState(pair, radarState, isPairPinned)
+        ),
+        radarState.sort
+      ),
+    [isPairPinned, radarState, snapshotData.momentumPairs]
+  );
+  const filteredPinnedPairs = useMemo(
+    () =>
+      sortPinnedPairs(
+        pinnedPairs.filter((pair) => pinnedPairMatchesRadarState(pair, radarState)),
+        radarState.sort
+      ),
+    [pinnedPairs, radarState]
+  );
+  const radarFiltersActive = useMemo(() => hasActiveRadarFilters(radarState), [radarState]);
+  const selectedPairOutsideFilter = selectedPairWithChart
+    ? !pairMatchesRadarState(selectedPairWithChart, radarState, isPairPinned)
+    : false;
 
   const updatePairQuery = useCallback(
     (pair: BasePair) => {
@@ -326,19 +440,25 @@ export function BaseTerminal({
         </div>
       ) : null}
       <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
-        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(92px,0.72fr)_repeat(3,minmax(0,1fr))] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
+        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[auto_minmax(76px,0.55fr)_repeat(3,minmax(0,1fr))] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
+          <RadarFilterPanel
+            state={radarState}
+            onChange={setRadarState}
+            onReset={() => setRadarState(DEFAULT_RADAR_STATE)}
+          />
           <PinnedPairsPanel
-            pairs={pinnedPairs}
+            pairs={filteredPinnedPairs}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
             onUnpin={unpinPinnedPair}
+            filtersActive={radarFiltersActive}
           />
           <OpportunityFeed
             id="new-pairs"
             title="New Pairs"
             marker="A"
             kind="new"
-            pairs={snapshotData.newPairs}
+            pairs={filteredNewPairs}
             showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
@@ -349,7 +469,7 @@ export function BaseTerminal({
             title="Volume Inflow"
             marker="B"
             kind="inflow"
-            pairs={snapshotData.volumeInflows}
+            pairs={filteredVolumeInflows}
             showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
@@ -360,7 +480,7 @@ export function BaseTerminal({
             title="Momentum"
             marker="C"
             kind="momentum"
-            pairs={snapshotData.momentumPairs}
+            pairs={filteredMomentumPairs}
             showFallbackLabels={snapshotData.mode === "dexscreener"}
             selectedPairId={selectedPairWithChart.id}
             onSelect={handleSelectPairById}
@@ -373,6 +493,7 @@ export function BaseTerminal({
           <SelectedPairPanel
             pair={selectedPairWithChart}
             marketDataMode={snapshotData.mode}
+            outsideCurrentFilter={selectedPairOutsideFilter}
             chartRefreshStatus={
               chartRefreshStatus[getChartCacheKey(selectedPairWithChart)] ?? "idle"
             }
@@ -433,6 +554,333 @@ function normalizePairParam(value: string) {
 
 function normalizePairIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getInitialRadarState() {
+  return readRadarStateFromUrl() ?? readRadarStateFromStorage() ?? DEFAULT_RADAR_STATE;
+}
+
+function readRadarStateFromUrl() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const hasRadarParam = ["rliq", "rvol", "rage", "rmin", "rmax", "rpin", "rhide", "rsort"].some(
+    (key) => params.has(key)
+  );
+
+  if (!hasRadarParam) {
+    return undefined;
+  }
+
+  return normalizeRadarState({
+    minLiquidityUsd: toOptionalNumber(params.get("rliq")) ?? 0,
+    minVolume24hUsd: toOptionalNumber(params.get("rvol")) ?? 0,
+    maxAgeMinutes: toOptionalNumber(params.get("rage")),
+    minChange24h: toOptionalNumber(params.get("rmin")),
+    maxChange24h: toOptionalNumber(params.get("rmax")),
+    onlyPinned: params.get("rpin") === "1",
+    hideStale: params.get("rhide") === "1",
+    sort: parseRadarSort(params.get("rsort") ?? "feed")
+  });
+}
+
+function readRadarStateFromStorage() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(RADAR_FILTER_STORAGE_KEY);
+    const parsedValue = rawValue ? (JSON.parse(rawValue) as unknown) : undefined;
+
+    return normalizeRadarState(parsedValue);
+  } catch {
+    return undefined;
+  }
+}
+
+function writeRadarStateToUrl(state: RadarState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const nextUrl = new URL(window.location.href);
+
+  for (const key of ["rliq", "rvol", "rage", "rmin", "rmax", "rpin", "rhide", "rsort"]) {
+    nextUrl.searchParams.delete(key);
+  }
+
+  if (state.minLiquidityUsd > 0) {
+    nextUrl.searchParams.set("rliq", String(state.minLiquidityUsd));
+  }
+
+  if (state.minVolume24hUsd > 0) {
+    nextUrl.searchParams.set("rvol", String(state.minVolume24hUsd));
+  }
+
+  if (state.maxAgeMinutes !== undefined) {
+    nextUrl.searchParams.set("rage", String(state.maxAgeMinutes));
+  }
+
+  if (state.minChange24h !== undefined) {
+    nextUrl.searchParams.set("rmin", String(state.minChange24h));
+  }
+
+  if (state.maxChange24h !== undefined) {
+    nextUrl.searchParams.set("rmax", String(state.maxChange24h));
+  }
+
+  if (state.onlyPinned) {
+    nextUrl.searchParams.set("rpin", "1");
+  }
+
+  if (state.hideStale) {
+    nextUrl.searchParams.set("rhide", "1");
+  }
+
+  if (state.sort !== "feed") {
+    nextUrl.searchParams.set("rsort", state.sort);
+  }
+
+  const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextPath !== currentPath) {
+    window.history.replaceState(window.history.state, "", nextPath);
+  }
+}
+
+function normalizeRadarState(value: unknown): RadarState | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Partial<RadarState>;
+
+  return {
+    minLiquidityUsd: getNonNegativeNumber(candidate.minLiquidityUsd),
+    minVolume24hUsd: getNonNegativeNumber(candidate.minVolume24hUsd),
+    maxAgeMinutes: getPositiveNumber(candidate.maxAgeMinutes),
+    minChange24h: getFiniteOptionalNumber(candidate.minChange24h),
+    maxChange24h: getFiniteOptionalNumber(candidate.maxChange24h),
+    onlyPinned: Boolean(candidate.onlyPinned),
+    hideStale: Boolean(candidate.hideStale),
+    sort: parseRadarSort(candidate.sort)
+  };
+}
+
+function getRadarPresetState(preset: RadarPreset): RadarState {
+  if (preset === "fresh") {
+    return { ...DEFAULT_RADAR_STATE, maxAgeMinutes: 24 * 60, sort: "newest" };
+  }
+
+  if (preset === "liquid") {
+    return {
+      ...DEFAULT_RADAR_STATE,
+      minLiquidityUsd: 100_000,
+      minVolume24hUsd: 10_000,
+      sort: "liquidity-desc"
+    };
+  }
+
+  if (preset === "momentum") {
+    return {
+      ...DEFAULT_RADAR_STATE,
+      minVolume24hUsd: 10_000,
+      minChange24h: 5,
+      sort: "change-desc"
+    };
+  }
+
+  if (preset === "volatile") {
+    return {
+      ...DEFAULT_RADAR_STATE,
+      minVolume24hUsd: 5_000,
+      maxChange24h: -5,
+      sort: "change-asc"
+    };
+  }
+
+  return { ...DEFAULT_RADAR_STATE, onlyPinned: true, sort: "volume-desc" };
+}
+
+function pairMatchesRadarState(
+  pair: BasePair,
+  state: RadarState,
+  isPairPinned: (pair: BasePair) => boolean
+) {
+  if (state.hideStale && pair.stale) {
+    return false;
+  }
+
+  if (state.onlyPinned && !isPairPinned(pair)) {
+    return false;
+  }
+
+  if (pair.liquidity < state.minLiquidityUsd || pair.volume24h < state.minVolume24hUsd) {
+    return false;
+  }
+
+  if (state.maxAgeMinutes !== undefined && !pairHasMaxAge(pair, state.maxAgeMinutes)) {
+    return false;
+  }
+
+  if (state.minChange24h !== undefined && pair.change24h < state.minChange24h) {
+    return false;
+  }
+
+  if (state.maxChange24h !== undefined && pair.change24h > state.maxChange24h) {
+    return false;
+  }
+
+  return true;
+}
+
+function pinnedPairMatchesRadarState(pair: PinnedPair, state: RadarState) {
+  if (state.hideStale && pair.stale) {
+    return false;
+  }
+
+  if (pair.liquidity < state.minLiquidityUsd || pair.volume24h < state.minVolume24hUsd) {
+    return false;
+  }
+
+  if (state.minChange24h !== undefined && pair.change24h < state.minChange24h) {
+    return false;
+  }
+
+  if (state.maxChange24h !== undefined && pair.change24h > state.maxChange24h) {
+    return false;
+  }
+
+  return true;
+}
+
+function sortRadarPairs(pairs: BasePair[], sort: RadarSort) {
+  if (sort === "feed") {
+    return pairs;
+  }
+
+  return [...pairs].sort((left, right) => compareRadarPairs(left, right, sort));
+}
+
+function sortPinnedPairs(pairs: PinnedPair[], sort: RadarSort) {
+  if (sort === "feed" || sort === "newest" || sort === "oldest") {
+    return pairs;
+  }
+
+  return [...pairs].sort((left, right) => comparePinnedPairs(left, right, sort));
+}
+
+function compareRadarPairs(left: BasePair, right: BasePair, sort: RadarSort) {
+  if (sort === "liquidity-desc") {
+    return right.liquidity - left.liquidity;
+  }
+
+  if (sort === "volume-desc") {
+    return right.volume24h - left.volume24h;
+  }
+
+  if (sort === "change-desc") {
+    return right.change24h - left.change24h;
+  }
+
+  if (sort === "change-asc") {
+    return left.change24h - right.change24h;
+  }
+
+  if (sort === "newest") {
+    return getSortableAge(left) - getSortableAge(right);
+  }
+
+  if (sort === "oldest") {
+    return getSortableAge(right) - getSortableAge(left);
+  }
+
+  return 0;
+}
+
+function comparePinnedPairs(left: PinnedPair, right: PinnedPair, sort: RadarSort) {
+  if (sort === "liquidity-desc") {
+    return right.liquidity - left.liquidity;
+  }
+
+  if (sort === "volume-desc") {
+    return right.volume24h - left.volume24h;
+  }
+
+  if (sort === "change-desc") {
+    return right.change24h - left.change24h;
+  }
+
+  if (sort === "change-asc") {
+    return left.change24h - right.change24h;
+  }
+
+  return 0;
+}
+
+function pairHasMaxAge(pair: BasePair, maxAgeMinutes: number) {
+  const age = getSortableAge(pair);
+  return Number.isFinite(age) && age <= maxAgeMinutes;
+}
+
+function getSortableAge(pair: BasePair) {
+  if (pair.ageMinutes > 0 && pair.ageMinutes < 999_999) {
+    return pair.ageMinutes;
+  }
+
+  if (pair.pairCreatedAtMs && pair.pairCreatedAtMs > 0) {
+    return Math.max(1, Math.floor((Date.now() - pair.pairCreatedAtMs) / 60_000));
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+function hasActiveRadarFilters(state: RadarState) {
+  return (
+    state.minLiquidityUsd > 0 ||
+    state.minVolume24hUsd > 0 ||
+    state.maxAgeMinutes !== undefined ||
+    state.minChange24h !== undefined ||
+    state.maxChange24h !== undefined ||
+    state.onlyPinned ||
+    state.hideStale
+  );
+}
+
+function parseRadarSort(value: unknown): RadarSort {
+  return RADAR_SORT_OPTIONS.some((option) => option.value === value)
+    ? (value as RadarSort)
+    : "feed";
+}
+
+function toOptionalNumber(value: unknown) {
+  if (value === "" || value === undefined || value === null) {
+    return undefined;
+  }
+
+  const parsed =
+    typeof value === "number" ? value : Number.parseFloat(String(value).replace(/,/g, ""));
+
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function getNonNegativeNumber(value: unknown) {
+  const parsed = toOptionalNumber(value);
+  return parsed !== undefined && parsed > 0 ? parsed : 0;
+}
+
+function getPositiveNumber(value: unknown) {
+  const parsed = toOptionalNumber(value);
+  return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function getFiniteOptionalNumber(value: unknown) {
+  const parsed = toOptionalNumber(value);
+  return parsed !== undefined ? parsed : undefined;
 }
 
 function buildProviderHealth(
@@ -524,16 +972,223 @@ function pairsRepresentSamePair(left: BasePair, right: BasePair) {
   );
 }
 
+function RadarFilterPanel({
+  state,
+  onChange,
+  onReset
+}: {
+  state: RadarState;
+  onChange: Dispatch<SetStateAction<RadarState>>;
+  onReset: () => void;
+}) {
+  function patchState(patch: Partial<RadarState>) {
+    onChange((current) => ({ ...current, ...patch }));
+  }
+
+  function applyPreset(preset: RadarPreset) {
+    onChange(getRadarPresetState(preset));
+  }
+
+  return (
+    <section className="min-h-0 overflow-hidden border border-base-line bg-base-panel">
+      <div className="flex min-h-8 items-center justify-between border-b border-base-line bg-base-raised px-2">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
+          Radar filters
+        </h2>
+        <button
+          type="button"
+          onClick={onReset}
+          className="font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted hover:text-base-mint"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div className="space-y-2 p-2">
+        <div className="grid grid-cols-5 gap-1">
+          {(["fresh", "liquid", "momentum", "volatile", "watched"] as RadarPreset[]).map(
+            (preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                className="h-6 border border-base-line bg-base-elevated px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted hover:border-base-mint hover:text-base-mint"
+              >
+                {preset}
+              </button>
+            )
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-1">
+          <RadarSelect
+            label="Min liq"
+            value={String(state.minLiquidityUsd)}
+            onChange={(value) => patchState({ minLiquidityUsd: toOptionalNumber(value) ?? 0 })}
+          >
+            {RADAR_LIQUIDITY_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {value === 0 ? "Any" : formatCompactCurrency(value)}
+              </option>
+            ))}
+          </RadarSelect>
+
+          <RadarSelect
+            label="Min vol"
+            value={String(state.minVolume24hUsd)}
+            onChange={(value) => patchState({ minVolume24hUsd: toOptionalNumber(value) ?? 0 })}
+          >
+            {RADAR_VOLUME_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {value === 0 ? "Any" : formatCompactCurrency(value)}
+              </option>
+            ))}
+          </RadarSelect>
+
+          <RadarSelect
+            label="Max age"
+            value={state.maxAgeMinutes === undefined ? "" : String(state.maxAgeMinutes)}
+            onChange={(value) => patchState({ maxAgeMinutes: toOptionalNumber(value) })}
+          >
+            {RADAR_AGE_OPTIONS.map((option) => (
+              <option key={option.label} value={option.value ?? ""}>
+                {option.label}
+              </option>
+            ))}
+          </RadarSelect>
+
+          <RadarSelect
+            label="Sort"
+            value={state.sort}
+            onChange={(value) => patchState({ sort: parseRadarSort(value) })}
+          >
+            {RADAR_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </RadarSelect>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1">
+          <RadarInput
+            label="Min 24h %"
+            value={state.minChange24h}
+            onChange={(value) => patchState({ minChange24h: value })}
+          />
+          <RadarInput
+            label="Max 24h %"
+            value={state.maxChange24h}
+            onChange={(value) => patchState({ maxChange24h: value })}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-1">
+          <RadarToggle
+            label="Pinned only"
+            active={state.onlyPinned}
+            onClick={() => patchState({ onlyPinned: !state.onlyPinned })}
+          />
+          <RadarToggle
+            label="Hide stale"
+            active={state.hideStale}
+            onClick={() => patchState({ hideStale: !state.hideStale })}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RadarSelect({
+  label,
+  value,
+  onChange,
+  children
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-base-line bg-base-elevated text-[10px]">
+      <span className="border-r border-base-line px-1 font-mono uppercase tracking-[0.08em] text-base-muted">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-6 min-w-0 bg-base-panel px-1 font-mono text-[10px] text-base-text outline-none"
+      >
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function RadarInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (value: number | undefined) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-base-line bg-base-elevated text-[10px]">
+      <span className="border-r border-base-line px-1 font-mono uppercase tracking-[0.08em] text-base-muted">
+        {label}
+      </span>
+      <input
+        type="number"
+        value={value ?? ""}
+        onChange={(event) => onChange(toOptionalNumber(event.target.value))}
+        placeholder="Any"
+        className="h-6 min-w-0 bg-base-panel px-1 font-mono text-[10px] text-base-text outline-none placeholder:text-base-muted"
+      />
+    </label>
+  );
+}
+
+function RadarToggle({
+  label,
+  active,
+  onClick
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "h-6 border px-1 font-mono text-[9px] uppercase tracking-[0.08em]",
+        active
+          ? "border-base-mint/45 bg-base-mint/10 text-base-mint"
+          : "border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 function PinnedPairsPanel({
   pairs,
   selectedPairId,
   onSelect,
-  onUnpin
+  onUnpin,
+  filtersActive
 }: {
   pairs: PinnedPair[];
   selectedPairId: string;
   onSelect: (id: string) => void;
   onUnpin: (key: string) => void;
+  filtersActive: boolean;
 }) {
   return (
     <section className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
@@ -551,7 +1206,9 @@ function PinnedPairsPanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {pairs.length === 0 ? (
           <div className="px-2 py-3 text-[11px] text-base-muted">
-            <p className="font-mono text-base-text">No pinned pairs.</p>
+            <p className="font-mono text-base-text">
+              {filtersActive ? "No pinned pairs match filters." : "No pinned pairs."}
+            </p>
             <p className="mt-1">Use the star on rows or search results.</p>
           </div>
         ) : (
@@ -811,11 +1468,13 @@ function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
 function SelectedPairPanel({
   pair,
   marketDataMode,
+  outsideCurrentFilter,
   chartRefreshStatus,
   onRefreshChart
 }: {
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
+  outsideCurrentFilter: boolean;
   chartRefreshStatus: ChartRefreshStatus;
   onRefreshChart: (pair: BasePair) => void;
 }) {
@@ -849,6 +1508,11 @@ function SelectedPairPanel({
             {pair.stale ? (
               <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
                 {pair.staleReason ?? "Stale selected pair"}
+              </span>
+            ) : null}
+            {outsideCurrentFilter ? (
+              <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
+                Outside current filter
               </span>
             ) : null}
             <Copy size={12} className="shrink-0 text-base-muted" aria-hidden="true" />
@@ -1470,6 +2134,16 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
         </div>
 
         <div className="grid gap-2 md:grid-cols-4">
+          <OverviewCell label="5m volume" value={formatOptionalCompactCurrency(pair.volumes?.m5)} />
+          <OverviewCell label="1h volume" value={formatOptionalCompactCurrency(pair.volumes?.h1)} />
+          <OverviewCell label="6h volume" value={formatOptionalCompactCurrency(pair.volumes?.h6)} />
+          <OverviewCell
+            label="24h volume"
+            value={formatOptionalCompactCurrency(pair.volumes?.h24 ?? pair.volume24h)}
+          />
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-4">
           <OverviewCell label="5m buys/sells" value={formatTxnWindow(pair.txns?.m5)} />
           <OverviewCell label="1h buys/sells" value={formatTxnWindow(pair.txns?.h1)} />
           <OverviewCell label="6h buys/sells" value={formatTxnWindow(pair.txns?.h6)} />
@@ -1772,6 +2446,10 @@ function getBaseScanAddressUrl(address: string | undefined) {
 
 function formatOptionalCurrency(value: number | undefined) {
   return value && value > 0 ? formatCompactCurrency(value) : "N/A";
+}
+
+function formatOptionalCompactCurrency(value: number | undefined) {
+  return typeof value === "number" && value > 0 ? formatCompactCurrency(value) : "N/A";
 }
 
 function formatOptionalPercent(value: number | undefined) {
