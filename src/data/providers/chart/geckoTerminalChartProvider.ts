@@ -1,19 +1,17 @@
 import { mockChartProvider } from "./mockChartProvider";
 import type { ChartPairInput, PairChartCandle, PairChartProvider } from "./types";
+import {
+  fetchJsonWithTimeout,
+  readArray,
+  readRecord
+} from "../responseValidation";
 
 const GECKOTERMINAL_API_BASE = "https://api.geckoterminal.com/api/v2";
 const BASE_NETWORK = "base";
 const TIMEFRAME = "hour";
 const CANDLE_LIMIT = 96;
 const REVALIDATE_SECONDS = 60;
-
-type GeckoTerminalOhlcvResponse = {
-  data?: {
-    attributes?: {
-      ohlcv_list?: unknown[];
-    };
-  };
-};
+const REQUEST_TIMEOUT_MS = 8_000;
 
 export const geckoTerminalChartProvider: PairChartProvider = {
   name: "GeckoTerminal OHLCV read-only",
@@ -26,20 +24,20 @@ export const geckoTerminalChartProvider: PairChartProvider = {
     }
 
     try {
-      const response = await fetch(
+      const payload = await fetchJsonWithTimeout(
         `${GECKOTERMINAL_API_BASE}/networks/${BASE_NETWORK}/pools/${pairAddress}/ohlcv/${TIMEFRAME}?aggregate=1&limit=${CANDLE_LIMIT}&currency=usd&token=base`,
         {
           headers: { accept: "application/json" },
           next: { revalidate: REVALIDATE_SECONDS }
-        } as RequestInit & { next: { revalidate: number } }
+        },
+        REQUEST_TIMEOUT_MS
       );
 
-      if (!response.ok) {
-        return fallback(pair, `GeckoTerminal returned ${response.status}.`);
+      if (!payload) {
+        return fallback(pair, "GeckoTerminal OHLCV request failed.");
       }
 
-      const payload = (await response.json()) as GeckoTerminalOhlcvResponse;
-      const candles = normalizeOhlcvList(payload.data?.attributes?.ohlcv_list ?? []);
+      const candles = parseGeckoTerminalOhlcvResponse(payload);
 
       if (candles.length === 0) {
         return fallback(pair, "GeckoTerminal returned no OHLCV candles.");
@@ -56,6 +54,13 @@ export const geckoTerminalChartProvider: PairChartProvider = {
     }
   }
 };
+
+export function parseGeckoTerminalOhlcvResponse(payload: unknown): PairChartCandle[] {
+  const response = readRecord(payload);
+  const data = readRecord(response?.data);
+  const attributes = readRecord(data?.attributes);
+  return normalizeOhlcvList(readArray(attributes?.ohlcv_list));
+}
 
 async function fallback(pair: ChartPairInput, unavailableReason: string) {
   const result = await mockChartProvider.getPairChart(pair);

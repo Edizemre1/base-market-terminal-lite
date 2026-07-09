@@ -43,6 +43,8 @@ Watchlist pins are browser-local and stored in `localStorage`. There is no accou
 
 In read-only market data mode, the terminal refreshes provider snapshots about every 60 seconds without reloading the page. The last good snapshot remains visible if a provider refresh fails, and compact stale/failed states show when data is old or unavailable.
 
+External provider responses are defensively normalized before they reach the terminal UI. Missing or malformed fields are dropped or treated as unavailable, and provider timeouts keep the last good/stale UI state visible instead of blanking the app.
+
 Selected pair details can show public read-only provider fields such as addresses, source links, windowed volume/change, transaction counts, FDV, and market cap when available. Public market quality signals are transparent heuristics from displayed data only, not financial advice or private scoring.
 
 Radar filters, sorting, and presets are local read-only views over the loaded provider snapshot. Presets are transparent filter/sort combinations, not financial advice, private scoring, or trading recommendations.
@@ -87,10 +89,12 @@ npm run dev
 npm run build
 npm run typecheck
 npm run lint
+npm run test:providers
 npm run test:e2e
 ```
 
 `npm run test:e2e` runs Playwright smoke/regression tests against the local Next.js dev server. The tests cover read-only terminal loading, pair selection URL state, search, local watchlist persistence, filters/sorting, provider health, and disabled swap execution.
+`npm run test:providers` runs fixture-based provider parsing tests without live external provider calls.
 
 ## Project Structure
 
