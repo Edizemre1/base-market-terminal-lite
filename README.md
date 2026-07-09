@@ -1,20 +1,33 @@
 # Base Terminal Lite
 
-Standalone public MVP for a focused read-only Base on-chain swap/radar terminal. The app defaults to local mock data and can optionally use read-only public DexScreener data for Base pairs.
+Public read-only Base market terminal demo for pair discovery, inspection, chart review, local watchlists, and disabled swap-preview workflows. The app defaults to local mock data and can optionally use public read-only provider data for Base pairs.
 
-Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
+## Launch Links
 
-Public status: `/status`
+- Live demo: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
+- Public status page: `/status`
+- Health endpoint: `/api/health`
 
-Health endpoint: `/api/health`
+## Core Features
+
+- DexScreener read-only Base radar for New Pairs, Volume Inflow, and Momentum feeds.
+- GeckoTerminal read-only OHLCV chart support with synthetic fallback.
+- Compact topbar search over loaded provider data.
+- URL pair deep-links through `pair=<pairId-or-pairAddress>`.
+- Browser-local watchlist stored in `localStorage`.
+- Provider health, stale-data states, and last-good snapshot behavior.
+- Radar filters, sorting, and transparent local presets.
+- Public pair detail fields and market quality signals derived from displayed data only.
 
 ## Safety Boundaries
 
 - No unrelated private branding.
 - No private business logic.
-- No real API keys or backend secrets.
+- No wallet connection.
+- No swaps, signing, approvals, transaction construction, or transaction execution.
+- No real API keys, backend secrets, backend auth, or database.
 - No paid product logic.
-- No real transactions, approvals, wallet signing, or swap execution.
+- No private scoring or investment advice.
 - Mock/demo Base pair data by default.
 - DexScreener mode is read-only market data only.
 - Risk labels are demo/derived UI states, not live token safety assessments.
@@ -56,6 +69,7 @@ No API key is needed. DexScreener and OHLCV modes are read-only and do not enabl
 Base Terminal Lite is a public read-only demo. Private or production transaction work belongs behind separate reviewed boundaries. Builder Code/ERC-8021 attribution belongs to later private transaction work, not this public demo yet.
 
 See [Public Demo Boundary](docs/public-demo-boundary.md) for the concise public/private boundary.
+See [Public Launch Checklist](docs/public-launch-checklist.md) and [Base Builder Visibility](docs/base-builder-visibility.md) for launch-readiness notes.
 
 ## What Is Included
 
@@ -95,6 +109,14 @@ npm run test:e2e
 
 `npm run test:e2e` runs Playwright smoke/regression tests against the local Next.js dev server. The tests cover read-only terminal loading, pair selection URL state, search, local watchlist persistence, filters/sorting, provider health, and disabled swap execution.
 `npm run test:providers` runs fixture-based provider parsing tests without live external provider calls.
+
+## Testing
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `npm run test:providers`
+- `npm run test:e2e`
 
 ## Project Structure
 

@@ -39,6 +39,12 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
             <StatusRow label="Boundary" value="No transaction execution" tone="amber" />
           </div>
           <p className="mt-3 text-[11px] leading-4 text-base-muted">{APP_DESCRIPTION}</p>
+          <Link
+            href="/"
+            className="mt-3 inline-flex border border-base-line bg-base-panel px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-base-mint hover:border-base-mint hover:text-base-text"
+          >
+            Open terminal
+          </Link>
         </TerminalPanel>
 
         <div className="space-y-2">
