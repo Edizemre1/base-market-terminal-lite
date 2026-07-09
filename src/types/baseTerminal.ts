@@ -30,6 +30,8 @@ export type BasePair = {
   dexId?: string;
   dexName?: string;
   sourceUrl?: string;
+  tokenLogoUrl?: string;
+  quoteTokenLogoUrl?: string;
   priceNative?: string;
   priceUsdValue?: number;
   liquidityUsd?: number;

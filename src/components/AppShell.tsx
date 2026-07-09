@@ -3,7 +3,6 @@
 import {
   AlertTriangle,
   BookOpenText,
-  CircleDot,
   Droplets,
   Radar,
   Search,
@@ -17,6 +16,7 @@ import { Suspense, useMemo, useState, type KeyboardEvent, type ReactNode } from 
 import type { MarketDataMode } from "@/data/providers";
 import { formatCompactCurrency, cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
+import { BaseNetworkIcon, PairAvatarStack } from "@/components/TokenIdentity";
 import type { BasePair } from "@/types/baseTerminal";
 import { APP_VERSION } from "@/lib/appInfo";
 
@@ -40,9 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
             <Link href="/" className="flex min-w-0 items-center gap-2">
-              <span className="grid h-5 w-5 place-items-center rounded-full bg-base-blue text-[10px] font-bold text-white">
-                B
-              </span>
+              <BaseNetworkIcon className="h-5 w-5" />
               <span className="truncate text-[13px] font-semibold text-base-text">
                 Base Terminal Lite
               </span>
@@ -54,7 +52,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <TerminalSearchBox />
 
             <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
-              <TopChip label="Base Network Online" tone="mint" />
+              <TopChip
+                label="Base Network Online"
+                tone="mint"
+                icon={<BaseNetworkIcon className="h-3.5 w-3.5" />}
+              />
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
               </Suspense>
@@ -95,7 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mt-auto p-1.5">
             <div className="border border-base-line bg-base-elevated p-1.5">
               <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-                <CircleDot size={12} aria-hidden="true" />
+                <BaseNetworkIcon className="h-4 w-4" />
                 Base Demo Network
               </div>
               <p className="font-mono text-[11px] text-base-text">Chain ID 8453</p>
@@ -185,13 +187,22 @@ function TerminalSearchBox() {
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => selectResult(pair.id)}
-                  className="min-w-0 text-left"
+                  className="flex min-w-0 items-center gap-2 text-left"
                 >
-                  <span className="block truncate font-mono font-semibold text-base-text">
-                    {pair.pair}
-                  </span>
-                  <span className="block truncate text-[10px] text-base-muted">
-                    {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} - {pair.dex}
+                  <PairAvatarStack
+                    baseSymbol={pair.baseToken}
+                    quoteSymbol={pair.quoteToken}
+                    baseLogoUrl={pair.tokenLogoUrl}
+                    quoteLogoUrl={pair.quoteTokenLogoUrl}
+                    size="sm"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono font-semibold text-base-text">
+                      {pair.pair}
+                    </span>
+                    <span className="block truncate text-[10px] text-base-muted">
+                      {pair.dataSource === "mock" ? "Demo fallback" : "Read-only"} - {pair.dex}
+                    </span>
                   </span>
                 </button>
                 <span className="text-right font-mono text-[10px] text-base-muted">

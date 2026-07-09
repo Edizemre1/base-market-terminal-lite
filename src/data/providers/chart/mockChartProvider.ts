@@ -1,7 +1,5 @@
 import type { ChartPairInput, PairChartProvider } from "./types";
 
-const SYNTHETIC_INTERVAL_SECONDS = 60 * 60;
-
 export const mockChartProvider: PairChartProvider = {
   name: "Synthetic chart preview",
   readOnly: true,
@@ -18,6 +16,7 @@ export function buildSyntheticCandles(pair: ChartPairInput) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const points = pair.chart.length > 0 ? pair.chart : [1];
   const volumePerPoint = pair.volume24h / Math.max(points.length, 1);
+  const intervalSeconds = getSyntheticIntervalSeconds(pair.timeframe);
 
   return points.map((close, index) => {
     const previous = points[index - 1] ?? close;
@@ -25,7 +24,7 @@ export function buildSyntheticCandles(pair: ChartPairInput) {
     const wick = Math.max(movement * 0.45, Math.abs(close) * 0.006, 0.0001);
 
     return {
-      timestamp: nowSeconds - (points.length - index - 1) * SYNTHETIC_INTERVAL_SECONDS,
+      timestamp: nowSeconds - (points.length - index - 1) * intervalSeconds,
       open: previous,
       high: Math.max(previous, close) + wick,
       low: Math.max(0, Math.min(previous, close) - wick),
@@ -33,4 +32,18 @@ export function buildSyntheticCandles(pair: ChartPairInput) {
       volume: volumePerPoint
     };
   });
+}
+
+function getSyntheticIntervalSeconds(timeframe: ChartPairInput["timeframe"]) {
+  switch (timeframe) {
+    case "15m":
+      return 15 * 60;
+    case "4h":
+      return 4 * 60 * 60;
+    case "1d":
+      return 24 * 60 * 60;
+    case "1h":
+    default:
+      return 60 * 60;
+  }
 }

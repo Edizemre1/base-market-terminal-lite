@@ -45,6 +45,9 @@ type DexPair = {
   dexId?: string;
   pairAddress?: string;
   url?: string;
+  info?: {
+    imageUrl?: string;
+  };
   baseToken?: DexToken;
   quoteToken?: DexToken;
   priceNative?: string;
@@ -219,6 +222,7 @@ function toDexPair(payload: unknown): DexPair | undefined {
     dexId: readString(pair.dexId),
     pairAddress: readString(pair.pairAddress),
     url: readHttpUrl(pair.url),
+    info: toDexPairInfo(pair.info),
     baseToken: toDexToken(pair.baseToken),
     quoteToken: toDexToken(pair.quoteToken),
     priceNative: readString(pair.priceNative),
@@ -242,6 +246,17 @@ function toDexPair(payload: unknown): DexPair | undefined {
   }
 
   return normalized;
+}
+
+function toDexPairInfo(payload: unknown): DexPair["info"] {
+  const info = readRecord(payload);
+
+  if (!info) {
+    return undefined;
+  }
+
+  const imageUrl = readHttpUrl(info.imageUrl);
+  return imageUrl ? { imageUrl } : undefined;
 }
 
 function toDexToken(payload: unknown): DexToken | undefined {
@@ -404,6 +419,8 @@ function normalizePair(pair: DexPair): BasePair | undefined {
     dexId: pair.dexId,
     dexName: formatDexName(pair.dexId),
     sourceUrl: pair.url ?? `https://dexscreener.com/base/${pairAddress}`,
+    tokenLogoUrl: pair.info?.imageUrl,
+    quoteTokenLogoUrl: getKnownTokenLogoUrl(quoteToken.symbol),
     priceNative,
     priceUsdValue: priceUsd,
     liquidityUsd: liquidity,
@@ -815,6 +832,20 @@ function shortenAddress(address: string) {
   }
 
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function getKnownTokenLogoUrl(symbol: string | undefined) {
+  const normalized = symbol?.toUpperCase();
+
+  if (normalized === "WETH" || normalized === "ETH") {
+    return "https://assets.coingecko.com/coins/images/279/small/ethereum.png";
+  }
+
+  if (normalized === "USDC") {
+    return "https://assets.coingecko.com/coins/images/6319/small/usdc.png";
+  }
+
+  return undefined;
 }
 
 function toNumber(value: number | string | null | undefined) {

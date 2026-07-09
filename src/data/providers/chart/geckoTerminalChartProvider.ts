@@ -1,5 +1,10 @@
 import { mockChartProvider } from "./mockChartProvider";
-import type { ChartPairInput, PairChartCandle, PairChartProvider } from "./types";
+import type {
+  ChartPairInput,
+  ChartTimeframe,
+  PairChartCandle,
+  PairChartProvider
+} from "./types";
 import {
   fetchJsonWithTimeout,
   readArray,
@@ -8,7 +13,6 @@ import {
 
 const GECKOTERMINAL_API_BASE = "https://api.geckoterminal.com/api/v2";
 const BASE_NETWORK = "base";
-const TIMEFRAME = "hour";
 const CANDLE_LIMIT = 96;
 const REVALIDATE_SECONDS = 60;
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -24,8 +28,9 @@ export const geckoTerminalChartProvider: PairChartProvider = {
     }
 
     try {
+      const timeframe = getTimeframeConfig(pair.timeframe);
       const payload = await fetchJsonWithTimeout(
-        `${GECKOTERMINAL_API_BASE}/networks/${BASE_NETWORK}/pools/${pairAddress}/ohlcv/${TIMEFRAME}?aggregate=1&limit=${CANDLE_LIMIT}&currency=usd&token=base`,
+        `${GECKOTERMINAL_API_BASE}/networks/${BASE_NETWORK}/pools/${pairAddress}/ohlcv/${timeframe.path}?aggregate=${timeframe.aggregate}&limit=${CANDLE_LIMIT}&currency=usd&token=base`,
         {
           headers: { accept: "application/json" },
           next: { revalidate: REVALIDATE_SECONDS }
@@ -54,6 +59,20 @@ export const geckoTerminalChartProvider: PairChartProvider = {
     }
   }
 };
+
+function getTimeframeConfig(timeframe: ChartTimeframe | undefined) {
+  switch (timeframe) {
+    case "15m":
+      return { path: "minute", aggregate: 15 };
+    case "4h":
+      return { path: "hour", aggregate: 4 };
+    case "1d":
+      return { path: "day", aggregate: 1 };
+    case "1h":
+    default:
+      return { path: "hour", aggregate: 1 };
+  }
+}
 
 export function parseGeckoTerminalOhlcvResponse(payload: unknown): PairChartCandle[] {
   const response = readRecord(payload);

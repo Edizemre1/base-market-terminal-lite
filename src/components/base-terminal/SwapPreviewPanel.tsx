@@ -1,5 +1,6 @@
 import { LockKeyhole, Settings } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
+import { TokenAvatar } from "@/components/TokenIdentity";
 import { cx, formatNumber } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -44,6 +45,7 @@ export function SwapTicket({
         <TokenBox
           label="From"
           token={pair.quoteToken}
+          logoUrl={pair.quoteTokenLogoUrl}
           sublabel="Base"
           rightLabel={`Max: 0.2451 ${pair.quoteToken}`}
           value={amount}
@@ -59,6 +61,7 @@ export function SwapTicket({
         <TokenBox
           label="To (Estimated)"
           token={pair.baseToken}
+          logoUrl={pair.tokenLogoUrl}
           sublabel="Base"
           value={formatNumber(estimatedOutput)}
           readOnly
@@ -112,6 +115,7 @@ export function SwapTicket({
 function TokenBox({
   label,
   token,
+  logoUrl,
   sublabel,
   rightLabel,
   value,
@@ -120,6 +124,7 @@ function TokenBox({
 }: {
   label: string;
   token: string;
+  logoUrl?: string;
   sublabel: string;
   rightLabel?: string;
   value: string;
@@ -134,9 +139,7 @@ function TokenBox({
       </div>
       <div className="grid min-w-0 grid-cols-[104px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[116px_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-1.5">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-base-mint/15 font-mono text-[10px] font-semibold text-base-mint">
-            {token.slice(0, 2)}
-          </span>
+          <TokenAvatar symbol={token} logoUrl={logoUrl} size="md" />
           <div className="min-w-0">
             <p className="truncate font-mono text-[13px] font-semibold text-base-text">{token}</p>
             <p className="text-[10px] text-base-muted">{sublabel}</p>
