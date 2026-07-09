@@ -1,5 +1,6 @@
 import { LockKeyhole, Settings } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
+import { TokenAvatar } from "@/components/TokenIdentity";
 import { cx, formatNumber } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -33,18 +34,24 @@ export function SwapTicket({
       <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Swap selected pair
+            Execution preview
           </p>
-          <h2 className="text-[12px] font-semibold text-base-text">{pair.pair}</h2>
+          <h2 className="text-[12px] font-semibold text-base-text">Swap {pair.pair}</h2>
         </div>
-        <Settings size={14} className="text-base-muted" aria-hidden="true" />
+        <div className="flex items-center gap-1.5">
+          <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+            Disabled
+          </span>
+          <Settings size={14} className="text-base-muted" aria-hidden="true" />
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
         <TokenBox
           label="From"
           token={pair.quoteToken}
-          sublabel="Base"
+          logoUrl={pair.quoteTokenLogoUrl}
+          sublabel="Sell asset"
           rightLabel={`Max: 0.2451 ${pair.quoteToken}`}
           value={amount}
           onValueChange={onAmountChange}
@@ -59,12 +66,13 @@ export function SwapTicket({
         <TokenBox
           label="To (Estimated)"
           token={pair.baseToken}
-          sublabel="Base"
+          logoUrl={pair.tokenLogoUrl}
+          sublabel="Selected pair"
           value={formatNumber(estimatedOutput)}
           readOnly
         />
 
-        <div className="border border-base-line bg-base-elevated p-2">
+        <div className="border border-base-line bg-base-elevated p-2.5">
           <div className="mb-1 flex items-center justify-between">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
               Route preview (best)
@@ -79,15 +87,20 @@ export function SwapTicket({
           <RouteRow label="Network fee (est.)" value="$0.84" />
         </div>
 
-        <div className="space-y-1.5 text-[11px]">
+        <div className="border border-base-line bg-base-panel p-2 text-[11px]">
           <RouteRow label="Slippage tolerance" value="0.50%" />
           <RouteRow label="Price impact" value="-0.24%" tone="mint" />
           <RouteRow label="Platform fee" value="0.10% (Est. $0.33)" />
         </div>
 
         <div className="mt-auto space-y-2 pt-1">
-          <div className="border border-base-amber/45 bg-base-amber/10 p-2 text-[11px] leading-4 text-base-muted">
-            Low liquidity: higher price impact and slippage risk. {modeWarning}
+          <div className="border border-base-amber/45 bg-base-amber/10 p-2.5 text-[11px] leading-4 text-base-muted">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-base-amber">
+              Read-only boundary
+            </p>
+            <p className="mt-1">
+              Low liquidity can increase price impact and slippage. {modeWarning}
+            </p>
           </div>
 
           <button
@@ -97,7 +110,7 @@ export function SwapTicket({
             className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
           >
             <LockKeyhole size={14} aria-hidden="true" />
-            Review Swap
+            Review swap
           </button>
 
           <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
@@ -112,6 +125,7 @@ export function SwapTicket({
 function TokenBox({
   label,
   token,
+  logoUrl,
   sublabel,
   rightLabel,
   value,
@@ -120,6 +134,7 @@ function TokenBox({
 }: {
   label: string;
   token: string;
+  logoUrl?: string;
   sublabel: string;
   rightLabel?: string;
   value: string;
@@ -134,9 +149,7 @@ function TokenBox({
       </div>
       <div className="grid min-w-0 grid-cols-[104px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[116px_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-1.5">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-base-mint/15 font-mono text-[10px] font-semibold text-base-mint">
-            {token.slice(0, 2)}
-          </span>
+          <TokenAvatar symbol={token} logoUrl={logoUrl} size="md" />
           <div className="min-w-0">
             <p className="truncate font-mono text-[13px] font-semibold text-base-text">{token}</p>
             <p className="text-[10px] text-base-muted">{sublabel}</p>

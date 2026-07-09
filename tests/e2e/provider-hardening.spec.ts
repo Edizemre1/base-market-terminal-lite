@@ -12,6 +12,9 @@ const validDexPair = {
   dexId: "uniswap",
   pairAddress: "0x1111111111111111111111111111111111111111",
   url: "https://dexscreener.com/base/0x1111111111111111111111111111111111111111",
+  info: {
+    imageUrl: "https://example.com/token.png"
+  },
   baseToken: {
     address: "0x2222222222222222222222222222222222222222",
     name: "Fixture Token",
@@ -66,6 +69,7 @@ test.describe("provider response fixture hardening", () => {
       quoteToken: "WETH",
       dexName: "Uniswap",
       sourceUrl: "https://dexscreener.com/base/0x1111111111111111111111111111111111111111",
+      tokenLogoUrl: "https://example.com/token.png",
       volume24h: 190000,
       liquidity: 250000,
       change24h: 14.6,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPairChart } from "@/data/providers/chart";
-import type { ChartPairInput } from "@/data/providers/chart/types";
+import type { ChartPairInput, ChartTimeframe } from "@/data/providers/chart/types";
 import { resolveMarketDataMode } from "@/data/providers";
 
 type ChartRefreshBody = {
@@ -10,7 +10,10 @@ type ChartRefreshBody = {
   chart?: unknown;
   volume24h?: unknown;
   mode?: unknown;
+  timeframe?: unknown;
 };
+
+const chartTimeframes: ChartTimeframe[] = ["15m", "1h", "4h", "1d"];
 
 export async function POST(request: Request) {
   try {
@@ -39,9 +42,16 @@ function normalizeChartPairInput(body: ChartRefreshBody): ChartPairInput | undef
     id: body.id,
     dataSource: body.dataSource === "dexscreener" ? "dexscreener" : "mock",
     pairAddress: typeof body.pairAddress === "string" ? body.pairAddress : undefined,
+    timeframe: normalizeChartTimeframe(body.timeframe),
     chart: Array.isArray(body.chart) ? body.chart.map(toNumber).filter((value) => value > 0) : [],
     volume24h: toNumber(body.volume24h)
   };
+}
+
+function normalizeChartTimeframe(value: unknown): ChartTimeframe {
+  return typeof value === "string" && chartTimeframes.includes(value as ChartTimeframe)
+    ? (value as ChartTimeframe)
+    : "1h";
 }
 
 function toNumber(value: unknown) {

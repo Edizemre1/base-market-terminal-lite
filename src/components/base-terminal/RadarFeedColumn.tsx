@@ -1,5 +1,6 @@
 import { Star } from "lucide-react";
 import { type PinnedPair } from "@/components/TerminalSearchContext";
+import { PairAvatarStack } from "@/components/TokenIdentity";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -57,18 +58,27 @@ export function PinnedPairsPanel({
                 type="button"
                 disabled={!pair.currentPairId}
                 onClick={() => pair.currentPairId && onSelect(pair.currentPairId)}
-                className="min-w-0 text-left disabled:cursor-not-allowed"
+                className="flex min-w-0 items-center gap-2 text-left disabled:cursor-not-allowed"
               >
-                <span className="block truncate font-mono font-semibold text-base-text">
-                  {pair.pair}
-                </span>
-                <span
-                  className={cx(
-                    "block truncate text-[10px]",
-                    pair.stale ? "font-mono text-base-amber" : "text-base-muted"
-                  )}
-                >
-                  {pair.stale ? "Stale - not in current feed" : pair.dex}
+                <PairAvatarStack
+                  baseSymbol={pair.baseToken}
+                  quoteSymbol={pair.quoteToken}
+                  baseLogoUrl={pair.tokenLogoUrl}
+                  quoteLogoUrl={pair.quoteTokenLogoUrl}
+                  size="sm"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-mono font-semibold text-base-text">
+                    {pair.pair}
+                  </span>
+                  <span
+                    className={cx(
+                      "block truncate text-[10px]",
+                      pair.stale ? "font-mono text-base-amber" : "text-base-muted"
+                    )}
+                  >
+                    {pair.stale ? "Stale - not in current feed" : pair.dex}
+                  </span>
                 </span>
               </button>
               <span className="text-right font-mono text-[10px]">
@@ -137,11 +147,11 @@ export function OpportunityFeed({
             {title}
           </h2>
         </div>
-        <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-          View all
+        <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+          {pairs.length} rows
         </span>
       </div>
-      <div className="grid shrink-0 grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+      <div className="grid shrink-0 grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
         <span>Pair</span>
         <span>Age</span>
         <span className="text-right">Liquidity</span>
@@ -192,7 +202,7 @@ function FeedEmptyState({ kind }: { kind: FeedKind }) {
   if (kind === "new") {
     return (
       <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
-        <p className="font-mono text-base-text">No qualified new Base pairs found.</p>
+        <p className="font-mono text-base-text">No qualified new pairs found.</p>
         <p className="mt-1">Try Volume Inflow or Momentum.</p>
       </div>
     );
@@ -234,26 +244,40 @@ function FeedRow({
       <button
         type="button"
         onClick={() => onSelect(pair.id)}
-        className="grid min-h-10 w-full grid-cols-[minmax(104px,1.4fr)_34px_56px_56px_44px] items-center px-2 py-1 pr-8 text-left text-[11px] hover:bg-base-mint/5"
+        className="grid min-h-11 w-full grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] items-center px-2 py-1 pr-8 text-left text-[11px] hover:bg-base-mint/5"
       >
-        <span className="flex min-w-0 items-start gap-1.5">
+        <span className="flex min-w-0 items-center gap-2">
           <span
             className={cx(
-              "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+              "h-1.5 w-1.5 shrink-0 rounded-full",
               isFallbackRow ? "bg-base-amber" : "bg-base-mint"
             )}
+          />
+          <PairAvatarStack
+            baseSymbol={pair.baseToken}
+            quoteSymbol={pair.quoteToken}
+            baseLogoUrl={pair.tokenLogoUrl}
+            quoteLogoUrl={pair.quoteTokenLogoUrl}
+            size="sm"
           />
           <span className="min-w-0">
             <span className="block truncate font-mono font-semibold text-base-text">
               {pair.pair}
             </span>
-            <span
-              className={cx(
-                "block truncate text-[9px] leading-3",
-                isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
-              )}
-            >
-              {getFeedRowSubtitle(pair, isFallbackRow)}
+            <span className="flex min-w-0 items-center gap-1">
+              <span
+                className={cx(
+                  "truncate text-[9px] leading-3",
+                  isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+                )}
+              >
+                {getFeedRowSubtitle(pair, isFallbackRow)}
+              </span>
+              {!isFallbackRow ? (
+                <span className="shrink-0 border border-base-line bg-base-elevated px-1 font-mono text-[8px] uppercase text-base-muted">
+                  {pair.dexName ?? pair.dex}
+                </span>
+              ) : null}
             </span>
           </span>
         </span>
@@ -266,8 +290,10 @@ function FeedRow({
         </span>
         <span
           className={cx(
-            "text-right font-mono text-[10px]",
-            pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"
+            "justify-self-end border px-1 py-0.5 text-right font-mono text-[10px]",
+            pair.change24h >= 0
+              ? "border-base-mint/35 bg-base-mint/10 text-base-mint"
+              : "border-base-rose/35 bg-base-rose/10 text-base-rose"
           )}
         >
           {kind === "momentum"
@@ -299,6 +325,6 @@ function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
   }
 
   return pair.project && pair.project !== pair.baseToken
-    ? `${pair.project} - ${pair.dex}`
-    : pair.dex;
+    ? pair.project
+    : "Market pair";
 }

@@ -1,4 +1,5 @@
 export type PairChartSource = "synthetic" | "geckoterminal";
+export type ChartTimeframe = "15m" | "1h" | "4h" | "1d";
 
 export type PairChartCandle = {
   timestamp: number;
@@ -13,6 +14,7 @@ export type ChartPairInput = {
   id: string;
   dataSource?: "mock" | "dexscreener";
   pairAddress?: string;
+  timeframe?: ChartTimeframe;
   chart: number[];
   volume24h: number;
 };

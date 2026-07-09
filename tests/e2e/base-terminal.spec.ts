@@ -7,10 +7,10 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("loads the default mock terminal and keeps swap read-only", async ({ page }) => {
-    await expect(page.getByTestId("terminal-topbar")).toContainText("Base Terminal Lite");
+    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen.finance");
     await expect(page.getByTestId("feed-new")).toContainText("New Pairs");
-    await expect(page.getByTestId("selected-pair-panel")).toContainText("Selected pair");
-    await expect(page.getByTestId("swap-preview-panel")).toContainText("Swap selected pair");
+    await expect(page.getByTestId("selected-pair-panel")).toContainText("Selected market");
+    await expect(page.getByTestId("swap-preview-panel")).toContainText("Execution preview");
     await expect(page.getByTestId("review-swap-button")).toBeDisabled();
     await expect(page.getByText(/no transaction will be sent/i)).toBeVisible();
     await expect(page.getByText(/connect wallet/i)).toHaveCount(0);
@@ -18,8 +18,8 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
   test("loads read-only market data mode without crashing", async ({ page }) => {
     await page.goto("/?data=dexscreener");
-    await expect(page.getByTestId("terminal-topbar")).toContainText("Base Terminal Lite");
-    await expect(page.getByRole("button", { name: /read-only market data/i })).toBeVisible();
+    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen.finance");
+    await expect(page.getByRole("button", { name: /read-only data/i })).toBeVisible();
     await expect(page.getByTestId("feed-inflow")).toBeVisible();
     await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
     await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
@@ -96,7 +96,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
     expect(health).toMatchObject({
       ok: true,
-      app: "Base Terminal Lite",
+      app: "Mergen.finance",
       version: "0.1.0",
       readOnly: true
     });

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
-import type { PairChartResult } from "@/data/providers/chart/types";
+import type { ChartTimeframe, PairChartResult } from "@/data/providers/chart/types";
 import { getChartCacheKey } from "@/lib/base-terminal/pairs";
 import type { BasePair } from "@/types/baseTerminal";
 import type { ChartRefreshStatus } from "@/components/base-terminal/types";
@@ -11,7 +11,7 @@ export function useChartData(snapshotRef: { current: MarketTerminalSnapshot }) {
   const chartRefreshRequestIds = useRef<Record<string, number>>({});
 
   const refreshPairChart = useCallback(
-    async (pair: BasePair) => {
+    async (pair: BasePair, timeframe: ChartTimeframe = "1h") => {
       const chartKey = getChartCacheKey(pair);
       const requestId = (chartRefreshRequestIds.current[chartKey] ?? 0) + 1;
       chartRefreshRequestIds.current[chartKey] = requestId;
@@ -26,6 +26,7 @@ export function useChartData(snapshotRef: { current: MarketTerminalSnapshot }) {
             mode: snapshotRef.current.mode,
             dataSource: pair.dataSource,
             pairAddress: pair.pairAddress,
+            timeframe,
             chart: pair.chart,
             volume24h: pair.volume24h
           })

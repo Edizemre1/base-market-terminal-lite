@@ -34,6 +34,8 @@ export type PinnedPair = {
   id?: string;
   pairAddress?: string;
   currentPairId?: string;
+  tokenLogoUrl?: string;
+  quoteTokenLogoUrl?: string;
   pair: string;
   baseToken: string;
   quoteToken: string;
@@ -235,6 +237,8 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
     pairIdentity: candidate.pairIdentity ?? normalizePairIdentity(candidate.pair),
     id: candidate.id,
     pairAddress: candidate.pairAddress,
+    tokenLogoUrl: candidate.tokenLogoUrl,
+    quoteTokenLogoUrl: candidate.quoteTokenLogoUrl,
     pair: candidate.pair,
     baseToken: candidate.baseToken,
     quoteToken: candidate.quoteToken,
@@ -256,6 +260,8 @@ function toPinnedPair(pair: BasePair): PinnedPair {
     id: pair.id,
     pairAddress: pair.pairAddress,
     currentPairId: pair.id,
+    tokenLogoUrl: pair.tokenLogoUrl,
+    quoteTokenLogoUrl: pair.quoteTokenLogoUrl,
     pair: pair.pair,
     baseToken: pair.baseToken,
     quoteToken: pair.quoteToken,
@@ -276,6 +282,8 @@ function toStoredPinnedPair(pair: PinnedPair) {
     pairIdentity: pair.pairIdentity,
     id: pair.id,
     pairAddress: pair.pairAddress,
+    tokenLogoUrl: pair.tokenLogoUrl,
+    quoteTokenLogoUrl: pair.quoteTokenLogoUrl,
     pair: pair.pair,
     baseToken: pair.baseToken,
     quoteToken: pair.quoteToken,
