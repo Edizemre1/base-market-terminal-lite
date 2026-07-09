@@ -33,7 +33,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <TerminalSearchProvider>
       <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text xl:h-screen xl:overflow-hidden">
-        <header className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel">
+        <header
+          className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel"
+          data-testid="terminal-topbar"
+        >
           <div className="grid h-full grid-cols-[minmax(164px,188px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
             <Link href="/" className="flex min-w-0 items-center gap-2">
               <span className="grid h-5 w-5 place-items-center rounded-full bg-base-blue text-[10px] font-bold text-white">
@@ -143,6 +146,7 @@ function TerminalSearchBox() {
       />
       <span className="sr-only">Search token, pair, or contract</span>
       <input
+        aria-label="Search token, pair, or contract"
         type="search"
         value={query}
         onChange={(event) => {
@@ -167,6 +171,7 @@ function TerminalSearchBox() {
                 )}
               >
                 <button
+                  data-testid={`search-result-${pair.id}`}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => selectResult(pair.id)}
@@ -280,6 +285,7 @@ function ProviderHealthChip() {
 
   return (
     <TopChip
+      dataTestId="provider-health-status"
       label={`${sourceLabel} - ${statusLabel} - ${updateLabel}`}
       tone={tone}
       title={[
@@ -422,12 +428,14 @@ function TopChip({
   label,
   tone = "muted",
   icon,
-  title
+  title,
+  dataTestId
 }: {
   label: string;
   tone?: "mint" | "blue" | "amber" | "muted";
   icon?: ReactNode;
   title?: string;
+  dataTestId?: string;
 }) {
   const toneClassName = {
     mint: "border-base-mint/45 bg-base-mint/10 text-base-mint",
@@ -438,6 +446,7 @@ function TopChip({
 
   return (
     <span
+      data-testid={dataTestId}
       title={title}
       className={cx(
         "hidden h-6 min-w-0 max-w-[150px] items-center gap-1 whitespace-nowrap border px-1.5 lg:inline-flex",
