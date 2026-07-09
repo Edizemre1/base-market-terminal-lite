@@ -77,7 +77,10 @@ npm run dev
 npm run build
 npm run typecheck
 npm run lint
+npm run test:e2e
 ```
+
+`npm run test:e2e` runs Playwright smoke/regression tests against the local Next.js dev server. The tests cover read-only terminal loading, pair selection URL state, search, local watchlist persistence, filters/sorting, provider health, and disabled swap execution.
 
 ## Project Structure
 

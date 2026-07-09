@@ -28,14 +28,22 @@ export function SelectedPairPanel({
       : "+mock";
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+    <section
+      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      data-testid="selected-pair-panel"
+    >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Selected pair
           </p>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="truncate text-lg font-semibold text-base-text">{pair.pair}</h1>
+            <h1
+              className="truncate text-lg font-semibold text-base-text"
+              data-testid="selected-pair-title"
+            >
+              {pair.pair}
+            </h1>
             <Star size={14} className="shrink-0 text-base-mint" aria-hidden="true" />
             <span className="max-w-[150px] truncate border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
               {pair.address}
@@ -216,7 +224,10 @@ function ChartPanel({
         : undefined;
 
   return (
-    <div className="market-scanline flex min-h-[280px] flex-1 flex-col overflow-hidden border border-base-line bg-base-panel xl:min-h-0">
+    <div
+      className="market-scanline flex min-h-[280px] flex-1 flex-col overflow-hidden border border-base-line bg-base-panel xl:min-h-0"
+      data-testid="chart-panel"
+    >
       <div className="flex shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2 py-1.5">
         <div className="min-w-0">
           <p className="font-mono text-[12px] font-semibold text-base-text">

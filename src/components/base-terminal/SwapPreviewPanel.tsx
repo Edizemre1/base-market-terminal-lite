@@ -26,7 +26,10 @@ export function SwapTicket({
       : "Demo mode - no transaction will be sent";
 
   return (
-    <aside className="min-w-0 border border-base-line bg-base-panel xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:self-stretch xl:overflow-hidden">
+    <aside
+      className="min-w-0 border border-base-line bg-base-panel xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:self-stretch xl:overflow-hidden"
+      data-testid="swap-preview-panel"
+    >
       <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
@@ -90,6 +93,7 @@ export function SwapTicket({
           <button
             type="button"
             disabled
+            data-testid="review-swap-button"
             className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
           >
             <LockKeyhole size={14} aria-hidden="true" />

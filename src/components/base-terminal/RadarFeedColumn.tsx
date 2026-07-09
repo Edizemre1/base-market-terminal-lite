@@ -19,7 +19,10 @@ export function PinnedPairsPanel({
   filtersActive: boolean;
 }) {
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+    <section
+      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      data-testid="pinned-pairs-panel"
+    >
       <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
         <div className="flex items-center gap-2">
           <Star size={11} className="text-base-mint" fill="currentColor" aria-hidden="true" />
@@ -43,6 +46,7 @@ export function PinnedPairsPanel({
           pairs.map((pair) => (
             <div
               key={pair.key}
+              data-testid={`pinned-pair-${pair.currentPairId ?? pair.key}`}
               className={cx(
                 "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-base-line px-2 py-1.5 text-[11px] last:border-b-0",
                 pair.currentPairId === selectedPairId && "bg-base-mint/10",
@@ -121,7 +125,11 @@ export function OpportunityFeed({
     showFallbackLabels ? pairs.filter((pair) => pair.dataSource === "mock") : [];
 
   return (
-    <section id={id} className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
+    <section
+      id={id}
+      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      data-testid={`feed-${kind}`}
+    >
       <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] text-base-muted">{marker}</span>
@@ -217,6 +225,7 @@ function FeedRow({
 }) {
   return (
     <div
+      data-testid={`pair-row-${kind}-${pair.id}`}
       className={cx(
         "relative border-b border-base-line last:border-b-0",
         selectedPairId === pair.id && "bg-base-mint/10"
@@ -269,6 +278,7 @@ function FeedRow({
         </span>
       </button>
       <button
+        data-testid={`pin-pair-${kind}-${pair.id}`}
         type="button"
         onClick={() => onTogglePin(pair)}
         className={cx(

@@ -31,7 +31,10 @@ export function RadarFilterPanel({
   }
 
   return (
-    <section className="min-h-0 overflow-hidden border border-base-line bg-base-panel">
+    <section
+      className="min-h-0 overflow-hidden border border-base-line bg-base-panel"
+      data-testid="radar-filters"
+    >
       <div className="flex min-h-8 items-center justify-between border-b border-base-line bg-base-raised px-2">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
           Radar filters
@@ -50,6 +53,7 @@ export function RadarFilterPanel({
           {(["fresh", "liquid", "momentum", "volatile", "watched"] as RadarPreset[]).map(
             (preset) => (
               <button
+                data-testid={`radar-preset-${preset}`}
                 key={preset}
                 type="button"
                 onClick={() => applyPreset(preset)}
@@ -158,6 +162,7 @@ function RadarSelect({
         {label}
       </span>
       <select
+        data-testid={`radar-select-${label.toLowerCase().replace(/\s+/g, "-")}`}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="h-6 min-w-0 bg-base-panel px-1 font-mono text-[10px] text-base-text outline-none"
