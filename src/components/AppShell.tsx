@@ -54,6 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
               </Suspense>
+              <ProviderHealthChip />
               <TopChip label="UTC 19:06" />
               <TopChip label="EN / TR" />
               <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />
@@ -256,6 +257,75 @@ function normalizeSearch(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function ProviderHealthChip() {
+  const { providerHealth } = useTerminalSearch();
+
+  if (!providerHealth) {
+    return <TopChip label="Provider - idle - static" />;
+  }
+
+  const statusLabel = getProviderHealthStatusLabel(providerHealth);
+  const sourceLabel = providerHealth.mode === "dexscreener" ? "Read-only Base" : "Mock feed";
+  const updateLabel = formatProviderHealthTime(providerHealth.lastSuccessAt);
+  const tone =
+    providerHealth.status === "failed" || providerHealth.stale
+      ? "amber"
+      : providerHealth.status === "refreshing"
+        ? "blue"
+        : "mint";
+
+  return (
+    <TopChip
+      label={`${sourceLabel} - ${statusLabel} - ${updateLabel}`}
+      tone={tone}
+      title={[
+        providerHealth.providerName,
+        providerHealth.feedStatusLabel,
+        providerHealth.failureReason,
+        providerHealth.fallbackReason
+      ]
+        .filter(Boolean)
+        .join(" - ")}
+    />
+  );
+}
+
+function getProviderHealthStatusLabel({
+  status,
+  stale
+}: {
+  status: "idle" | "refreshing" | "failed";
+  stale: boolean;
+}) {
+  if (status === "refreshing") {
+    return "refreshing";
+  }
+
+  if (status === "failed") {
+    return "failed";
+  }
+
+  return stale ? "stale" : "idle";
+}
+
+function formatProviderHealthTime(value: string | undefined) {
+  if (!value) {
+    return "static";
+  }
+
+  const timestamp = new Date(value);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return "cached";
+  }
+
+  return timestamp.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
 function DataSourceSwitcher() {
   const pathname = usePathname();
   const router = useRouter();
@@ -347,20 +417,24 @@ function SidebarNetworkCopy({ mode }: { mode: MarketDataMode }) {
 function TopChip({
   label,
   tone = "muted",
-  icon
+  icon,
+  title
 }: {
   label: string;
-  tone?: "mint" | "blue" | "muted";
+  tone?: "mint" | "blue" | "amber" | "muted";
   icon?: ReactNode;
+  title?: string;
 }) {
   const toneClassName = {
     mint: "border-base-mint/45 bg-base-mint/10 text-base-mint",
     blue: "border-base-blue/25 bg-base-blue/5 text-base-electric",
+    amber: "border-base-amber/45 bg-base-amber/10 text-base-amber",
     muted: "border-base-line bg-base-elevated text-base-muted"
   };
 
   return (
     <span
+      title={title}
       className={cx(
         "hidden h-6 min-w-0 max-w-[150px] items-center gap-1 whitespace-nowrap border px-1.5 lg:inline-flex",
         toneClassName[tone]
