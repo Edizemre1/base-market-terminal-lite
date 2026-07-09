@@ -41,6 +41,8 @@ In read-only market data mode, the terminal refreshes provider snapshots about e
 
 Selected pair details can show public read-only provider fields such as addresses, source links, windowed volume/change, transaction counts, FDV, and market cap when available. Public market quality signals are transparent heuristics from displayed data only, not financial advice or private scoring.
 
+Radar filters, sorting, and presets are local read-only views over the loaded provider snapshot. Presets are transparent filter/sort combinations, not financial advice, private scoring, or trading recommendations.
+
 No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, or transaction building.
 
 ## What Is Included
