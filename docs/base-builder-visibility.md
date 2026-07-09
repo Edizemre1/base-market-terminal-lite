@@ -1,6 +1,6 @@
 # Base Builder Visibility
 
-Base Terminal Lite is prepared as a public read-only builder demo for the Base ecosystem.
+Mergen.finance Base Swap Terminal is prepared as a public read-only builder demo for the Base ecosystem.
 
 ## What This Demo Proves
 

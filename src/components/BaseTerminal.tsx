@@ -258,7 +258,7 @@ export function BaseTerminal({
       <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
         <section className="border border-base-line bg-base-panel p-4">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Base Terminal Lite
+            Mergen.finance
           </p>
           <p className="mt-2 font-mono text-sm text-base-text">
             No demo pairs are available from the active read-only provider.

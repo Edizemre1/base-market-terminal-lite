@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Copy, ExternalLink, LockKeyhole, RefreshCw, Settings } from "lucide-react";
+import { ExternalLink, LockKeyhole, RefreshCw, Settings } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { ChartTimeframe } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
@@ -45,20 +45,20 @@ export function SelectedPairPanel({
           />
           <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Selected pair
+            Selected market
           </p>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
             <h1
-              className="truncate text-lg font-semibold text-base-text"
+              className="truncate text-[17px] font-semibold leading-5 text-base-text"
               data-testid="selected-pair-title"
             >
               {pair.pair}
             </h1>
-            <span className="inline-flex items-center gap-1 border border-base-blue/25 bg-base-blue/5 px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-electric">
-              Base Mainnet
-            </span>
             <span className="border border-base-mint/35 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-mint">
               {pair.dexName ?? pair.dex}
+            </span>
+            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-base-muted">
+              {pair.dataSource === "mock" ? "Demo data" : "Read-only data"}
             </span>
             <span className="max-w-[150px] truncate border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[10px] text-base-muted">
               {pair.address}
@@ -78,7 +78,6 @@ export function SelectedPairPanel({
                 Outside current filter
               </span>
             ) : null}
-            <Copy size={12} className="shrink-0 text-base-muted" aria-hidden="true" />
             {pair.sourceUrl ? (
               <a
                 href={pair.sourceUrl}
@@ -304,7 +303,7 @@ function ChartPanel({
           )}
           <p className="font-mono text-[10px] text-base-muted">
             {hasReadOnlyOhlcv
-              ? "Read-only candles - Base"
+              ? "Cached OHLCV - read-only"
               : pair.chartUnavailableReason ?? "OHLCV unavailable for this selected pair"}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-base-muted">
@@ -454,7 +453,7 @@ function ChartPanel({
           {formatChartValue(latest.close)}
         </text>
         <text x="0" y={height - 2} className="fill-base-muted font-mono text-[10px]">
-          {timeframe.toUpperCase()} cached read-only preview
+          {timeframe.toUpperCase()} cached OHLCV preview
         </text>
         <text
           x={width}

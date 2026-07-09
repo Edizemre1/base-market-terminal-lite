@@ -22,7 +22,7 @@ export type {
 
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
 const FEED_ROW_TARGET = 8;
-const READ_ONLY_DATA_FALLBACK_LABEL = "Read-only market data + demo fallback";
+const READ_ONLY_DATA_FALLBACK_LABEL = "Read-only data + demo fallback";
 
 export function resolveMarketDataMode(
   mode = process.env.MARKET_DATA_MODE ?? process.env.NEXT_PUBLIC_MARKET_DATA_MODE
@@ -50,7 +50,7 @@ export function resolveUrlMarketDataMode(
 export function getMarketFeedStatusLabel(
   mode: MarketDataMode = resolveMarketDataMode()
 ): FeedStatusLabel {
-  return mode === "dexscreener" ? "READ-ONLY MARKET DATA" : "MOCK FEED";
+  return mode === "dexscreener" ? "READ-ONLY DATA" : "MOCK";
 }
 
 export async function getMarketDataProvider(
@@ -178,8 +178,8 @@ async function fillDexScreenerSnapshot(
 
   return {
     ...snapshot,
-    providerName: "Read-only Base market data + demo fallback",
-    feedStatusLabel: "READ-ONLY MARKET DATA + DEMO FALLBACK",
+    providerName: "Read-only market data + demo fallback",
+    feedStatusLabel: "READ-ONLY DATA + DEMO FALLBACK",
     defaultPairId,
     allPairs,
     newPairs,
@@ -203,8 +203,8 @@ function withDexScreenerFallbackLabel(snapshot: MarketTerminalSnapshot): MarketT
   return {
     ...snapshot,
     mode: "dexscreener",
-    providerName: "Read-only Base market data + demo fallback",
-    feedStatusLabel: "READ-ONLY MARKET DATA + DEMO FALLBACK",
+    providerName: "Read-only market data + demo fallback",
+    feedStatusLabel: "READ-ONLY DATA + DEMO FALLBACK",
     generatedAt: new Date().toISOString(),
     defaultPairId: allPairs[0]?.id ?? "",
     allPairs,

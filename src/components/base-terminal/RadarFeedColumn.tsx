@@ -147,8 +147,8 @@ export function OpportunityFeed({
             {title}
           </h2>
         </div>
-        <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-mint">
-          View all
+        <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+          {pairs.length} rows
         </span>
       </div>
       <div className="grid shrink-0 grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
@@ -202,7 +202,7 @@ function FeedEmptyState({ kind }: { kind: FeedKind }) {
   if (kind === "new") {
     return (
       <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
-        <p className="font-mono text-base-text">No qualified new Base pairs found.</p>
+        <p className="font-mono text-base-text">No qualified new pairs found.</p>
         <p className="mt-1">Try Volume Inflow or Momentum.</p>
       </div>
     );
@@ -326,5 +326,5 @@ function getFeedRowSubtitle(pair: BasePair, isFallbackRow: boolean) {
 
   return pair.project && pair.project !== pair.baseToken
     ? pair.project
-    : "Read-only Base pair";
+    : "Market pair";
 }

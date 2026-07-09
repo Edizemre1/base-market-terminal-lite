@@ -43,7 +43,7 @@ export default function DocsPage() {
         <div className="space-y-2">
           <TerminalPanel
             label="BUILDER LOG"
-            title="Base Terminal Lite direction"
+            title="Mergen.finance terminal direction"
             meta={<StatusPill label="Swap/radar" />}
           >
             <div className="grid gap-1 md:grid-cols-2">

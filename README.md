@@ -1,6 +1,6 @@
-# Base Terminal Lite
+# Mergen.finance Base Swap Terminal
 
-Public read-only Base market terminal demo for pair discovery, inspection, chart review, local watchlists, and disabled swap-preview workflows. The app defaults to local mock data and can optionally use public read-only provider data for Base pairs.
+Public read-only Base swap terminal demo for pair discovery, inspection, chart review, local watchlists, and disabled swap-preview workflows. The app defaults to local mock data and can optionally use public read-only provider data for Base pairs.
 
 ## Launch Links
 
@@ -21,7 +21,6 @@ Public read-only Base market terminal demo for pair discovery, inspection, chart
 
 ## Safety Boundaries
 
-- No unrelated private branding.
 - No private business logic.
 - No wallet connection.
 - No swaps, signing, approvals, transaction construction, or transaction execution.
@@ -36,8 +35,8 @@ Public read-only Base market terminal demo for pair discovery, inspection, chart
 
 Default mode is mock/demo. Use the topbar data source switch to choose between:
 
-- `MOCK FEED`
-- `READ-ONLY MARKET DATA`
+- `MOCK`
+- `READ-ONLY DATA`
 
 The switch updates the URL query string:
 
@@ -48,7 +47,7 @@ No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARK
 
 DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified read-only pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified read-only data is limited, and the app shows `Read-only market data + demo fallback`.
 
-Chart data is read-only and cached, not streaming. In read-only market data mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart safely falls back to the synthetic preview and labels it as unavailable.
+Chart data is read-only and cached, not streaming. In read-only market data mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart shows a clearly labeled unavailable/demo placeholder instead of a realistic market chart.
 
 Topbar search is local and read-only over the loaded provider snapshot. Selected pairs can be shared with `pair=<pairId-or-pairAddress>` while preserving `data=dexscreener` when read-only market data mode is active.
 
@@ -66,7 +65,7 @@ No API key is needed. DexScreener and OHLCV modes are read-only and do not enabl
 
 ## Public Demo Boundary
 
-Base Terminal Lite is a public read-only demo. Private or production transaction work belongs behind separate reviewed boundaries. Builder Code/ERC-8021 attribution belongs to later private transaction work, not this public demo yet.
+Mergen.finance Base Swap Terminal is a public read-only demo. Private or production transaction work belongs behind separate reviewed boundaries. Builder Code/ERC-8021 attribution belongs to later private transaction work, not this public demo yet.
 
 See [Public Demo Boundary](docs/public-demo-boundary.md) for the concise public/private boundary.
 See [Public Launch Checklist](docs/public-launch-checklist.md) and [Base Builder Visibility](docs/base-builder-visibility.md) for launch-readiness notes.

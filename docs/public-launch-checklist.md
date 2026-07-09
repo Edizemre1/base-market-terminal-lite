@@ -1,6 +1,6 @@
 # Public Launch Checklist
 
-Base Terminal Lite is a public read-only Base market terminal demo. Use this checklist before sharing the repo or demo externally.
+Mergen.finance Base Swap Terminal is a public read-only Base market terminal demo. Use this checklist before sharing the repo or demo externally.
 
 ## Demo Checks
 

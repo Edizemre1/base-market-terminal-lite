@@ -34,11 +34,16 @@ export function SwapTicket({
       <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Swap selected pair
+            Execution preview
           </p>
-          <h2 className="text-[12px] font-semibold text-base-text">{pair.pair}</h2>
+          <h2 className="text-[12px] font-semibold text-base-text">Swap {pair.pair}</h2>
         </div>
-        <Settings size={14} className="text-base-muted" aria-hidden="true" />
+        <div className="flex items-center gap-1.5">
+          <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+            Disabled
+          </span>
+          <Settings size={14} className="text-base-muted" aria-hidden="true" />
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
@@ -46,7 +51,7 @@ export function SwapTicket({
           label="From"
           token={pair.quoteToken}
           logoUrl={pair.quoteTokenLogoUrl}
-          sublabel="Base"
+          sublabel="Sell asset"
           rightLabel={`Max: 0.2451 ${pair.quoteToken}`}
           value={amount}
           onValueChange={onAmountChange}
@@ -62,12 +67,12 @@ export function SwapTicket({
           label="To (Estimated)"
           token={pair.baseToken}
           logoUrl={pair.tokenLogoUrl}
-          sublabel="Base"
+          sublabel="Selected pair"
           value={formatNumber(estimatedOutput)}
           readOnly
         />
 
-        <div className="border border-base-line bg-base-elevated p-2">
+        <div className="border border-base-line bg-base-elevated p-2.5">
           <div className="mb-1 flex items-center justify-between">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
               Route preview (best)
@@ -82,15 +87,20 @@ export function SwapTicket({
           <RouteRow label="Network fee (est.)" value="$0.84" />
         </div>
 
-        <div className="space-y-1.5 text-[11px]">
+        <div className="border border-base-line bg-base-panel p-2 text-[11px]">
           <RouteRow label="Slippage tolerance" value="0.50%" />
           <RouteRow label="Price impact" value="-0.24%" tone="mint" />
           <RouteRow label="Platform fee" value="0.10% (Est. $0.33)" />
         </div>
 
         <div className="mt-auto space-y-2 pt-1">
-          <div className="border border-base-amber/45 bg-base-amber/10 p-2 text-[11px] leading-4 text-base-muted">
-            Low liquidity: higher price impact and slippage risk. {modeWarning}
+          <div className="border border-base-amber/45 bg-base-amber/10 p-2.5 text-[11px] leading-4 text-base-muted">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-base-amber">
+              Read-only boundary
+            </p>
+            <p className="mt-1">
+              Low liquidity can increase price impact and slippage. {modeWarning}
+            </p>
           </div>
 
           <button
@@ -100,7 +110,7 @@ export function SwapTicket({
             className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
           >
             <LockKeyhole size={14} aria-hidden="true" />
-            Review Swap
+            Review swap
           </button>
 
           <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">

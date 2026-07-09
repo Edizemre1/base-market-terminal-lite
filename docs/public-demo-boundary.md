@@ -1,6 +1,6 @@
 # Public Demo Boundary
 
-Base Terminal Lite is a public read-only demo for Base market radar, pair inspection, and disabled swap preview workflows.
+Mergen.finance Base Swap Terminal is a public read-only demo for Base market radar, pair inspection, and disabled swap preview workflows.
 
 - Market data uses mock data by default and optional public read-only provider data.
 - Swap UI is present for preview only; the review action remains disabled.
