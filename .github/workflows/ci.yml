@@ -2,29 +2,57 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
+    name: Validate and package staging artifact
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_VERSION: "22"
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
     steps:
-      - name: Checkout
+      - name: Checkout exact source SHA
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
+
+      - name: Restore Next build cache
+        id: next-cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-next-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx', 'next.config.ts', 'tailwind.config.ts', 'postcss.config.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-next-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
 
       - name: Typecheck
         run: npm run typecheck
@@ -32,8 +60,49 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build
+      - name: Provider contract tests
+        run: npm run test:providers
+
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-playwright-
+
+      - name: Install Playwright system dependencies
+        run: npx playwright install-deps chromium
+
+      - name: Ensure Chromium is installed
+        run: npx playwright install chromium
+
+      - name: Production build
         run: npm run build
 
-      - name: Smoke tests
+      - name: Browser and responsive smoke tests
         run: npm run test:e2e
+
+      - name: Prepare and verify exact staging artifact
+        run: |
+          npm run artifact:prepare
+          archive=".artifacts/base-terminal-staging-${SOURCE_SHA}.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$archive" -C .artifacts/payload .
+          sha256sum "$archive" > "${archive}.sha256"
+          cp .artifacts/payload/artifact-manifest.json ".artifacts/base-terminal-staging-${SOURCE_SHA}.manifest.json"
+          npm run artifact:verify -- "$archive" "$SOURCE_SHA"
+
+      - name: Upload GREEN staging artifact
+        id: upload-staging
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-terminal-staging-${{ env.SOURCE_SHA }}
+          path: |
+            .artifacts/base-terminal-staging-${{ env.SOURCE_SHA }}.tar.gz
+            .artifacts/base-terminal-staging-${{ env.SOURCE_SHA }}.tar.gz.sha256
+            .artifacts/base-terminal-staging-${{ env.SOURCE_SHA }}.manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
