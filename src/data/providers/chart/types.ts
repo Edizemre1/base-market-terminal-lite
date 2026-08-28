@@ -1,4 +1,4 @@
-export type PairChartSource = "synthetic" | "geckoterminal";
+export type PairChartSource = "unavailable" | "geckoterminal";
 export type ChartTimeframe = "15m" | "1h" | "4h" | "1d";
 
 export type PairChartCandle = {

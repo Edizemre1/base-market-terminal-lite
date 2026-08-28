@@ -93,8 +93,6 @@ export function BaseTerminal({
         : undefined,
     [chartOverrides, selectedPair]
   );
-  const amountNumber = Number.parseFloat(amount);
-  const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
   const filteredNewPairs = useMemo(
     () =>
       sortRadarPairs(
@@ -244,15 +242,6 @@ export function BaseTerminal({
     return () => window.clearInterval(intervalId);
   }, [refreshProviderSnapshot, snapshotData.mode]);
 
-  const estimatedOutput = useMemo(() => {
-    if (!selectedPairWithChart) {
-      return 0;
-    }
-
-    const base = selectedPairWithChart.liquidity / Math.max(selectedPairWithChart.riskScore, 1);
-    return cleanAmount * base * selectedPairWithChart.volumeMultiple;
-  }, [cleanAmount, selectedPairWithChart]);
-
   if (!selectedPairWithChart) {
     return (
       <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
@@ -261,7 +250,11 @@ export function BaseTerminal({
             Mergen.finance
           </p>
           <p className="mt-2 font-mono text-sm text-base-text">
-            No demo pairs are available from the active read-only provider.
+            Live market data is temporarily unavailable.
+          </p>
+          <p className="mt-2 max-w-xl text-[11px] leading-5 text-base-muted">
+            No sample prices were substituted. Retry the read-only feed, or choose Mock only
+            when you explicitly want to explore the interface with labeled sample data.
           </p>
         </section>
       </main>
@@ -348,7 +341,6 @@ export function BaseTerminal({
           marketDataMode={snapshotData.mode}
           amount={amount}
           onAmountChange={setAmount}
-          estimatedOutput={estimatedOutput}
         />
       </section>
     </main>

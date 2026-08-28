@@ -1,6 +1,6 @@
 # Mergen.finance Base Swap Terminal
 
-Public read-only Base swap terminal demo for pair discovery, inspection, chart review, local watchlists, and disabled swap-preview workflows. The app defaults to local mock data and can optionally use public read-only provider data for Base pairs.
+Public read-only Base swap terminal for pair discovery, inspection, chart review, local watchlists, and disabled swap-preview workflows. The app defaults to public read-only provider data; labeled sample data is available only when explicitly selected.
 
 ## Launch Links
 
@@ -11,7 +11,7 @@ Public read-only Base swap terminal demo for pair discovery, inspection, chart r
 ## Core Features
 
 - DexScreener read-only Base radar for New Pairs, Volume Inflow, and Momentum feeds.
-- GeckoTerminal read-only OHLCV chart support with synthetic fallback.
+- GeckoTerminal read-only OHLCV chart support with an explicit unavailable state.
 - Compact topbar search over loaded provider data.
 - URL pair deep-links through `pair=<pairId-or-pairAddress>`.
 - Browser-local watchlist stored in `localStorage`.
@@ -33,21 +33,21 @@ Public read-only Base swap terminal demo for pair discovery, inspection, chart r
 
 ## Data Mode
 
-Default mode is mock/demo. Use the topbar data source switch to choose between:
+Default mode is `READ-ONLY DATA`. Use the topbar data source switch to choose between:
 
 - `MOCK`
 - `READ-ONLY DATA`
 
 The switch updates the URL query string:
 
-- Mock mode: `/`
-- DexScreener mode: `/?data=dexscreener`
+- DexScreener read-only mode: `/`
+- Explicit sample mode: `/?data=mock`
 
-No Vercel environment variable setup is required. `MARKET_DATA_MODE=mock`, `MARKET_DATA_MODE=dexscreener`, and `NEXT_PUBLIC_MARKET_DATA_MODE=mock` remain supported for compatibility, but the public app can switch data sources directly from the UI.
+No environment variable setup is required. The public app switches data sources directly from the URL/UI and never substitutes sample prices into read-only provider mode.
 
-DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified read-only pairs under 7 days old. Volume Inflow and Momentum may show a separate `Demo fallback` section when qualified read-only data is limited, and the app shows `Read-only market data + demo fallback`.
+DexScreener rows are filtered to Base pairs with usable price, pair address, token sides, liquidity above `$10K`, and 24h volume above `$5K`. New Pairs shows only qualified read-only pairs under 7 days old. When provider data is limited or unavailable, the terminal shows an explicit empty/unavailable state instead of inserting sample prices.
 
-Chart data is read-only and cached, not streaming. In read-only market data mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart shows a clearly labeled unavailable/demo placeholder instead of a realistic market chart.
+Chart data is read-only and cached, not streaming. In read-only market data mode, the app attempts optional GeckoTerminal OHLCV candles for valid Base pool addresses with 60-second revalidation. No API key is required. If OHLCV is unavailable, empty, rate-limited, or unsupported for a pair, the chart shows a clean unavailable state and does not draw a synthetic market path.
 
 Topbar search is local and read-only over the loaded provider snapshot. Selected pairs can be shared with `pair=<pairId-or-pairAddress>` while preserving `data=dexscreener` when read-only market data mode is active.
 
@@ -61,7 +61,7 @@ Selected pair details can show public read-only provider fields such as addresse
 
 Radar filters, sorting, and presets are local read-only views over the loaded provider snapshot. Presets are transparent filter/sort combinations, not financial advice, private scoring, or trading recommendations.
 
-No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, or transaction building.
+No API key is needed. DexScreener and OHLCV modes are read-only and do not enable live trading, wallet actions, approvals, transaction execution, transaction building, or executable quotes. The swap panel does not invent balances, fees, price impact, or output amounts.
 
 ## Public Demo Boundary
 
@@ -93,7 +93,11 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000`. Use `http://localhost:3000/?data=mock` only for explicitly labeled, deterministic UI exploration.
+
+## Development and CI policy
+
+Local development uses light, targeted checks. GitHub Actions owns the full Linux build and browser regression suite, produces an exact-SHA staging artifact, and cancels superseded runs for the same pull request. Feature-branch pushes do not trigger CI by themselves. See [AGENTS.md](AGENTS.md) for the shared $20/month Actions budget and computer-to-computer synchronization rules.
 
 ## Scripts
 

@@ -9,6 +9,13 @@ export function GET() {
     app: APP_NAME,
     version: APP_VERSION,
     timestamp: new Date().toISOString(),
-    readOnly: true
+    readOnly: true,
+    publicReadOnlyReady: true,
+    marketDataReady: true,
+    tokenSearchReady: true,
+    advancedChartsAssetsAvailable: false,
+    approvalRequestEnabled: false,
+    swapRequestEnabled: false,
+    authenticationRequiredForPrivateData: true
   });
 }

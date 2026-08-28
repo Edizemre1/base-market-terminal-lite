@@ -1,5 +1,4 @@
 import type { BasePair } from "@/types/baseTerminal";
-import { getPairChart } from "./chart";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
 import type {
@@ -20,9 +19,9 @@ export type {
   PairRiskDetails
 } from "./types";
 
-const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "mock";
-const FEED_ROW_TARGET = 8;
-const READ_ONLY_DATA_FALLBACK_LABEL = "Read-only data + demo fallback";
+const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "dexscreener";
+const READ_ONLY_DATA_UNAVAILABLE_LABEL =
+  "Read-only market data is temporarily unavailable. No sample prices were substituted.";
 const NEUTRAL_DEFAULT_PAIR_ORDER = [
   ["WETH", "USDC"],
   ["USDC", "WETH"],
@@ -95,10 +94,19 @@ async function buildMarketTerminalSnapshot(
   provider: MarketDataProvider,
   fallbackReason?: string
 ): Promise<MarketTerminalSnapshot> {
-  const newPairs = await hydratePairs(provider, await provider.getNewPairs());
-  const volumeInflows = await hydratePairs(provider, await provider.getVolumeInflows());
-  const momentumPairs = await hydratePairs(provider, await provider.getMomentumPairs());
-  const allPairs = dedupePairs([...newPairs, ...volumeInflows, ...momentumPairs]);
+  const [newPairInputs, volumeInflowInputs, momentumPairInputs] = await Promise.all([
+    provider.getNewPairs(),
+    provider.getVolumeInflows(),
+    provider.getMomentumPairs()
+  ]);
+  const allPairs = await hydratePairs(
+    provider,
+    dedupePairs([...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
+  );
+  const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
+  const newPairs = selectHydratedPairs(newPairInputs, pairsById);
+  const volumeInflows = selectHydratedPairs(volumeInflowInputs, pairsById);
+  const momentumPairs = selectHydratedPairs(momentumPairInputs, pairsById);
   const defaultPairId = allPairs[0]?.id ?? "";
 
   return {
@@ -123,8 +131,7 @@ async function hydratePair(
   provider: MarketDataProvider,
   pair: BasePair
 ): Promise<BasePair> {
-  const [chart, activity, liquidityDetail, risk] = await Promise.all([
-    getPairChart(pair, provider.mode),
+  const [activity, liquidityDetail, risk] = await Promise.all([
     provider.getActivityFeed(pair.id),
     provider.getLiquidityDetails(pair.id),
     provider.getRiskDetails(pair.id)
@@ -133,12 +140,12 @@ async function hydratePair(
   return {
     ...pair,
     dataSource: pair.dataSource ?? (provider.mode === "dexscreener" ? "dexscreener" : "mock"),
-    chart: chart.candles.map((candle) => candle.close),
-    chartCandles: chart.candles,
-    chartSource: chart.source,
-    chartLabel: chart.label,
-    chartUpdatedAt: chart.updatedAt,
-    chartUnavailableReason: chart.unavailableReason,
+    chart: [],
+    chartCandles: [],
+    chartSource: "unavailable",
+    chartLabel: "OHLCV loads for the selected pair",
+    chartUpdatedAt: undefined,
+    chartUnavailableReason: "Select a pair to request cached read-only OHLCV.",
     activity,
     liquidityDetail: liquidityDetail ?? pair.liquidityDetail,
     riskScore: risk?.riskScore ?? pair.riskScore,
@@ -166,88 +173,31 @@ function dedupePairs(pairs: BasePair[]) {
 async function fillDexScreenerSnapshot(
   snapshot: MarketTerminalSnapshot
 ): Promise<MarketTerminalSnapshot> {
-  const mockSnapshot = await buildMarketTerminalSnapshot(mockMarketDataProvider);
-  const newPairs = snapshot.newPairs;
-  const volumeInflows = fillFeed(snapshot.volumeInflows, mockSnapshot.volumeInflows);
-  const momentumPairs = fillFeed(snapshot.momentumPairs, mockSnapshot.momentumPairs);
-  const allPairs = dedupePairs([...newPairs, ...volumeInflows, ...momentumPairs]);
-  const usedFallback =
-    volumeInflows.length > snapshot.volumeInflows.length ||
-    momentumPairs.length > snapshot.momentumPairs.length;
-  const defaultPairId = getDefaultPairId({ newPairs, volumeInflows, momentumPairs });
-
-  if (!usedFallback) {
-    return {
-      ...snapshot,
-      defaultPairId
-    };
-  }
-
   return {
     ...snapshot,
-    providerName: "Read-only market data + demo fallback",
-    feedStatusLabel: "READ-ONLY DATA + DEMO FALLBACK",
-    defaultPairId,
-    allPairs,
-    newPairs,
-    volumeInflows,
-    momentumPairs,
-    fallbackReason: READ_ONLY_DATA_FALLBACK_LABEL
+    defaultPairId: getDefaultPairId(snapshot)
   };
 }
 
-async function buildDexScreenerFallbackSnapshot() {
-  const mockSnapshot = await buildMarketTerminalSnapshot(mockMarketDataProvider);
-  return withDexScreenerFallbackLabel(mockSnapshot);
+function selectHydratedPairs(inputs: BasePair[], pairsById: Map<string, BasePair>) {
+  return inputs
+    .map((pair) => pairsById.get(pair.id))
+    .filter((pair): pair is BasePair => Boolean(pair));
 }
 
-function withDexScreenerFallbackLabel(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
-  const newPairs: BasePair[] = [];
-  const volumeInflows = snapshot.volumeInflows.slice(0, FEED_ROW_TARGET);
-  const momentumPairs = snapshot.momentumPairs.slice(0, FEED_ROW_TARGET);
-  const allPairs = dedupePairs([...volumeInflows, ...momentumPairs]);
-
+function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
   return {
-    ...snapshot,
     mode: "dexscreener",
-    providerName: "Read-only market data + demo fallback",
-    feedStatusLabel: "READ-ONLY DATA + DEMO FALLBACK",
+    providerName: "DexScreener read-only market data",
+    feedStatusLabel: "READ-ONLY DATA",
     generatedAt: new Date().toISOString(),
-    defaultPairId: allPairs[0]?.id ?? "",
-    allPairs,
-    newPairs,
-    volumeInflows,
-    momentumPairs,
-    fallbackReason: READ_ONLY_DATA_FALLBACK_LABEL
+    defaultPairId: "",
+    allPairs: [],
+    newPairs: [],
+    volumeInflows: [],
+    momentumPairs: [],
+    fallbackReason: READ_ONLY_DATA_UNAVAILABLE_LABEL
   };
-}
-
-function fillFeed(primary: BasePair[], fallback: BasePair[]) {
-  const result = primary.slice(0, FEED_ROW_TARGET);
-  const seenIds = new Set(result.map((pair) => pair.id));
-  const seenPairKeys = new Set(result.map(getPairKey));
-
-  for (const pair of fallback) {
-    if (result.length >= FEED_ROW_TARGET) {
-      break;
-    }
-
-    const pairKey = getPairKey(pair);
-
-    if (seenIds.has(pair.id) || seenPairKeys.has(pairKey)) {
-      continue;
-    }
-
-    result.push(pair);
-    seenIds.add(pair.id);
-    seenPairKeys.add(pairKey);
-  }
-
-  return result;
-}
-
-function getPairKey(pair: BasePair) {
-  return `${normalizePairToken(pair.baseToken)}-${normalizePairToken(pair.quoteToken)}`;
 }
 
 function getDefaultPairId({
@@ -260,21 +210,12 @@ function getDefaultPairId({
   momentumPairs: BasePair[];
 }) {
   const orderedPairs = [...newPairs, ...volumeInflows, ...momentumPairs];
-  const liveOhlcvPairs = orderedPairs.filter(isLivePairWithOhlcv);
-  const preferredOhlcvPair =
-    findPreferredNeutralPair(liveOhlcvPairs) ?? getHighestQualityPair(liveOhlcvPairs);
+  const livePairs = orderedPairs.filter(isLivePair);
+  const preferredLivePair =
+    findPreferredNeutralPair(livePairs) ?? getHighestQualityPair(livePairs);
 
-  if (preferredOhlcvPair) {
-    return preferredOhlcvPair.id;
-  }
-
-  const livePair =
-    newPairs.find(isLivePair) ??
-    volumeInflows.find(isLivePair) ??
-    momentumPairs.find(isLivePair);
-
-  if (livePair) {
-    return livePair.id;
+  if (preferredLivePair) {
+    return preferredLivePair.id;
   }
 
   return volumeInflows[0]?.id ?? momentumPairs[0]?.id ?? "";
@@ -282,10 +223,6 @@ function getDefaultPairId({
 
 function isLivePair(pair: BasePair) {
   return pair.dataSource === "dexscreener";
-}
-
-function isLivePairWithOhlcv(pair: BasePair) {
-  return isLivePair(pair) && pair.chartSource === "geckoterminal";
 }
 
 function findPreferredNeutralPair(pairs: BasePair[]) {

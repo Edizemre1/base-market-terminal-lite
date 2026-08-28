@@ -1,22 +1,22 @@
 import { LockKeyhole, Settings } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { TokenAvatar } from "@/components/TokenIdentity";
-import { cx, formatNumber } from "@/lib/format";
+import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 
 export function SwapTicket({
   pair,
   marketDataMode,
   amount,
-  onAmountChange,
-  estimatedOutput
+  onAmountChange
 }: {
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
   amount: string;
   onAmountChange: (value: string) => void;
-  estimatedOutput: number;
 }) {
+  const amountNumber = Number.parseFloat(amount);
+  const amountValid = Number.isFinite(amountNumber) && amountNumber > 0;
   const modeWarning =
     marketDataMode === "dexscreener"
       ? "Read-only market data. No real funds will be used."
@@ -34,7 +34,7 @@ export function SwapTicket({
       <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Execution preview
+            Read-only preview
           </p>
           <h2 className="text-[12px] font-semibold text-base-text">Swap {pair.pair}</h2>
         </div>
@@ -52,7 +52,7 @@ export function SwapTicket({
           token={pair.quoteToken}
           logoUrl={pair.quoteTokenLogoUrl}
           sublabel="Sell asset"
-          rightLabel={`Max: 0.2451 ${pair.quoteToken}`}
+          rightLabel="Wallet not connected by design"
           value={amount}
           onValueChange={onAmountChange}
         />
@@ -68,30 +68,40 @@ export function SwapTicket({
           token={pair.baseToken}
           logoUrl={pair.tokenLogoUrl}
           sublabel="Selected pair"
-          value={formatNumber(estimatedOutput)}
+          value="Unavailable"
           readOnly
         />
 
         <div className="border border-base-line bg-base-elevated p-2.5">
           <div className="mb-1 flex items-center justify-between">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-              Route preview (best)
+              Quote status
             </p>
-            <span className="border border-base-mint/40 bg-base-mint/10 px-1.5 py-0.5 font-mono text-[10px] text-base-mint">
-              100%
+            <span className="border border-base-amber/40 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
+              Not requested
             </span>
           </div>
-          <RouteRow label={pair.dex} value={pair.route} />
-          <RouteRow label="Price impact" value="-0.24%" tone="mint" />
-          <RouteRow label="Minimum received" value={`${formatNumber(estimatedOutput * 0.99)} ${pair.baseToken}`} />
-          <RouteRow label="Network fee (est.)" value="$0.84" />
+          <RouteRow label="Pair context" value={pair.pair} />
+          <RouteRow
+            label="Market source"
+            value={marketDataMode === "dexscreener" ? "Read-only public data" : "Labeled sample data"}
+          />
+          <RouteRow label="Executable route" value="Unavailable" />
+          <RouteRow label="Price impact" value="Unavailable" />
+          <RouteRow label="Network fee" value="Unavailable" />
         </div>
 
         <div className="border border-base-line bg-base-panel p-2 text-[11px]">
-          <RouteRow label="Slippage tolerance" value="0.50%" />
-          <RouteRow label="Price impact" value="-0.24%" tone="mint" />
-          <RouteRow label="Platform fee" value="0.10% (Est. $0.33)" />
+          <RouteRow label="Wallet" value="Not connected" />
+          <RouteRow label="Approval" value="Not available" />
+          <RouteRow label="Transaction" value="Not constructed" />
         </div>
+
+        {!amountValid ? (
+          <p className="border border-base-amber/40 bg-base-amber/10 px-2 py-1.5 text-[11px] text-base-amber">
+            Enter an amount greater than zero to inspect the local preview context.
+          </p>
+        ) : null}
 
         <div className="mt-auto space-y-2 pt-1">
           <div className="border border-base-line border-l-base-amber bg-base-elevated p-2.5 text-[11px] leading-4 text-base-muted">
@@ -110,7 +120,7 @@ export function SwapTicket({
             className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
           >
             <LockKeyhole size={14} aria-hidden="true" />
-            Review swap
+            Quote unavailable — preview only
           </button>
 
           <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">

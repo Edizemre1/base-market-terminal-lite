@@ -451,7 +451,7 @@ function normalizePair(pair: DexPair): BasePair | undefined {
     volumeMultiple: liquidity > 0 ? Number((volume24h / liquidity).toFixed(2)) : 0,
     riskScore,
     riskLabel: "Derived/demo risk UI",
-    chart: buildSyntheticChart(change24h, volume24h, liquidity),
+    chart: [],
     pressure: { buy: buyPressure, sell: sellPressure },
     holders: {
       top10: "N/A",
@@ -640,19 +640,6 @@ function getMomentumRank(pair: BasePair) {
   const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity, 1)) * 3, 0, 18);
 
   return priceSignal + volumeLiquiditySignal + liquiditySignal + pair.momentumScore * 0.2;
-}
-
-function buildSyntheticChart(change24h: number, volume24h: number, liquidity: number) {
-  const direction = change24h >= 0 ? 1 : -1;
-  const volatility = liquidity > 0 ? clamp(volume24h / liquidity, 0.08, 1.1) : 0.2;
-  const base = 1;
-
-  return Array.from({ length: 12 }, (_, index) => {
-    const progress = index / 11;
-    const trend = (Math.abs(change24h) / 100) * progress * direction;
-    const wave = Math.sin(index * 1.7) * volatility * 0.025;
-    return Number((base + trend + wave).toFixed(4));
-  });
 }
 
 function dedupeDexPairs(pairs: DexPair[]) {

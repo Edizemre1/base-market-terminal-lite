@@ -7,8 +7,7 @@ import {
   Radar,
   Search,
   Star,
-  Shuffle,
-  WalletCards
+  Shuffle
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -38,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(206px,242px)_minmax(220px,520px)_minmax(0,1fr)] items-center gap-2 px-2">
+          <div className="grid h-full grid-cols-[minmax(120px,0.9fr)_minmax(150px,1.5fr)] items-center gap-2 px-2 lg:grid-cols-[minmax(206px,242px)_minmax(220px,520px)_minmax(0,1fr)]">
             <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
@@ -56,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <TerminalSearchBox />
 
-            <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em]">
+            <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em] lg:flex">
               <TopChip
                 label="Base Mainnet"
                 tone="mint"
@@ -66,9 +65,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <DataSourceSwitcher />
               </Suspense>
               <ProviderHealthChip />
-              <TopChip label="UTC 19:06" />
-              <TopChip label="EN / TR" />
-              <TopChip label="0xDemo...9A1" icon={<WalletCards size={12} />} />
+              <TopChip label="Read-only" tone="mint" />
             </div>
           </div>
         </header>
@@ -388,13 +385,13 @@ function DataSourceSwitcher() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeMode: MarketDataMode =
-    searchParams.get("data") === "dexscreener" ? "dexscreener" : "mock";
+    searchParams.get("data") === "mock" ? "mock" : "dexscreener";
 
   function selectMode(mode: MarketDataMode) {
     const nextParams = new URLSearchParams(searchParams.toString());
 
-    if (mode === "dexscreener") {
-      nextParams.set("data", "dexscreener");
+    if (mode === "mock") {
+      nextParams.set("data", "mock");
     } else {
       nextParams.delete("data");
     }
@@ -449,7 +446,7 @@ function DataSourceButton({
 function DataSourceFallback() {
   return (
     <span className="hidden h-6 items-center border border-base-line bg-base-elevated px-1.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-base-muted lg:inline-flex">
-      Mock
+      Read-Only Data
     </span>
   );
 }
@@ -457,7 +454,7 @@ function DataSourceFallback() {
 function SidebarNetworkCard() {
   const searchParams = useSearchParams();
   const activeMode: MarketDataMode =
-    searchParams.get("data") === "dexscreener" ? "dexscreener" : "mock";
+    searchParams.get("data") === "mock" ? "mock" : "dexscreener";
 
   return <SidebarNetworkCopy mode={activeMode} />;
 }

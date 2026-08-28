@@ -5,7 +5,8 @@ Mergen.finance Base Swap Terminal is a public read-only Base market terminal dem
 ## Demo Checks
 
 - Live demo opens: https://base-market-terminal-lite-1stf8lo85-eddie0159.vercel.app/
-- Main terminal loads in mock mode.
+- Main terminal loads in read-only provider mode without sample-price substitution.
+- Explicit `?data=mock` mode remains clearly labeled for deterministic UI exploration.
 - Read-only market data mode loads without requiring Vercel environment setup.
 - `/status` renders public demo status.
 - `/api/health` returns safe read-only JSON only.

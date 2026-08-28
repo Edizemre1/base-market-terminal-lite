@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ExternalLink, LockKeyhole, RefreshCw, Settings } from "lucide-react";
+import { ExternalLink, LockKeyhole, RefreshCw } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { ChartTimeframe } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
@@ -27,7 +27,7 @@ export function SelectedPairPanel({
       ? isDemoFallbackSelected
         ? "Mock fallback"
         : "Read-only feed"
-      : "+mock";
+      : "Labeled sample";
 
   return (
     <section
@@ -93,22 +93,6 @@ export function SelectedPairPanel({
           </div>
         </div>
         <div className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted md:flex">
-          {["5m", "15m", "1h", "4h", "1d"].map((period) => (
-            <span
-              key={period}
-              className={cx(
-                "border px-1.5 py-0.5",
-                period === "1h"
-                  ? "border-base-mint bg-base-mint/10 text-base-mint"
-                  : "border-base-line bg-base-elevated"
-              )}
-            >
-              {period}
-            </span>
-          ))}
-          <span className="grid h-5 w-5 place-items-center border border-base-line bg-base-elevated">
-            <Settings size={11} aria-hidden="true" />
-          </span>
           <button
             type="button"
             onClick={() => onRefreshChart(pair)}
@@ -140,7 +124,12 @@ export function SelectedPairPanel({
           detail={readOnlyDetail}
         />
         <Metric label="Age" value={pair.age} detail={formatPairCreatedAt(pair)} />
-        <Metric label="Risk score" value={`${pair.riskScore} / 100`} detail={pair.riskLabel} tone="mint" />
+        <Metric
+          label="Risk score"
+          value={`${pair.riskScore} / 100`}
+          detail={pair.riskLabel}
+          tone={pair.riskScore <= 30 ? "mint" : pair.riskScore >= 61 ? "rose" : "default"}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
@@ -159,14 +148,14 @@ export function SelectedPairPanel({
           <MiniModule
             label="Holder Concentration"
             value={`Top 10: ${pair.holders.top10}`}
-            detail="Healthy"
+            detail="Provider-reported concentration"
             bar={Number.parseFloat(pair.holders.top10)}
           />
-          <MiniModule label="Pool Age" value={pair.poolAge} detail="Just launched" />
+          <MiniModule label="Pool Age" value={pair.poolAge} detail="Public pair metadata" />
           <MiniModule
             label="Contract Flags"
             value={pair.flags[0] ?? "No flags"}
-            detail={pair.flags[1] ?? "Demo check"}
+            detail={pair.flags[1] ?? "Additional flag unavailable"}
           />
           <MiniModule
             label="Taxes"
@@ -271,7 +260,7 @@ function ChartPanel({
   const chartLabel = hasReadOnlyOhlcv
     ? (pair.chartLabel ?? "OHLCV read-only \u00b7 cached chart")
     : pair.dataSource === "mock"
-      ? "Mock preview data"
+      ? "Sample data — chart disabled"
       : "OHLCV unavailable";
   const statusMessage =
     refreshStatus === "refreshing"
@@ -279,7 +268,7 @@ function ChartPanel({
       : refreshStatus === "using-last"
       ? "Using last available chart"
       : !hasReadOnlyOhlcv
-        ? "Demo chart preview - not real market data"
+        ? "No synthetic chart rendered"
         : undefined;
 
   return (
@@ -287,7 +276,7 @@ function ChartPanel({
       className="market-scanline flex min-h-[280px] flex-1 flex-col overflow-hidden border border-base-line bg-base-panel xl:min-h-0"
       data-testid="chart-panel"
     >
-      <div className="relative z-20 shrink-0 border-b border-base-line bg-base-raised px-2 py-1.5 pr-[188px]">
+      <div className="relative z-20 shrink-0 border-b border-base-line bg-base-raised px-2 py-1.5 md:pr-[188px]">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-2 font-mono text-[12px] font-semibold text-base-text">
             <span>{pair.pair.replace(" / ", "/")}</span>
@@ -303,7 +292,7 @@ function ChartPanel({
             </p>
           ) : (
             <p className="mt-1 font-mono text-[10px] text-base-amber">
-              Demo chart preview - not real market data
+              Chart unavailable — no synthetic market path is shown
             </p>
           )}
           <p className="font-mono text-[10px] text-base-muted">
@@ -316,7 +305,7 @@ function ChartPanel({
             {statusMessage ? <span className="text-base-amber">{statusMessage}</span> : null}
           </div>
         </div>
-        <div className="absolute right-2 top-1.5 z-30 flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5 md:absolute md:right-2 md:top-1.5 md:z-30 md:mt-0 md:justify-end">
           <div className="flex h-6 items-center border border-base-line bg-base-elevated">
             {(["15m", "1h", "4h", "1d"] as ChartTimeframe[]).map((option) => (
               <button
@@ -521,7 +510,7 @@ function ChartUnavailablePlaceholder({
   statusMessage?: string;
   timeframe: ChartTimeframe;
 }) {
-  const headline = "Demo chart preview";
+  const headline = "Chart unavailable";
   const reason =
     pair.chartUnavailableReason ??
     "Read-only OHLCV is not available for this selected pair yet.";
@@ -532,55 +521,12 @@ function ChartUnavailablePlaceholder({
         className="pointer-events-none absolute inset-2 border border-dashed border-base-line bg-base-panel/45"
         aria-hidden="true"
       />
-      <svg
-        viewBox="0 0 820 270"
-        className="pointer-events-none absolute inset-0 h-full w-full opacity-75"
-        aria-hidden="true"
-      >
-        <defs>
-          <linearGradient id={`demo-preview-${pair.id}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="rgb(var(--color-mint))" stopOpacity="0.13" />
-            <stop offset="100%" stopColor="rgb(var(--color-mint))" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {Array.from({ length: 6 }).map((_, index) => (
-          <line
-            key={`placeholder-h-${index}`}
-            x1="0"
-            x2="820"
-            y1={32 + index * 38}
-            y2={32 + index * 38}
-            stroke="rgb(var(--color-line))"
-            strokeOpacity="0.62"
-          />
-        ))}
-        <path
-          d="M52 178 C126 151 167 163 225 134 S332 118 396 130 S520 153 594 112 S700 82 768 92 L768 214 L52 214 Z"
-          fill={`url(#demo-preview-${pair.id})`}
-        />
-        <path
-          d="M52 178 C126 151 167 163 225 134 S332 118 396 130 S520 153 594 112 S700 82 768 92"
-          fill="none"
-          stroke="rgb(var(--color-mint))"
-          strokeDasharray="7 7"
-          strokeOpacity="0.45"
-          strokeWidth="1.6"
-        />
-        <text
-          x="410"
-          y="148"
-          textAnchor="middle"
-          className="fill-base-muted font-mono text-[26px] font-semibold uppercase opacity-20"
-        >
-          DEMO PREVIEW
-        </text>
-      </svg>
       <div className="relative z-10 m-auto max-w-[440px] border border-base-line bg-base-panel/95 px-4 py-3 text-center">
         <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-base-muted">
           {headline}
         </p>
         <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">
-          Demo chart preview - not real market data
+          No synthetic market chart is rendered
         </p>
         <p className="mt-2 text-[11px] leading-5 text-base-muted">{reason}</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">

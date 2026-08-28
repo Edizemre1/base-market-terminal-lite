@@ -6,6 +6,10 @@ import {
   parseDexTokenProfiles
 } from "../../src/data/providers/dexScreenerProvider";
 import { parseGeckoTerminalOhlcvResponse } from "../../src/data/providers/chart/geckoTerminalChartProvider";
+import {
+  getMarketTerminalSnapshot,
+  resolveUrlMarketDataMode
+} from "../../src/data/providers";
 
 const validDexPair = {
   chainId: "base",
@@ -54,6 +58,18 @@ const validDexPair = {
   },
   pairCreatedAt: Date.now() - 45 * 60 * 1000
 };
+
+test.describe("market data safety defaults", () => {
+  test("defaults to read-only data and requires explicit sample selection", async () => {
+    expect(resolveUrlMarketDataMode(undefined)).toBe("dexscreener");
+    expect(resolveUrlMarketDataMode("mock")).toBe("mock");
+
+    const sampleSnapshot = await getMarketTerminalSnapshot("mock");
+    expect(sampleSnapshot.mode).toBe("mock");
+    expect(sampleSnapshot.allPairs.length).toBeGreaterThan(0);
+    expect(sampleSnapshot.allPairs.every((pair) => pair.dataSource === "mock")).toBeTruthy();
+  });
+});
 
 test.describe("provider response fixture hardening", () => {
   test("normalizes valid DexScreener pairs into the internal pair model", () => {

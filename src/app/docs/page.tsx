@@ -1,8 +1,8 @@
 import { StatusPill, TerminalPanel } from "@/components/TerminalWidgets";
 
 const safetyItems = [
-  "Mock Base pair data by default",
-  "Optional DexScreener read-only mode",
+  "DexScreener read-only data by default",
+  "Sample data only through an explicit Mock selection",
   "No wallet signing",
   "No approvals",
   "No real swaps or blockchain transactions",
@@ -15,7 +15,7 @@ const buildItems = [
   "Clickable new pair, inflow, and momentum feeds",
   "Selected pair chart, risk, liquidity, and activity modules",
   "Always-visible disabled swap ticket",
-  "Read-only provider boundary with mock fallback"
+  "Read-only provider boundary with an explicit unavailable state"
 ];
 
 export default function DocsPage() {
@@ -68,7 +68,7 @@ export default function DocsPage() {
               Base pair discovery can run through read-only provider adapters.
               Wallet connection, swap routing, and fee handling should be added
               behind explicit boundaries later. This MVP keeps execution
-              disabled and falls back to mock data when providers are unavailable.
+              disabled and never substitutes sample prices when providers are unavailable.
             </p>
           </TerminalPanel>
         </div>

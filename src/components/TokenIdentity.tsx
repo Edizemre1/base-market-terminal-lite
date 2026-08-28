@@ -31,7 +31,7 @@ export function MergenMark({ className }: { className?: string }) {
         alt=""
         width={20}
         height={27}
-        className="h-full w-auto object-contain"
+        className="object-contain"
         priority
       />
     </span>
