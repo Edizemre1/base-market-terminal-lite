@@ -610,7 +610,8 @@ function formatChartTimestamp(value: string | undefined) {
   return timestamp.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hour12: false,
+    timeZone: "UTC"
   });
 }
 
@@ -666,6 +667,7 @@ function formatPairCreatedAt(pair: BasePair) {
   return timestamp.toLocaleDateString("en-US", {
     month: "short",
     day: "2-digit",
-    year: "numeric"
+    year: "numeric",
+    timeZone: "UTC"
   });
 }

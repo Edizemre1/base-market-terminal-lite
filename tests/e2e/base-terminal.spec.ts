@@ -21,6 +21,11 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("loads the default read-only market data mode without sample substitution", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+
     await page.goto("/");
     await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen.finance");
     await expect(page.getByRole("button", { name: /read-only data/i })).toBeVisible();
@@ -28,6 +33,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       /Selected market|Live market data is temporarily unavailable/
     );
     await expect(page.locator("body")).not.toContainText("Demo fallback selected");
+    expect(consoleErrors).toEqual([]);
   });
 
   test("clicking a pair updates selected pair and restores through the URL", async ({ page }) => {
