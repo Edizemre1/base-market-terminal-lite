@@ -26,7 +26,10 @@ export type WalletProviderOption = {
   source: "eip6963" | "legacy";
   icon?: string;
   rdns?: string;
+  compatibility: "verified" | "eip1193" | "unverified";
 };
+
+export type WalletErrorCode = "cancelled" | "pending" | "unreachable" | "unsupported-base";
 
 export type ReadOnlyWalletSnapshot = {
   address?: string;
@@ -45,6 +48,7 @@ export type WalletControllerStatus =
 export type WalletControllerState = ReadOnlyWalletSnapshot & {
   status: WalletControllerStatus;
   error?: string;
+  errorCode?: WalletErrorCode;
   providers: WalletProviderOption[];
   selectedProviderId?: string;
 };
@@ -79,6 +83,7 @@ export class ReadOnlyWalletController {
   private reconcilePromise?: Promise<void>;
   private reconcileQueued = false;
   private started = false;
+  private preferredProviderId?: string;
 
   private readonly handleAnnouncement = (event: Event) => {
     const announcement = event as Eip6963Announcement;
@@ -92,7 +97,8 @@ export class ReadOnlyWalletController {
       provider,
       source: "eip6963",
       icon: readSafeWalletIcon(info.icon),
-      rdns: info.rdns
+      rdns: info.rdns,
+      compatibility: classifyWalletCompatibility(info.name, info.rdns, "eip6963")
     });
   };
 
@@ -140,11 +146,15 @@ export class ReadOnlyWalletController {
     return () => this.subscribers.delete(listener);
   }
 
-  start(target: WalletDiscoveryTarget = window as Window & WalletDiscoveryTarget) {
+  start(
+    target: WalletDiscoveryTarget = window as Window & WalletDiscoveryTarget,
+    preferredProviderId?: string
+  ) {
     if (this.started && this.discoveryTarget === target) return;
 
     this.stop();
     this.started = true;
+    this.preferredProviderId = preferredProviderId;
     this.discoveryTarget = target;
     this.setState({ ...INITIAL_CONTROLLER_STATE });
     target.addEventListener("eip6963:announceProvider", this.handleAnnouncement);
@@ -156,11 +166,13 @@ export class ReadOnlyWalletController {
         id: "legacy:injected",
         name: readLegacyProviderName(legacyProvider),
         provider: legacyProvider,
-        source: "legacy"
+        source: "legacy",
+        compatibility: classifyWalletCompatibility(readLegacyProviderName(legacyProvider), undefined, "legacy")
       });
     }
 
     if (this.state.providers.length === 0) this.patchState({ status: "unavailable" });
+    else if (!this.selectedProvider) this.patchState({ status: "disconnected" });
   }
 
   stop() {
@@ -168,6 +180,7 @@ export class ReadOnlyWalletController {
     this.detachProviderListeners();
     this.discoveryTarget = undefined;
     this.started = false;
+    this.preferredProviderId = undefined;
     this.reconcileQueued = false;
   }
 
@@ -178,13 +191,13 @@ export class ReadOnlyWalletController {
     this.bindProvider(option);
     this.patchState({
       selectedProviderId: option.id,
-      status: "checking",
+      status: "disconnected",
       address: undefined,
       chainId: undefined,
       balanceEth: undefined,
-      error: undefined
+      error: undefined,
+      errorCode: undefined
     });
-    this.queueReconcile();
   }
 
   connect() {
@@ -194,7 +207,8 @@ export class ReadOnlyWalletController {
     if (!provider) {
       this.patchState({
         status: "unavailable",
-        error: "Install or select a compatible wallet to connect."
+        error: "Install or select a compatible wallet to connect.",
+        errorCode: "unreachable"
       });
       return Promise.resolve();
     }
@@ -210,7 +224,7 @@ export class ReadOnlyWalletController {
         }
       } catch (requestError) {
         if (provider === this.selectedProvider) {
-          this.patchState({ status: "error", error: getWalletErrorMessage(requestError) });
+          this.patchState({ status: "error", error: getWalletErrorMessage(requestError), errorCode: getWalletErrorCode(requestError) });
         }
       } finally {
         this.connectPromise = undefined;
@@ -230,8 +244,15 @@ export class ReadOnlyWalletController {
     if (!provider) {
       this.patchState({
         status: "unavailable",
-        error: "Install or select a compatible wallet to connect."
+        error: "Install or select a compatible wallet to connect.",
+        errorCode: "unreachable"
       });
+      return Promise.resolve();
+    }
+
+    const selectedOption = this.state.providers.find((option) => option.id === this.selectedProviderId);
+    if (selectedOption?.compatibility !== "verified") {
+      this.patchState({ error: "This wallet does not support Base.", errorCode: "unsupported-base" });
       return Promise.resolve();
     }
 
@@ -247,7 +268,7 @@ export class ReadOnlyWalletController {
         }
       } catch (requestError) {
         if (provider === this.selectedProvider) {
-          this.patchState({ error: getWalletErrorMessage(requestError) });
+          this.patchState({ error: getWalletErrorMessage(requestError), errorCode: getWalletErrorCode(requestError) });
         }
       } finally {
         this.switchPromise = undefined;
@@ -265,7 +286,8 @@ export class ReadOnlyWalletController {
       status: this.selectedProvider ? "disconnected" : "unavailable",
       address: undefined,
       balanceEth: undefined,
-      error: undefined
+      error: undefined,
+      errorCode: undefined
     });
   }
 
@@ -275,8 +297,11 @@ export class ReadOnlyWalletController {
     );
     if (duplicate) return;
 
-    this.patchState({ providers: [...this.state.providers, option] });
-    if (!this.selectedProvider) {
+    this.patchState({
+      providers: [...this.state.providers, option],
+      status: this.selectedProvider ? this.state.status : "disconnected"
+    });
+    if (!this.selectedProvider && option.id === this.preferredProviderId && option.compatibility !== "unverified") {
       this.bindProvider(option);
       this.patchState({ selectedProviderId: option.id, status: "checking" });
       this.queueReconcile();
@@ -351,7 +376,8 @@ export class ReadOnlyWalletController {
     this.patchState({
       ...next,
       status: next.address ? "connected" : "disconnected",
-      error: undefined
+      error: undefined,
+      errorCode: undefined
     });
   }
 
@@ -434,6 +460,13 @@ export function getWalletErrorMessage(error: unknown) {
   return "The wallet could not complete this request. Try again or choose another wallet.";
 }
 
+export function getWalletErrorCode(error: unknown): WalletErrorCode {
+  const code = readProviderErrorCode(error);
+  if (code === 4001) return "cancelled";
+  if (code === -32_002) return "pending";
+  return "unreachable";
+}
+
 export function getWalletDiagnostic(error: unknown) {
   return {
     category: error instanceof RangeError ? "provider-recursion" : readProviderErrorCode(error) === 4001 ? "user-rejected" : "provider-request-failed",
@@ -454,11 +487,23 @@ function readProviderErrorCode(error: unknown) {
 }
 
 function readLegacyProviderName(provider: Eip1193Provider) {
-  const flags = provider as Eip1193Provider & { isMetaMask?: boolean; isCoinbaseWallet?: boolean; isRabby?: boolean };
+  const flags = provider as Eip1193Provider & { isMetaMask?: boolean; isCoinbaseWallet?: boolean; isRabby?: boolean; isKeplr?: boolean };
   if (flags.isRabby) return "Rabby";
   if (flags.isCoinbaseWallet) return "Coinbase Wallet";
   if (flags.isMetaMask) return "MetaMask";
+  if (flags.isKeplr) return "Keplr";
   return "Injected wallet";
+}
+
+export function classifyWalletCompatibility(
+  name: string,
+  rdns: string | undefined,
+  source: WalletProviderOption["source"]
+): WalletProviderOption["compatibility"] {
+  const identity = `${name} ${rdns ?? ""}`.toLowerCase();
+  if (/keplr|cosmos/.test(identity)) return "unverified";
+  if (/metamask|coinbase|rabby|io\.metamask|com\.coinbase|io\.rabby/.test(identity)) return "verified";
+  return source === "eip6963" ? "eip1193" : "unverified";
 }
 
 function readSafeWalletIcon(icon: string | undefined) {

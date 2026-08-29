@@ -17,6 +17,7 @@ import {
   type WalletControllerStatus,
   type WalletProviderOption
 } from "@/lib/wallet";
+import { WalletPicker } from "@/components/WalletPicker";
 
 export type WalletStatus = WalletControllerStatus;
 
@@ -26,15 +27,23 @@ type WalletContextValue = {
   chainId?: number;
   balanceEth?: string;
   error?: string;
+  errorCode?: WalletControllerState["errorCode"];
   providers: WalletProviderOption[];
   selectedProviderId?: string;
   providerAvailable: boolean;
   wrongNetwork: boolean;
   selectProvider: (providerId: string) => void;
+  connectProvider: (providerId: string) => Promise<void>;
   connect: () => Promise<void>;
   switchToBase: () => Promise<void>;
   disconnect: () => void;
+  pickerOpen: boolean;
+  openPicker: () => void;
+  closePicker: () => void;
 };
+
+export const WALLET_PROVIDER_STORAGE_KEY = "mergen-pulse:wallet-provider:v2";
+const LEGACY_WALLET_PROVIDER_STORAGE_KEYS = ["mergen-pulse:wallet-provider:v1", "base-terminal-lite:wallet-provider"];
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
@@ -43,11 +52,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   if (!controllerRef.current) controllerRef.current = new ReadOnlyWalletController();
   const controller = controllerRef.current;
   const [state, setState] = useState<WalletControllerState>(() => controller.getState());
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
-    controller.start();
+    const preferredProviderId = readPreferredProviderId();
+    controller.start(undefined, preferredProviderId);
+    const migrationTimer = window.setTimeout(() => {
+      if (preferredProviderId && !controller.getState().providers.some((provider) => provider.id === preferredProviderId)) {
+        window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+      }
+    }, 500);
     return () => {
+      window.clearTimeout(migrationTimer);
       unsubscribe();
       controller.stop();
     };
@@ -55,8 +72,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const selectProvider = useCallback((providerId: string) => controller.selectProvider(providerId), [controller]);
   const connect = useCallback(() => controller.connect(), [controller]);
+  const connectProvider = useCallback(async (providerId: string) => {
+    controller.selectProvider(providerId);
+    await controller.connect();
+    if (controller.getState().status === "connected") setPickerOpen(false);
+  }, [controller]);
   const switchToBase = useCallback(() => controller.switchToBase(), [controller]);
   const disconnect = useCallback(() => controller.disconnect(), [controller]);
+  const openPicker = useCallback(() => setPickerOpen(true), []);
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+
+  useEffect(() => {
+    if (state.status !== "connected" || !state.selectedProviderId) return;
+    const selected = state.providers.find((provider) => provider.id === state.selectedProviderId);
+    if (!selected || selected.compatibility === "unverified") return;
+    window.localStorage.setItem(WALLET_PROVIDER_STORAGE_KEY, JSON.stringify({
+      id: selected.id,
+      name: selected.name,
+      rdns: selected.rdns,
+      compatibility: selected.compatibility
+    }));
+  }, [state.providers, state.selectedProviderId, state.status]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -64,14 +100,40 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       providerAvailable: state.providers.length > 0,
       wrongNetwork: Boolean(state.address && state.chainId !== BASE_CHAIN_ID),
       selectProvider,
+      connectProvider,
       connect,
       switchToBase,
-      disconnect
+      disconnect,
+      pickerOpen,
+      openPicker,
+      closePicker
     }),
-    [connect, disconnect, selectProvider, state, switchToBase]
+    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, selectProvider, state, switchToBase]
   );
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return <WalletContext.Provider value={value}>{children}<WalletPicker /></WalletContext.Provider>;
+}
+
+function readPreferredProviderId() {
+  if (typeof window === "undefined") return undefined;
+  for (const key of LEGACY_WALLET_PROVIDER_STORAGE_KEYS) {
+    const legacyValue = window.localStorage.getItem(key);
+    if (legacyValue !== null) window.localStorage.removeItem(key);
+  }
+  try {
+    const raw = window.localStorage.getItem(WALLET_PROVIDER_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { id?: unknown; name?: unknown; rdns?: unknown; compatibility?: unknown };
+    const identity = `${String(parsed.id ?? "")} ${String(parsed.name ?? "")} ${String(parsed.rdns ?? "")}`.toLowerCase();
+    if (identity.includes("keplr") || parsed.compatibility === "unverified" || typeof parsed.id !== "string") {
+      window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+      return undefined;
+    }
+    return parsed.id;
+  } catch {
+    window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+    return undefined;
+  }
 }
 
 export function useWallet() {

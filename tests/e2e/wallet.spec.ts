@@ -6,18 +6,21 @@ const ACCOUNT_TWO = "0x2222222222222222222222222222222222222222";
 test.describe("read-only EIP-1193 wallet connection", () => {
   test("shows a clear install state when no provider exists", async ({ page }) => {
     await page.goto("/?data=mock");
-    await expect(page.getByText("Install a compatible wallet to connect.")).toBeVisible();
-    await expect(page.getByTestId("review-swap-button")).toBeDisabled();
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-picker")).toBeVisible();
+    await expect(page.getByText("No installed EVM wallet was detected.")).toBeVisible();
+    await expect(page.getByTestId("get-wallet-toggle")).toHaveAttribute("aria-expanded", "false");
   });
 
   test("connects only after a click, reads Base account context and never sends a transaction", async ({ page }) => {
     await installWalletStub(page, { chainId: "0x2105", emitDuringRequest: true });
-    await page.goto("/?data=mock");
+    await page.goto("/?data=mock&view=wallet");
 
     await expect(page.getByTestId("wallet-address")).toHaveCount(0);
     expect(await walletRequests(page)).not.toContain("eth_requestAccounts");
 
-    await page.getByTestId("wallet-panel-connect").evaluate((button: HTMLButtonElement) => {
+    await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").evaluate((button: HTMLButtonElement) => {
       button.click();
       button.click();
     });
@@ -37,29 +40,41 @@ test.describe("read-only EIP-1193 wallet connection", () => {
 
   test("reports a rejected connection cleanly", async ({ page }) => {
     await installWalletStub(page, { chainId: "0x2105", rejectConnection: true });
-    await page.goto("/?data=mock");
+    await page.goto("/?data=mock&view=wallet");
     await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
 
-    await expect(page.getByTestId("wallet-error")).toContainText("rejected");
+    await expect(page.getByTestId("wallet-error")).toContainText("Wallet connection was cancelled.");
     await expect(page.getByTestId("wallet-address")).toHaveCount(0);
   });
 
   test("sanitizes a provider recursion error and remains retryable", async ({ page }) => {
     await installWalletStub(page, { chainId: "0x2105", recursionError: true });
-    await page.goto("/?data=mock");
+    await page.goto("/?data=mock&view=wallet");
     await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
 
-    await expect(page.getByTestId("wallet-error")).toContainText("could not complete");
+    await expect(page.getByTestId("wallet-error")).toContainText("Wallet could not be reached.");
     await expect(page.getByTestId("wallet-error")).not.toContainText("Maximum call stack");
     await expect(page.getByTestId("wallet-panel-connect")).toBeEnabled();
   });
 
+  test("localizes a rejected wallet request in Turkish", async ({ page, context }) => {
+    await context.addCookies([{ name: "mergen_locale", value: "tr", domain: "127.0.0.1", path: "/" }]);
+    await installWalletStub(page, { chainId: "0x2105", rejectConnection: true });
+    await page.goto("/?data=mock&view=wallet");
+    await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
+
+    await expect(page.getByTestId("wallet-error")).toContainText("Cüzdan bağlantısı iptal edildi.");
+    await expect(page.getByTestId("wallet-error")).not.toContainText(/stack|rpc|install/i);
+  });
+
   test("discovers EIP-6963 wallets and connects the explicitly selected provider", async ({ page }) => {
     await installEip6963Wallets(page);
-    await page.goto("/?data=mock");
-    await expect(page.getByLabel("Choose wallet provider")).toBeVisible();
-    await page.getByLabel("Choose wallet provider").selectOption({ label: "Second Wallet" });
+    await page.goto("/?data=mock&view=wallet");
     await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-eip6963:wallet-second").click();
 
     await expect(page.getByTestId("wallet-address")).toHaveText("0x2222...2222");
     expect(await page.evaluate(() => (window as Window & { __eip6963Requests?: Record<string, string[]> }).__eip6963Requests?.second)).toContain("eth_requestAccounts");
@@ -67,8 +82,9 @@ test.describe("read-only EIP-1193 wallet connection", () => {
 
   test("shows the wrong network and switches to Base only on the manual action", async ({ page }) => {
     await installWalletStub(page, { chainId: "0x1" });
-    await page.goto("/?data=mock");
+    await page.goto("/?data=mock&view=wallet");
     await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
 
     await expect(page.getByTestId("wrong-network-warning")).toBeVisible();
     expect(await walletRequests(page)).not.toContain("wallet_switchEthereumChain");
@@ -80,8 +96,9 @@ test.describe("read-only EIP-1193 wallet connection", () => {
 
   test("handles account, chain and disconnect events without opening transaction capability", async ({ page }) => {
     await installWalletStub(page, { chainId: "0x2105" });
-    await page.goto("/?data=mock");
+    await page.goto("/?data=mock&view=wallet");
     await page.getByTestId("wallet-panel-connect").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
 
     await emitWalletEvent(page, "accountsChanged", [ACCOUNT_TWO]);
     await expect(page.getByTestId("wallet-address")).toHaveText("0x2222...2222");
@@ -119,6 +136,7 @@ async function installWalletStub(
         for (const listener of listeners.get(event) ?? []) listener(value);
       };
       const provider = {
+        isMetaMask: true,
         request: async ({ method }: { method: string; params?: unknown }) => {
           activeRequests += 1;
           if (activeRequests > 1) reentrantRequests += 1;

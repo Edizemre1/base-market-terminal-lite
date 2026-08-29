@@ -24,6 +24,8 @@ import {
 } from "@/lib/base-terminal/discovery";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
+import { useI18n } from "@/i18n/I18nProvider";
+import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
 
 export function MarketDiscovery({
   snapshot,
@@ -37,7 +39,9 @@ export function MarketDiscovery({
   onRefresh,
   refreshStatus,
   onInteractionChange,
-  updatedPairIds
+  updatedPairIds,
+  compact = false,
+  initialCategory = "volume"
 }: {
   snapshot: MarketTerminalSnapshot;
   selectedPair: BasePair;
@@ -51,8 +55,11 @@ export function MarketDiscovery({
   refreshStatus: ProviderHealthState["status"];
   onInteractionChange: (active: boolean) => void;
   updatedPairIds: string[];
+  compact?: boolean;
+  initialCategory?: DiscoveryCategory;
 }) {
-  const [category, setCategory] = useState<DiscoveryCategory>("volume");
+  const { t, locale } = useI18n();
+  const [category, setCategory] = useState<DiscoveryCategory>(initialCategory);
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_DISCOVERY_FILTERS);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showSelected, setShowSelected] = useState(false);
@@ -86,13 +93,13 @@ export function MarketDiscovery({
   );
   const selectedOutsideFilters = !rows.some(({ pair }) => pair.id === selectedPair.id);
   const visibleRows = useMemo(() => {
-    const limited = rows.slice(0, 24);
+    const limited = rows.slice(0, compact ? 6 : 24);
     return showSelected && selectedOutsideFilters
       ? [{ pair: selectedPair }, ...limited.filter(({ pair }) => pair.id !== selectedPair.id)]
       : limited;
-  }, [rows, selectedOutsideFilters, selectedPair, showSelected]);
+  }, [compact, rows, selectedOutsideFilters, selectedPair, showSelected]);
   const currentCategory = DISCOVERY_CATEGORIES.find(({ id }) => id === category)!;
-  const freshnessLabel = formatSnapshotFreshness(snapshot.generatedAt);
+  const freshnessLabel = formatSnapshotFreshness(snapshot.generatedAt, locale, t);
 
   function patchFilters(patch: Partial<DiscoveryFilters>) {
     setFilters((current) => ({ ...current, ...patch }));
@@ -119,12 +126,12 @@ export function MarketDiscovery({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-line/60 px-3 py-3 sm:px-4">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">
-            Market Discovery · Live Board
+            {compact ? t("market.compactEyebrow") : t("market.eyebrow")}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <h2 className="text-[16px] font-semibold text-base-text">Stable updates while you inspect</h2>
+            <h2 className="text-[16px] font-semibold text-base-text">{compact ? t("market.compactTitle") : t("market.title")}</h2>
             <span className="font-mono text-[10px] text-base-muted">
-              {formatSnapshotFreshness(snapshot.generatedAt)} · {snapshot.providerName}
+              {formatSnapshotFreshness(snapshot.generatedAt, locale, t)} · {snapshot.providerName}
             </span>
           </div>
         </div>
@@ -137,7 +144,7 @@ export function MarketDiscovery({
             className="inline-flex h-8 items-center gap-1.5 rounded-full bg-base-elevated px-2.5 font-mono text-[10px] text-base-muted hover:text-base-mint disabled:cursor-wait disabled:opacity-60"
           >
             <RefreshCw size={11} className={refreshStatus === "refreshing" ? "animate-spin" : undefined} />
-            {refreshStatus === "refreshing" ? "Checking" : "Refresh board"}
+            {refreshStatus === "refreshing" ? t("common.checking") : t("market.refresh")}
           </button>
           {pendingUpdateCount > 0 ? (
             <button
@@ -146,36 +153,36 @@ export function MarketDiscovery({
               data-testid="apply-market-updates"
               className="inline-flex h-8 items-center rounded-full bg-base-mint px-3 text-[10px] font-bold text-[#031411] shadow-[0_0_18px_rgb(var(--color-mint)/0.16)]"
             >
-              {pendingUpdateCount} new market updates
+              {t("market.newUpdates", { count: pendingUpdateCount })}
             </button>
           ) : null}
           <span className="font-mono text-[11px] text-base-muted" data-testid="discovery-result-count">
-            {rows.length} results
+            {t("common.results", { count: rows.length })}
           </span>
-          <button
+          {!compact ? <button
             type="button"
             onClick={() => setAdvancedOpen((open) => !open)}
             aria-expanded={advancedOpen}
             className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-base-line bg-base-panel px-2.5 text-[11px] font-semibold text-base-muted outline-none hover:border-base-mint hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
           >
             <SlidersHorizontal size={13} aria-hidden="true" />
-            Filters
-          </button>
-          {hasActiveDiscoveryFilters(filters) ? (
+            {t("market.filters")}
+          </button> : null}
+          {!compact && hasActiveDiscoveryFilters(filters) ? (
             <button
               type="button"
               onClick={resetFilters}
               className="inline-flex h-8 items-center gap-1 px-1.5 text-[11px] text-base-amber outline-none hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
             >
               <X size={12} aria-hidden="true" />
-              Clear
+              {t("common.clear")}
             </button>
           ) : null}
         </div>
       </div>
 
-      <div className="border-b border-base-line px-3 py-2">
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Market categories">
+      {!compact ? <div className="border-b border-base-line px-3 py-2">
+        <div className="flex flex-wrap gap-1" role="tablist" aria-label={t("market.categories")}>
           {DISCOVERY_CATEGORIES.map((item) => {
             const disabled = categoryCounts[item.id] === 0 && item.id !== category;
             return (
@@ -185,7 +192,7 @@ export function MarketDiscovery({
                 role="tab"
                 aria-selected={category === item.id}
                 disabled={disabled}
-                title={disabled ? `${item.description}; no qualified data` : item.description}
+                title={t(categoryDescriptionKey(item.id))}
                 data-testid={`discovery-category-${item.id}`}
                 onClick={() => {
                   setCategory(item.id);
@@ -198,24 +205,24 @@ export function MarketDiscovery({
                     : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
                 )}
               >
-                {item.label}
+                {t(categoryKey(item.id))}
                 <span className="ml-1 font-mono text-[9px] opacity-70">{categoryCounts[item.id]}</span>
               </button>
             );
           })}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-[10px] font-medium text-base-muted">Quick filters</span>
-          <QuickFilter label="Fresh" active={filters.quickFresh} onClick={() => patchFilters({ quickFresh: !filters.quickFresh })} />
-          <QuickFilter label="Liquid" active={filters.quickLiquid} onClick={() => patchFilters({ quickLiquid: !filters.quickLiquid })} />
-          <QuickFilter label="Moving" active={filters.quickMoving} onClick={() => patchFilters({ quickMoving: !filters.quickMoving })} />
-          <QuickFilter label="High Volume" active={filters.quickHighVolume} onClick={() => patchFilters({ quickHighVolume: !filters.quickHighVolume })} />
-          <QuickFilter label="Watched" active={filters.quickWatched} onClick={() => patchFilters({ quickWatched: !filters.quickWatched })} />
-          <span className="ml-auto text-[10px] text-base-muted">{currentCategory.description}</span>
+          <span className="mr-1 text-[10px] font-medium text-base-muted">{t("market.quickFilters")}</span>
+          <QuickFilter label={t("market.fresh")} active={filters.quickFresh} onClick={() => patchFilters({ quickFresh: !filters.quickFresh })} />
+          <QuickFilter label={t("market.liquid")} active={filters.quickLiquid} onClick={() => patchFilters({ quickLiquid: !filters.quickLiquid })} />
+          <QuickFilter label={t("market.moving")} active={filters.quickMoving} onClick={() => patchFilters({ quickMoving: !filters.quickMoving })} />
+          <QuickFilter label={t("market.highVolume")} active={filters.quickHighVolume} onClick={() => patchFilters({ quickHighVolume: !filters.quickHighVolume })} />
+          <QuickFilter label={t("market.watched")} active={filters.quickWatched} onClick={() => patchFilters({ quickWatched: !filters.quickWatched })} />
+          <span className="ml-auto text-[10px] text-base-muted">{t(categoryDescriptionKey(currentCategory.id))}</span>
         </div>
-      </div>
+      </div> : null}
 
-      {advancedOpen ? (
+      {!compact && advancedOpen ? (
         <AdvancedFilters
           filters={filters}
           dexOptions={dexOptions}
@@ -224,28 +231,28 @@ export function MarketDiscovery({
         />
       ) : null}
 
-      {category === "volatile" ? (
+      {!compact && category === "volatile" ? (
         <p className="border-b border-base-amber/30 bg-base-amber/10 px-3 py-1.5 text-[11px] text-base-amber">
-          Volatility ranks absolute price movement. It does not mean the market is rising or safe.
+          {t("market.volatilityWarning")}
         </p>
       ) : null}
 
-      {selectedOutsideFilters ? (
+      {!compact && selectedOutsideFilters ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-base-amber/35 bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">
-          <span>{selectedPair.pair} is hidden by this category or the current filters.</span>
+          <span>{t("market.hiddenSelected", { pair: selectedPair.pair })}</span>
           <button
             type="button"
             onClick={() => setShowSelected(true)}
             className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-base-amber/40"
           >
-            Show selected
+            {t("market.showSelected")}
           </button>
           <button
             type="button"
             onClick={resetFilters}
             className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-base-amber/40"
           >
-            Clear filters
+            {t("market.clearFilters")}
           </button>
         </div>
       ) : null}
@@ -254,13 +261,13 @@ export function MarketDiscovery({
         <table className="w-full min-w-[700px] border-collapse text-left">
           <thead className="bg-base-elevated text-[10px] font-semibold uppercase tracking-[0.08em] text-base-muted">
             <tr>
-              <th className="px-3 py-2">Market</th>
-              <th className="px-2 py-2">Age</th>
-              <th className="px-2 py-2 text-right">Price / change</th>
-              <th className="px-2 py-2 text-right">24h volume</th>
-              <th className="px-2 py-2 text-right">Liquidity</th>
-              <th className="px-2 py-2">Data status</th>
-              <th className="w-10 px-2 py-2"><span className="sr-only">Watchlist</span></th>
+              <th className="px-3 py-2">{t("market.market")}</th>
+              <th className="px-2 py-2">{t("market.age")}</th>
+              <th className="px-2 py-2 text-right">{t("market.priceChange")}</th>
+              <th className="px-2 py-2 text-right">{t("market.volume24h")}</th>
+              <th className="px-2 py-2 text-right">{t("market.liquidity")}</th>
+              <th className="px-2 py-2">{t("market.dataStatus")}</th>
+              <th className="w-10 px-2 py-2"><span className="sr-only">{t("market.watchlist")}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -297,8 +304,8 @@ export function MarketDiscovery({
 
       {visibleRows.length === 0 ? (
         <div className="px-4 py-8 text-center text-[12px] text-base-muted">
-          <p className="font-semibold text-base-text">No qualified markets match.</p>
-          <p className="mt-1">Choose another category or clear the active filters.</p>
+          <p className="font-semibold text-base-text">{t("market.noMatches")}</p>
+          <p className="mt-1">{t("market.noMatchesBody")}</p>
         </div>
       ) : null}
     </section>
@@ -322,6 +329,7 @@ function DiscoveryTableRow({
   onSelect: (id: string) => void;
   onTogglePin: (pair: BasePair) => void;
 }) {
+  const { t, locale, formatCompactCurrency: localCurrency, formatPercent: localPercent } = useI18n();
   const { pair } = row;
   const change24h = getChange24h(pair);
 
@@ -339,17 +347,17 @@ function DiscoveryTableRow({
           </span>
         </button>
       </td>
-      <td className="px-2 py-2 font-mono text-[11px] text-base-muted">{formatAge(pair)}</td>
+      <td className="px-2 py-2 font-mono text-[11px] text-base-muted">{formatAge(pair, locale, t)}</td>
       <td className="px-2 py-2 text-right font-mono text-[11px]">
         <span className="block text-base-text">{pair.priceUsdValue || pair.dataSource === "mock" ? pair.priceUsd : "N/A"}</span>
-        <span className={getChangeTone(change24h)}>{formatOptionalPercent(change24h)}</span>
-        <span className="block text-[9px] text-base-muted">5m {formatOptionalPercent(pair.priceChanges?.m5)} · 1h {formatOptionalPercent(pair.priceChanges?.h1)}</span>
+        <span className={getChangeTone(change24h)}>{formatOptionalPercent(change24h, localPercent)}</span>
+        <span className="block text-[9px] text-base-muted">5m {formatOptionalPercent(pair.priceChanges?.m5, localPercent)} · 1h {formatOptionalPercent(pair.priceChanges?.h1, localPercent)}</span>
       </td>
-      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getVolume24h(pair))}</td>
-      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getLiquidityUsd(pair))}</td>
+      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getVolume24h(pair), localCurrency)}</td>
+      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)}</td>
       <td className="px-2 py-2 text-[10px] text-base-muted">
-        {row.activityScore !== undefined ? <span className="mr-1 inline-flex rounded-sm border border-base-cyan/30 bg-base-cyan/10 px-1.5 py-0.5 font-mono text-base-cyan">Activity {row.activityScore}</span> : null}
-        <span className={cx("inline-flex rounded-sm border px-1.5 py-0.5", pair.stale ? "border-base-amber/35 bg-base-amber/10 text-base-amber" : "border-base-line bg-base-elevated")}>{getDataStatus(pair)}</span>
+        {row.activityScore !== undefined ? <span className="mr-1 inline-flex rounded-sm border border-base-cyan/30 bg-base-cyan/10 px-1.5 py-0.5 font-mono text-base-cyan">{t("market.activity", { score: row.activityScore })}</span> : null}
+        <span className={cx("inline-flex rounded-sm border px-1.5 py-0.5", pair.stale ? "border-base-amber/35 bg-base-amber/10 text-base-amber" : "border-base-line bg-base-elevated")}>{getDataStatus(pair, t)}</span>
         <span className="mt-1 block font-mono text-[9px] text-base-muted">{freshness}</span>
       </td>
       <td className="px-2 py-2">
@@ -360,6 +368,7 @@ function DiscoveryTableRow({
 }
 
 function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
+  const { t, locale, formatCompactCurrency: localCurrency, formatPercent: localPercent } = useI18n();
   const { row, freshness, selected, isPinned, onSelect, onTogglePin } = props;
   const { pair } = row;
   const change = getChange24h(pair);
@@ -371,15 +380,15 @@ function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
           <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} size="md" />
           <span className="min-w-0">
             <span className="block truncate font-mono text-[13px] font-semibold text-base-text">{pair.pair}</span>
-            <span className="block truncate text-[11px] text-base-muted">{pair.dexName ?? pair.dex} · {formatAge(pair)}</span>
+            <span className="block truncate text-[11px] text-base-muted">{pair.dexName ?? pair.dex} · {formatAge(pair, locale, t)}</span>
           </span>
         </button>
         <PinButton pair={pair} isPinned={isPinned} onTogglePin={onTogglePin} />
       </div>
       <button type="button" onClick={() => onSelect(pair.id)} className="mt-2 grid min-h-11 w-full grid-cols-3 gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
-        <MobileMetric label="Price / 24h" value={pair.priceUsdValue || pair.dataSource === "mock" ? pair.priceUsd : "N/A"} detail={formatOptionalPercent(change)} tone={getChangeTone(change)} />
-        <MobileMetric label="Volume" value={formatOptionalCurrency(getVolume24h(pair))} detail="24h" />
-        <MobileMetric label="Liquidity" value={formatOptionalCurrency(getLiquidityUsd(pair))} detail={`${getDataStatus(pair)} · ${freshness}`} />
+        <MobileMetric label={t("market.priceChange")} value={pair.priceUsdValue || pair.dataSource === "mock" ? pair.priceUsd : t("common.noData")} detail={formatOptionalPercent(change, localPercent)} tone={getChangeTone(change)} />
+        <MobileMetric label={t("market.volume24h")} value={formatOptionalCurrency(getVolume24h(pair), localCurrency)} detail={locale === "tr" ? "24s" : "24h"} />
+        <MobileMetric label={t("market.liquidity")} value={formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)} detail={`${getDataStatus(pair, t)} · ${freshness}`} />
       </button>
     </article>
   );
@@ -396,26 +405,27 @@ function AdvancedFilters({
   onChange: (patch: Partial<DiscoveryFilters>) => void;
   onReset: () => void;
 }) {
+  const { t, formatCompactCurrency: localCurrency } = useI18n();
   return (
     <div className="grid gap-2 border-b border-base-line bg-base-elevated p-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="discovery-advanced-filters">
-      <NumberFilter label="Minimum liquidity ($)" value={filters.minLiquidity} onChange={(value) => onChange({ minLiquidity: value })} />
-      <NumberFilter label="Minimum 24h volume ($)" value={filters.minVolume} onChange={(value) => onChange({ minVolume: value })} />
-      <NumberFilter label="Minimum age (minutes)" value={filters.minAgeMinutes} onChange={(value) => onChange({ minAgeMinutes: value })} />
-      <NumberFilter label="Maximum age (minutes)" value={filters.maxAgeMinutes} onChange={(value) => onChange({ maxAgeMinutes: value })} />
-      <NumberFilter label="Minimum 24h change (%)" value={filters.minChange24h} onChange={(value) => onChange({ minChange24h: value })} />
-      <NumberFilter label="Maximum 24h change (%)" value={filters.maxChange24h} onChange={(value) => onChange({ maxChange24h: value })} />
-      <SelectFilter label="DEX" value={filters.dex} onChange={(value) => onChange({ dex: value })} options={[{ value: "all", label: "All DEXes" }, ...dexOptions.map((dex) => ({ value: dex, label: dex }))]} />
-      <SelectFilter label="Sort" value={filters.sort} onChange={(value) => onChange({ sort: value as DiscoverySort })} options={[
-        { value: "category", label: "Category default" },
-        { value: "price-change-desc", label: "24h change" },
-        { value: "volume-desc", label: "24h volume" },
-        { value: "liquidity-desc", label: "Liquidity" },
-        { value: "age-asc", label: "Newest" }
+      <NumberFilter label={t("market.advanced.minLiquidity")} value={filters.minLiquidity} onChange={(value) => onChange({ minLiquidity: value })} />
+      <NumberFilter label={t("market.advanced.minVolume")} value={filters.minVolume} onChange={(value) => onChange({ minVolume: value })} />
+      <NumberFilter label={t("market.advanced.minAge")} value={filters.minAgeMinutes} onChange={(value) => onChange({ minAgeMinutes: value })} />
+      <NumberFilter label={t("market.advanced.maxAge")} value={filters.maxAgeMinutes} onChange={(value) => onChange({ maxAgeMinutes: value })} />
+      <NumberFilter label={t("market.advanced.minChange")} value={filters.minChange24h} onChange={(value) => onChange({ minChange24h: value })} />
+      <NumberFilter label={t("market.advanced.maxChange")} value={filters.maxChange24h} onChange={(value) => onChange({ maxChange24h: value })} />
+      <SelectFilter label="DEX" value={filters.dex} onChange={(value) => onChange({ dex: value })} options={[{ value: "all", label: t("market.advanced.allDexes") }, ...dexOptions.map((dex) => ({ value: dex, label: dex }))]} />
+      <SelectFilter label={t("market.advanced.sort")} value={filters.sort} onChange={(value) => onChange({ sort: value as DiscoverySort })} options={[
+        { value: "category", label: t("market.advanced.categoryDefault") },
+        { value: "price-change-desc", label: t("workspace.change24h") },
+        { value: "volume-desc", label: t("market.volume24h") },
+        { value: "liquidity-desc", label: t("market.liquidity") },
+        { value: "age-asc", label: t("market.advanced.newest") }
       ]} />
-      <CheckFilter label="Verified/data-complete only" checked={filters.completeOnly} onChange={(checked) => onChange({ completeOnly: checked })} />
-      <CheckFilter label="Hide stale" checked={filters.hideStale} onChange={(checked) => onChange({ hideStale: checked })} />
-      <CheckFilter label={`Hide liquidity below ${formatCompactCurrency(DISCOVERY_MIN_LIQUIDITY_USD)}`} checked={filters.hideLowLiquidity} onChange={(checked) => onChange({ hideLowLiquidity: checked })} />
-      <button type="button" onClick={onReset} className="min-h-10 rounded-sm border border-base-line bg-base-panel px-3 text-[11px] font-semibold text-base-muted outline-none hover:border-base-mint hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40">Reset all filters</button>
+      <CheckFilter label={t("market.advanced.completeOnly")} checked={filters.completeOnly} onChange={(checked) => onChange({ completeOnly: checked })} />
+      <CheckFilter label={t("market.advanced.hideStale")} checked={filters.hideStale} onChange={(checked) => onChange({ hideStale: checked })} />
+      <CheckFilter label={t("market.advanced.hideLowLiquidity", { value: localCurrency(DISCOVERY_MIN_LIQUIDITY_USD) })} checked={filters.hideLowLiquidity} onChange={(checked) => onChange({ hideLowLiquidity: checked })} />
+      <button type="button" onClick={onReset} className="min-h-10 rounded-sm border border-base-line bg-base-panel px-3 text-[11px] font-semibold text-base-muted outline-none hover:border-base-mint hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40">{t("market.advanced.reset")}</button>
     </div>
   );
 }
@@ -437,35 +447,39 @@ function CheckFilter({ label, checked, onChange }: { label: string; checked: boo
 }
 
 function PinButton({ pair, isPinned, onTogglePin }: { pair: BasePair; isPinned: boolean; onTogglePin: (pair: BasePair) => void }) {
-  return <button type="button" data-testid={`pin-discovery-${pair.id}`} onClick={() => onTogglePin(pair)} aria-label={isPinned ? `Unpin ${pair.pair}` : `Pin ${pair.pair}`} className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-sm border border-base-line bg-base-elevated text-base-muted outline-none hover:border-base-mint hover:text-base-mint focus-visible:ring-2 focus-visible:ring-base-mint/40", isPinned && "border-base-mint/45 bg-base-mint/10 text-base-mint")}><Star size={14} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" /></button>;
+  const { t } = useI18n();
+  return <button type="button" data-testid={`pin-discovery-${pair.id}`} onClick={() => onTogglePin(pair)} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })} className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-sm border border-base-line bg-base-elevated text-base-muted outline-none hover:border-base-mint hover:text-base-mint focus-visible:ring-2 focus-visible:ring-base-mint/40", isPinned && "border-base-mint/45 bg-base-mint/10 text-base-mint")}><Star size={14} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" /></button>;
 }
 
 function MobileMetric({ label, value, detail, tone = "text-base-muted" }: { label: string; value: string; detail: string; tone?: string }) {
   return <span className="min-w-0 rounded-sm bg-base-elevated p-2"><span className="block text-[9px] uppercase tracking-[0.08em] text-base-muted">{label}</span><span className="mt-1 block truncate font-mono text-[11px] font-semibold text-base-text">{value}</span><span className={cx("block truncate font-mono text-[9px]", tone)}>{detail}</span></span>;
 }
 
-function getDataStatus(pair: BasePair) {
-  if (pair.dataSource === "mock") return "Demo data";
-  if (pair.stale) return "Stale data";
-  return isDiscoveryDataComplete(pair) ? "Complete fields" : "Partial · unknown ≠ safe";
+function getDataStatus(pair: BasePair, t: (key: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (pair.dataSource === "mock") return t("market.demoData");
+  if (pair.stale) return t("market.staleData");
+  return isDiscoveryDataComplete(pair) ? t("market.completeFields") : t("market.partialFields");
 }
 
-function formatSnapshotFreshness(value: string) {
-  if (value === "mock-static") return "Sample dataset";
+function formatSnapshotFreshness(value: string, locale: "tr" | "en", t: (key: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (value === "mock-static") return t("market.sampleDataset");
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Cached" : `Updated ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" })} UTC`;
+  return Number.isNaN(date.getTime()) ? t("market.cached") : t("market.updatedAt", { time: date.toLocaleTimeString(locale === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) });
 }
 
-function formatAge(pair: BasePair) {
-  return getPairAgeMinutes(pair) === undefined ? "N/A" : pair.age;
+function categoryKey(category: DiscoveryCategory): TranslationKey { return `market.category.${category}` as TranslationKey; }
+function categoryDescriptionKey(category: DiscoveryCategory): TranslationKey { return `market.categoryDescription.${category}` as TranslationKey; }
+
+function formatAge(pair: BasePair, locale: "tr" | "en", t: (key: TranslationKey) => string) {
+  return getPairAgeMinutes(pair) === undefined ? t("common.noData") : localizeAgeLabel(pair.age, locale);
 }
 
-function formatOptionalCurrency(value: number | undefined) {
-  return value === undefined ? "N/A" : formatCompactCurrency(value);
+function formatOptionalCurrency(value: number | undefined, formatter: (value: number) => string = formatCompactCurrency) {
+  return value === undefined ? "N/A" : formatter(value);
 }
 
-function formatOptionalPercent(value: number | undefined) {
-  return value === undefined ? "N/A" : formatPercent(value);
+function formatOptionalPercent(value: number | undefined, formatter: (value: number) => string = formatPercent) {
+  return value === undefined ? "N/A" : formatter(value);
 }
 
 function getChangeTone(value: number | undefined) {

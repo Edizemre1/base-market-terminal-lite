@@ -8,6 +8,7 @@ import { useWallet } from "@/components/WalletContext";
 import { cx } from "@/lib/format";
 import { BASE_CHAIN_ID, shortenWalletAddress } from "@/lib/wallet";
 import type { BasePair } from "@/types/baseTerminal";
+import { useI18n } from "@/i18n/I18nProvider";
 
 export function SwapTicket({
   pair,
@@ -21,6 +22,7 @@ export function SwapTicket({
   onAmountChange: (value: string) => void;
 }) {
   const wallet = useWallet();
+  const { t } = useI18n();
   const walletAddress = wallet.address;
   const connected = wallet.status === "connected" && Boolean(walletAddress);
   const amountNumber = Number.parseFloat(amount);
@@ -31,27 +33,28 @@ export function SwapTicket({
     <aside
       className="pulse-surface min-w-0 overflow-hidden rounded-xl"
       data-testid="swap-preview-panel"
+      data-market-mode={marketDataMode}
     >
       <div className="flex min-h-12 items-center justify-between gap-3 border-b border-base-line/60 px-3 py-2.5">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">
-            Wallet Lens · Action Dock
+            {t("wallet.actionDock")}
           </p>
           <h2 className="mt-0.5 text-[13px] font-semibold text-base-text">{pair.pair}</h2>
         </div>
         <button type="button" onClick={() => setExpanded((current) => !current)} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-base-elevated px-2.5 font-mono text-[10px] text-base-muted" aria-expanded={expanded}>
           {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          {expanded ? "Collapse" : "Details"}
+          {expanded ? t("wallet.collapse") : t("wallet.details")}
         </button>
       </div>
 
       <div className="space-y-3 p-3">
-        <section className="rounded-sm bg-base-elevated p-3" aria-label="Wallet status">
+        <section className="rounded-sm bg-base-elevated p-3" aria-label={t("wallet.status")}>
           {connected && walletAddress ? (
             <>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-medium text-base-muted">Connected wallet</p>
+                  <p className="text-[10px] font-medium text-base-muted">{t("wallet.connected")}</p>
                   <p className="mt-1 truncate font-mono text-[14px] font-semibold text-base-text" data-testid="wallet-address">
                     {shortenWalletAddress(walletAddress)}
                   </p>
@@ -60,29 +63,29 @@ export function SwapTicket({
                   type="button"
                   onClick={wallet.disconnect}
                   className="inline-flex min-h-8 items-center gap-1 rounded-sm px-2 text-[10px] text-base-muted outline-none hover:bg-base-panel hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
-                  aria-label="Disconnect wallet from this interface"
+                  aria-label={t("wallet.disconnectAria")}
                 >
                   <LogOut size={12} aria-hidden="true" />
-                  Disconnect
+                  {t("wallet.disconnect")}
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <WalletMetric
-                  label="Network"
-                  value={wallet.chainId === BASE_CHAIN_ID ? "Base Mainnet" : `Chain ${wallet.chainId ?? "unknown"}`}
+                  label={t("wallet.network")}
+                  value={wallet.chainId === BASE_CHAIN_ID ? "Base Mainnet" : `Chain ${wallet.chainId ?? t("common.unknown")}`}
                   tone={wallet.wrongNetwork ? "amber" : "mint"}
                 />
-                <WalletMetric label="Balance" value={wallet.balanceEth ? `${wallet.balanceEth} ETH` : "Unavailable"} />
+                <WalletMetric label={t("wallet.balance")} value={wallet.balanceEth ? `${wallet.balanceEth} ETH` : t("common.unavailable")} />
               </div>
               {wallet.wrongNetwork ? (
                 <div className="mt-3 rounded-sm border border-base-amber/35 bg-base-amber/10 p-2.5 text-[11px] text-base-amber" data-testid="wrong-network-warning">
-                  <p className="font-semibold">This wallet is not on Base Mainnet (chain 8453).</p>
+                  <p className="font-semibold">{t("wallet.wrongNetwork")}</p>
                   <button
                     type="button"
                     onClick={() => void wallet.switchToBase()}
                     className="mt-2 min-h-9 rounded-sm border border-base-amber/45 bg-base-panel px-3 font-semibold outline-none hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-amber/40"
                   >
-                    Switch to Base
+                    {t("wallet.switchBase")}
                   </button>
                 </div>
               ) : null}
@@ -92,67 +95,54 @@ export function SwapTicket({
               <span className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-base-panel text-base-mint">
                 <WalletCards size={19} aria-hidden="true" />
               </span>
-              <p className="mt-2 text-[14px] font-semibold text-base-text">Connect for account context</p>
+              <p className="mt-2 text-[14px] font-semibold text-base-text">{t("wallet.contextTitle")}</p>
               <p className="mt-1 text-[11px] leading-5 text-base-muted">
-                View your public address, Base network and native balance. Connecting does not enable approvals or swaps.
+                {t("wallet.contextBody")}
               </p>
-              {wallet.providers.length > 1 ? (
-                <label className="mt-3 block text-left text-[10px] text-base-muted">
-                  <span className="mb-1 block">Choose wallet</span>
-                  <select
-                    value={wallet.selectedProviderId}
-                    onChange={(event) => wallet.selectProvider(event.target.value)}
-                    className="h-10 w-full rounded-lg border border-base-line bg-base-panel px-2 text-[11px] text-base-text outline-none"
-                    aria-label="Choose wallet provider"
-                  >
-                    {wallet.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-                  </select>
-                </label>
-              ) : null}
               <button
                 type="button"
                 data-testid="wallet-panel-connect"
-                onClick={() => void wallet.connect()}
+                onClick={wallet.openPicker}
                 disabled={wallet.status === "connecting"}
                 className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-sm border border-base-mint bg-base-mint px-3 text-[12px] font-semibold text-white outline-none hover:bg-base-mint/90 focus-visible:ring-2 focus-visible:ring-base-mint/50 disabled:cursor-wait disabled:opacity-70"
               >
                 <WalletCards size={14} aria-hidden="true" />
-                {wallet.status === "connecting" ? "Waiting for wallet..." : "Connect wallet"}
+                {wallet.status === "connecting" ? t("wallet.waiting") : t("wallet.connect")}
               </button>
               {wallet.status === "unavailable" ? (
-                <p className="mt-2 text-[11px] text-base-amber">Install a compatible wallet to connect.</p>
+                <p className="mt-2 text-[11px] text-base-amber">{t("wallet.noProvider")}</p>
               ) : null}
             </div>
           )}
           {wallet.error ? (
             <p className="mt-3 rounded-sm border border-base-amber/35 bg-base-amber/10 px-2.5 py-2 text-[11px] text-base-amber" role="alert" data-testid="wallet-error">
-              {wallet.error}
+              {wallet.errorCode ? walletErrorText(wallet.errorCode, t) : t("wallet.error.unreachable")}
             </p>
           ) : null}
         </section>
 
-        {expanded ? <section aria-label="Pair quote context" className="space-y-2">
+        {expanded ? <section aria-label={t("wallet.quoteContext")} className="space-y-2">
           <TokenBox
-            label="From"
+            label={t("wallet.from")}
             token={pair.quoteToken}
             logoUrl={pair.quoteTokenLogoUrl}
-            sublabel="Local input only"
+            sublabel={t("wallet.localInput")}
             value={amount}
             onValueChange={onAmountChange}
           />
           <TokenBox
-            label="To (indicative)"
+            label={t("wallet.toIndicative")}
             token={pair.baseToken}
             logoUrl={pair.tokenLogoUrl}
-            sublabel="No verified quote provider"
-            value="Unavailable"
+            sublabel={t("wallet.noQuoteProvider")}
+            value={t("common.unavailable")}
             readOnly
           />
         </section> : null}
 
         {expanded && !amountValid ? (
           <p className="rounded-sm border border-base-amber/35 bg-base-amber/10 px-2.5 py-2 text-[11px] text-base-amber">
-            Enter an amount greater than zero to inspect the pair context.
+            {t("wallet.amountError")}
           </p>
         ) : null}
 
@@ -160,22 +150,22 @@ export function SwapTicket({
           <div className="flex items-start gap-2">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-base-amber" aria-hidden="true" />
             <div>
-              <p className="text-[12px] font-semibold text-base-text">Indicative quote unavailable</p>
+              <p className="text-[12px] font-semibold text-base-text">{t("wallet.quoteUnavailable")}</p>
               <p className="mt-1 text-[11px] leading-5 text-base-muted">
-                No verified quote provider is configured for this public terminal. Market values come from {marketDataMode === "dexscreener" ? "read-only public data" : "the labeled sample dataset"}; no executable route is constructed.
+                {t("wallet.quoteUnavailableBody")}
               </p>
             </div>
           </div>
         </section> : (
           <div className="rounded-lg bg-base-elevated/60 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
-            <p className="font-semibold text-base-text">Trading preview is not configured</p>
-            <p>Indicative quote unavailable. Open Details for pair context; no executable route is built.</p>
+            <p className="font-semibold text-base-text">{t("wallet.previewMissing")}</p>
+            <p>{t("wallet.previewMissingBody")}</p>
           </div>
         )}
 
         <div className="rounded-lg bg-base-mint/5 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
-          <p className="font-semibold text-base-text">Wallet connection is read-only</p>
-          <p>Approval, swap and transaction creation remain disabled, even while a wallet is connected.</p>
+          <p className="font-semibold text-base-text">{t("wallet.readOnly")}</p>
+          <p>{t("wallet.readOnlyBody")}</p>
         </div>
 
         <button
@@ -185,11 +175,18 @@ export function SwapTicket({
           className="flex min-h-10 w-full items-center justify-center gap-2 rounded-sm border border-base-line bg-base-raised px-3 text-[12px] font-semibold text-base-muted"
         >
           <LockKeyhole size={14} aria-hidden="true" />
-          Transactions disabled — read-only
+          {t("wallet.transactionsDisabled")}
         </button>
       </div>
     </aside>
   );
+}
+
+function walletErrorText(code: "cancelled" | "pending" | "unreachable" | "unsupported-base", t: ReturnType<typeof useI18n>["t"]) {
+  if (code === "cancelled") return t("wallet.error.cancelled");
+  if (code === "pending") return t("wallet.error.pending");
+  if (code === "unsupported-base") return t("wallet.error.unsupportedBase");
+  return t("wallet.error.unreachable");
 }
 
 function TokenBox({

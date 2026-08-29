@@ -7,6 +7,7 @@ type PageProps = {
   searchParams?: Promise<{
     data?: string | string[];
     pair?: string | string[];
+    view?: string | string[];
   }>;
 };
 
@@ -18,6 +19,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     <BaseTerminal
       data={await getMarketTerminalSnapshot(mode)}
       initialPairParam={getFirstSearchParam(params?.pair)}
+      initialViewParam={getFirstSearchParam(params?.view)}
     />
   );
 }

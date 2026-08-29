@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { APP_DESCRIPTION, APP_METADATA_TITLE, APP_NAME, APP_URL } from "@/lib/appInfo";
+import { I18nProvider } from "@/i18n/I18nProvider";
+import { getInitialLocale } from "@/i18n/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -29,15 +31,18 @@ export const metadata: Metadata = {
   }
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const initialLocale = await getInitialLocale();
   return (
-    <html lang="en">
+    <html lang={initialLocale}>
       <body>
-        <AppShell>{children}</AppShell>
+        <I18nProvider initialLocale={initialLocale}>
+          <AppShell>{children}</AppShell>
+        </I18nProvider>
       </body>
     </html>
   );

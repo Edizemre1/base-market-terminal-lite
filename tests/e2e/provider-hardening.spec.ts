@@ -17,6 +17,7 @@ import {
 } from "../../src/lib/base-terminal/discovery";
 import {
   ReadOnlyWalletController,
+  classifyWalletCompatibility,
   getWalletErrorMessage,
   requestWalletConnection,
   switchWalletToBase,
@@ -283,6 +284,11 @@ test.describe("read-only wallet request boundary", () => {
 
     controller.start(target);
     await settleController();
+    expect(harness.methods).toEqual([]);
+    expect(controller.getState().selectedProviderId).toBeUndefined();
+    expect(harness.listenerCount()).toBe(0);
+    controller.selectProvider("legacy:injected");
+    expect(harness.listenerCount()).toBe(4);
     harness.resetMetrics();
 
     await Promise.all([controller.connect(), controller.connect()]);
@@ -317,6 +323,11 @@ test.describe("read-only wallet request boundary", () => {
     controller.start(target);
     await settleController();
     expect(controller.getState().providers).toHaveLength(2);
+    expect(first.listenerCount()).toBe(0);
+    expect(first.methods).toEqual([]);
+    expect(second.methods).toEqual([]);
+
+    controller.selectProvider("eip6963:first");
     expect(first.listenerCount()).toBe(4);
 
     await controller.connect();
@@ -341,9 +352,35 @@ test.describe("read-only wallet request boundary", () => {
     controller.stop();
     controller.start(target);
     await settleController();
+    expect(first.listenerCount()).toBe(0);
+    controller.selectProvider("eip6963:first");
     expect(first.listenerCount()).toBe(4);
     controller.stop();
     expect(first.listenerCount()).toBe(0);
+  });
+
+  test("classifies Keplr as unverified and never treats discovery order as Base compatibility", () => {
+    expect(classifyWalletCompatibility("Keplr", "app.keplr", "eip6963")).toBe("unverified");
+    expect(classifyWalletCompatibility("MetaMask", "io.metamask", "eip6963")).toBe("verified");
+    expect(classifyWalletCompatibility("Rabby", "io.rabby", "eip6963")).toBe("verified");
+    expect(classifyWalletCompatibility("Other EVM", "dev.other", "eip6963")).toBe("eip1193");
+    expect(classifyWalletCompatibility("Injected wallet", undefined, "legacy")).toBe("unverified");
+  });
+
+  test("never switches an unknown EIP-1193 wallet before Base support is verified", async () => {
+    const harness = createWalletProviderHarness();
+    const target = createEip6963DiscoveryTarget([
+      { uuid: "unknown", name: "Other EVM", provider: harness.provider }
+    ]);
+    const controller = new ReadOnlyWalletController();
+
+    controller.start(target);
+    controller.selectProvider("eip6963:unknown");
+    await controller.switchToBase();
+
+    expect(harness.methods).toEqual([]);
+    expect(controller.getState().errorCode).toBe("unsupported-base");
+    controller.stop();
   });
 });
 

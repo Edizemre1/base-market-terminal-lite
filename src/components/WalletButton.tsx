@@ -4,22 +4,24 @@ import { WalletCards } from "lucide-react";
 import { useWallet } from "@/components/WalletContext";
 import { cx } from "@/lib/format";
 import { shortenWalletAddress } from "@/lib/wallet";
+import { useI18n } from "@/i18n/I18nProvider";
 
 export function WalletButton({ compact = false }: { compact?: boolean }) {
   const wallet = useWallet();
+  const { t } = useI18n();
   const walletAddress = wallet.address;
   const connected = wallet.status === "connected" && Boolean(walletAddress);
   const label = connected && walletAddress
     ? shortenWalletAddress(walletAddress)
     : wallet.status === "connecting"
-      ? "Connecting..."
-      : "Connect wallet";
+      ? t("wallet.connecting")
+      : t("wallet.connect");
 
   return (
     <button
       type="button"
       data-testid="connect-wallet-button"
-      onClick={() => void wallet.connect()}
+      onClick={wallet.openPicker}
       disabled={wallet.status === "connecting"}
       className={cx(
         "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 border px-2 font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-base-mint/50 disabled:cursor-wait disabled:opacity-70 lg:h-8",
@@ -30,7 +32,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
           : "border-base-mint bg-base-mint text-white hover:bg-base-mint/90",
         compact ? "max-w-[116px] text-[10px]" : "text-[11px]"
       )}
-      aria-label={connected ? `Wallet ${label}` : "Connect wallet"}
+      aria-label={connected ? `Wallet ${label}` : t("wallet.connect")}
     >
       <WalletCards size={13} aria-hidden="true" />
       <span className="truncate">{label}</span>

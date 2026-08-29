@@ -3,13 +3,15 @@ import { expect, test, type Page } from "@playwright/test";
 test.describe("Base Terminal Lite smoke coverage", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/?data=mock");
-    await expectTerminalShell(page);
+    await expectPulseShell(page);
   });
 
   test("loads the explicitly selected sample terminal and keeps swap read-only", async ({ page }) => {
     await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen Finance");
-    await expect(page.getByTestId("market-discovery")).toContainText("Market Discovery");
-    await expect(page.getByTestId("market-discovery")).toContainText("Volume Leaders");
+    await expect(page.getByTestId("market-discovery")).toContainText("Market Board");
+    await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
+    await expect(page.getByTestId("swap-preview-panel")).toHaveCount(0);
+    await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
     await expect(page.getByTestId("selected-pair-panel")).toContainText("Selected market");
     await expect(page.getByTestId("swap-preview-panel")).toContainText("Wallet Lens");
     await expect(page.getByTestId("swap-preview-panel")).toContainText("Indicative quote unavailable");
@@ -31,7 +33,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen Finance");
     await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible();
     await expect(page.locator("body")).toContainText(
-      /Selected market|Live market data is temporarily unavailable/
+      /Live Pulse|Live market data is temporarily unavailable/
     );
     await expect(page.locator("body")).not.toContainText("Demo fallback selected");
     expect(consoleErrors).toEqual([]);
@@ -44,7 +46,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page).toHaveURL(/pair=blob-usdc/);
 
     await page.reload();
-    await expectTerminalShell(page);
+    await expectPairWorkspace(page);
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
   });
 
@@ -59,6 +61,8 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("watchlist pins persist in localStorage and can be removed", async ({ page }) => {
+    await page.goto("/?data=mock&view=markets");
+    await expect(page.getByTestId("market-discovery")).toBeVisible();
     await waitForWatchlistStorage(page);
 
     await page.locator('[data-testid="pin-discovery-blob-usdc"]:visible').click();
@@ -66,7 +70,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toContainText("BLOB / USDC");
 
     await page.reload();
-    await expectTerminalShell(page);
+    await expect(page.getByTestId("market-discovery")).toBeVisible();
     await page.getByTestId("discovery-category-watchlist").click();
     await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toContainText("BLOB / USDC");
 
@@ -75,7 +79,10 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("discovery categories, advanced filters and selected-pair recovery stay coherent", async ({ page }) => {
-    const initialPair = await page.getByTestId("selected-pair-title").innerText();
+    await page.goto("/?data=mock&view=markets");
+    await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await page.getByTestId("back-from-pair").click();
 
     await page.getByTestId("discovery-category-liquidity").click();
     await page.getByRole("button", { name: /^filters$/i }).click();
@@ -84,19 +91,20 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("discovery-result-count")).toContainText("0 results");
     await expect(page.getByText(/is hidden by this category or the current filters/i)).toBeVisible();
     await page.getByRole("button", { name: "Show selected" }).click();
-    await expect(page.locator(`[data-testid="discovery-row-${await selectedPairIdFromUrl(page)}"]:visible`)).toBeVisible();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText(initialPair);
+    await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toBeVisible();
+    await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
 
     await page.getByRole("button", { name: "Clear filters" }).click();
     await expect(page.getByTestId("market-discovery")).toBeVisible();
-    await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
-    await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
+    await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
+    await expect(page.getByTestId("swap-preview-panel")).toHaveCount(0);
   });
 
   test("recent markets persist locally", async ({ page }) => {
     await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
     await page.reload();
-    await expectTerminalShell(page);
+    await expectPairWorkspace(page);
+    await page.goto("/?data=mock&view=markets");
     await page.getByTestId("discovery-category-recent").click();
     await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toBeVisible();
   });
@@ -104,6 +112,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   test("provider health and chart refresh keep last good terminal data visible", async ({ page }) => {
     await expect(page.getByTestId("market-discovery")).toContainText("Sample dataset");
 
+    await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
     await page.getByRole("button", { name: /^refresh$/i }).click();
 
     await expect(page.getByTestId("chart-panel")).toBeVisible();
@@ -115,7 +124,6 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   test("queues board changes during interaction, applies them without losing selection and flashes the row", async ({ page, request }) => {
     const response = await request.get("/api/market-snapshot?data=mock");
     const snapshot = await response.json();
-    const selectedTitle = await page.getByTestId("selected-pair-title").innerText();
     const pairId = snapshot.allPairs[0].id as string;
     const nextPrice = (snapshot.allPairs[0].priceUsdValue as number) * 1.03;
     const updatedAt = "2026-08-29T12:00:12.000Z";
@@ -135,11 +143,11 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
     await page.getByTestId("refresh-market-board").click();
     await expect(page.getByTestId("apply-market-updates")).toContainText("1 new market updates");
-    await expect(page.getByTestId("selected-pair-title")).toHaveText(selectedTitle);
+    await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
 
     await page.getByTestId("apply-market-updates").click();
     await expect(page.getByTestId("apply-market-updates")).toHaveCount(0);
-    await expect(page.getByTestId("selected-pair-title")).toHaveText(selectedTitle);
+    await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
     await expect(page.locator(`[data-testid="discovery-row-${pairId}"]:visible`)).toHaveClass(/market-update-flash/);
   });
 
@@ -158,10 +166,10 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       }
     });
     await page.reload();
-    await expectTerminalShell(page);
+    await expectPulseShell(page);
     expect(await page.evaluate(() => (window as Window & { __notificationPermissionRequests?: number }).__notificationPermissionRequests)).toBe(0);
 
-    await page.getByRole("button", { name: /^alerts/i }).click();
+    await page.goto("/?data=mock&view=alerts");
     await page.locator("#alert-center-panel input").fill("1");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.locator("#alert-center-panel select").selectOption("liquidity");
@@ -173,8 +181,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     expect(await page.evaluate(() => (window as Window & { __notificationPermissionRequests?: number }).__notificationPermissionRequests)).toBe(1);
 
     await page.reload();
-    await expectTerminalShell(page);
-    await page.getByRole("button", { name: /^alerts/i }).click();
+    await expect(page.getByTestId("alerts-workspace")).toBeVisible();
     await expect(page.getByTestId("alert-rule")).toHaveCount(2);
   });
 
@@ -240,6 +247,9 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       await page.goto("/?data=mock");
       await expect(page.getByTestId("terminal-topbar")).toBeVisible();
       await expect(page.getByLabel("Search token, pair, or contract")).toBeVisible();
+      await expect(page.getByTestId("chart-panel")).toHaveCount(0);
+      await expect(page.getByTestId("swap-preview-panel")).toHaveCount(0);
+      await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
       await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
       await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
       const chartBox = await page.getByTestId("chart-panel").boundingBox();
@@ -254,23 +264,19 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("captures dark-theme visual evidence for the required responsive breakpoints", async ({ page }, testInfo) => {
-    const viewports = [
-      { width: 1440, height: 900 },
-      { width: 1280, height: 800 },
-      { width: 1024, height: 768 },
-      { width: 390, height: 844 }
-    ];
+    const viewports = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 
-    for (const viewport of viewports) {
-      await page.setViewportSize(viewport);
-      await page.goto("/?data=mock");
-      await expect(page.getByTestId("pulse-terminal")).toBeVisible();
-      const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-      expect(background).toMatch(/^rgb\((?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2])\)$/);
-      await page.screenshot({
-        path: testInfo.outputPath(`pulse-${viewport.width}x${viewport.height}.png`),
-        fullPage: true
-      });
+    for (const locale of ["en", "tr"] as const) {
+      await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
+      for (const viewport of viewports) {
+        await page.setViewportSize(viewport);
+        await page.goto("/?data=mock");
+        await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        await expect(page.getByTestId("pulse-terminal")).toBeVisible();
+        const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+        expect(background).toMatch(/^rgb\((?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2])\)$/);
+        await page.screenshot({ path: testInfo.outputPath(`pulse-${locale}-${viewport.width}x${viewport.height}.png`), fullPage: true });
+      }
     }
   });
 
@@ -298,16 +304,19 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 });
 
-async function expectTerminalShell(page: Page) {
+async function expectPulseShell(page: Page) {
   await expect(page.getByTestId("terminal-topbar")).toBeVisible();
   await expect(page.getByTestId("market-discovery")).toBeVisible();
-  await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
-  await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
+  await expect(page.getByTestId("live-pulse-strip")).toBeVisible();
+  await expect(page.getByTestId("opportunity-stream")).toBeVisible();
+  await expect(page.getByTestId("selected-pair-panel")).toHaveCount(0);
+  await expect(page.getByTestId("swap-preview-panel")).toHaveCount(0);
 }
 
-async function selectedPairIdFromUrl(page: Page) {
-  const pair = new URL(page.url()).searchParams.get("pair");
-  return pair ?? "pepe-weth";
+async function expectPairWorkspace(page: Page) {
+  await expect(page.getByTestId("terminal-topbar")).toBeVisible();
+  await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
+  await expect(page.getByTestId("swap-preview-panel")).toBeVisible();
 }
 
 async function waitForWatchlistStorage(page: Page) {

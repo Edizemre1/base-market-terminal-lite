@@ -1,7 +1,8 @@
 "use client";
 
-import { Activity, DatabaseZap } from "lucide-react";
+import { Activity, ArrowLeft, Bell, DatabaseZap, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertCenter } from "@/components/base-terminal/AlertCenter";
 import { useChartData } from "@/components/base-terminal/hooks/useChartData";
 import { useRecentPairs } from "@/components/base-terminal/hooks/useRecentPairs";
@@ -21,7 +22,7 @@ import {
   type ProviderHealthState
 } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
-import { getChartCacheKey } from "@/lib/base-terminal/pairs";
+import { getChartCacheKey, getShareablePairKey } from "@/lib/base-terminal/pairs";
 import { getSnapshotRefreshCadence, shouldQueueMarketUpdate } from "@/lib/base-terminal/liveUpdates";
 import {
   createVisitSnapshot,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/base-terminal/providerHealth";
 import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
+import { useI18n } from "@/i18n/I18nProvider";
 
 const AUTO_APPLY_DELAY_MS = 4_000;
 const VISIT_STORAGE_KEY = "mergen-pulse:last-visit:v1";
@@ -49,13 +51,19 @@ type PendingSnapshot = {
   changedPairIds: string[];
 };
 
+type TerminalView = "pulse" | "markets" | "watchlist" | "alerts" | "wallet" | "pair";
+
 export function BaseTerminal({
   data,
-  initialPairParam
+  initialPairParam,
+  initialViewParam
 }: {
   data: MarketTerminalSnapshot;
   initialPairParam?: string;
+  initialViewParam?: string;
 }) {
+  const router = useRouter();
+  const { t } = useI18n();
   const {
     pinnedPairs,
     registerPairs,
@@ -74,6 +82,8 @@ export function BaseTerminal({
   const [pendingSnapshot, setPendingSnapshot] = useState<PendingSnapshot>();
   const [lastAppliedChangedPairIds, setLastAppliedChangedPairIds] = useState<string[]>([]);
   const [interactionLocked, setInteractionLocked] = useState(false);
+  const [view, setView] = useState<TerminalView>(() => initialPairParam ? "pair" : normalizeTerminalView(initialViewParam));
+  const [returnView, setReturnView] = useState<"pulse" | "markets">(() => initialViewParam === "markets" ? "markets" : "pulse");
   const snapshotRef = useRef(snapshotData);
   const selectedPairRef = useRef<BasePair | undefined>(undefined);
   const interactionLockedRef = useRef(false);
@@ -93,6 +103,30 @@ export function BaseTerminal({
     [chartOverrides, selectedPair]
   );
   const recentPairIds = useRecentPairs(selectedPairWithLiveChart?.id);
+
+  const navigateView = useCallback((nextView: TerminalView) => {
+    setView(nextView);
+    if (nextView === "pulse" || nextView === "markets") setReturnView(nextView);
+    if (typeof window === "undefined") return;
+    const nextUrl = new URL(window.location.href);
+    if (nextView === "pulse") nextUrl.searchParams.delete("view");
+    else nextUrl.searchParams.set("view", nextView);
+    if (nextView !== "pair") nextUrl.searchParams.delete("pair");
+    router.replace(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
+  }, [router]);
+
+  const openPair = useCallback((pairId: string) => {
+    if (view === "markets") setReturnView("markets");
+    else if (view !== "pair") setReturnView("pulse");
+    handleSelectPairById(pairId);
+    setView("pair");
+    const nextPair = snapshotRef.current.allPairs.find((pair) => pair.id === pairId);
+    if (!nextPair || typeof window === "undefined") return;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("view", "pair");
+    nextUrl.searchParams.set("pair", getShareablePairKey(nextPair));
+    router.replace(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
+  }, [handleSelectPairById, router, view]);
 
   useEffect(() => {
     snapshotRef.current = snapshotData;
@@ -204,13 +238,13 @@ export function BaseTerminal({
   }, [selectedPairWithLiveChart]);
 
   useEffect(() => {
-    registerSelectPairHandler(handleSelectPairById);
+    registerSelectPairHandler(openPair);
     return () => registerSelectPairHandler(undefined);
-  }, [handleSelectPairById, registerSelectPairHandler]);
+  }, [openPair, registerSelectPairHandler]);
 
   useEffect(() => {
-    if (selectedPair) void refreshPairChart(selectedPair);
-  }, [refreshPairChart, selectedPair]);
+    if (view === "pair" && selectedPair) void refreshPairChart(selectedPair);
+  }, [refreshPairChart, selectedPair, view]);
 
   useEffect(() => {
     if (snapshotData.mode !== "dexscreener") return;
@@ -258,8 +292,8 @@ export function BaseTerminal({
       <main className="min-h-[calc(100vh-56px)] bg-base-black p-4">
         <section className="pulse-surface mx-auto max-w-3xl rounded-xl p-6">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-base-mint">Mergen Pulse</p>
-          <h1 className="mt-2 text-xl font-semibold text-base-text">Live market data is temporarily unavailable</h1>
-          <p className="mt-2 text-[12px] leading-6 text-base-muted">No sample prices were substituted. The terminal is preserving the source boundary while it waits for a healthy read-only snapshot.</p>
+          <h1 className="mt-2 text-xl font-semibold text-base-text">{t("terminal.unavailableTitle")}</h1>
+          <p className="mt-2 text-[12px] leading-6 text-base-muted">{t("terminal.unavailableBody")}</p>
         </section>
       </main>
     );
@@ -268,32 +302,50 @@ export function BaseTerminal({
   return (
     <main className="min-h-[calc(100vh-56px)] w-full overflow-x-hidden bg-base-black px-2.5 py-3 sm:px-4 lg:px-5" data-testid="pulse-terminal">
       <div className="mx-auto max-w-[1720px] space-y-3">
-        {snapshotData.fallbackReason ? <div className="rounded-lg bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">{snapshotData.fallbackReason}</div> : null}
+        {snapshotData.fallbackReason ? <div className="rounded-lg bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">{t("terminal.unavailableBody")}</div> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-1">
           <div className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-base-mint/10 text-base-mint"><DatabaseZap size={17} /></span>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-muted">Base market control center</p>
-              <h1 className="text-[18px] font-semibold tracking-tight text-base-text">Mergen Pulse Terminal</h1>
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-muted">{t("terminal.eyebrow")}</p>
+              <h1 className="text-[18px] font-semibold tracking-tight text-base-text">{t("terminal.title")}</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={cx("inline-flex h-9 items-center gap-2 rounded-full bg-base-elevated px-3 font-mono text-[10px]", providerHealth.stale ? "text-base-amber" : "text-base-mint")}><Activity size={12} />{providerHealth.status === "refreshing" ? "Checking source" : providerHealth.stale ? "Delayed data" : "Heartbeat healthy"}</span>
-            <AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} />
+            <span className={cx("inline-flex h-9 items-center gap-2 rounded-full bg-base-elevated px-3 font-mono text-[10px]", providerHealth.stale ? "text-base-amber" : "text-base-mint")}><Activity size={12} />{providerHealth.status === "refreshing" ? t("terminal.checkingSource") : providerHealth.stale ? t("terminal.delayedData") : t("terminal.heartbeatHealthy")}</span>
+            {view === "pulse" ? <button type="button" onClick={() => navigateView("alerts")} className="grid h-9 w-9 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={14} /></button> : null}
           </div>
         </div>
 
-        <LivePulseStrip snapshot={snapshotData} signals={pulseSignals} onSelect={handleSelectPairById} />
-        <OpportunityStream snapshot={snapshotData} signals={pulseSignals} sinceLastSignals={sinceLastSignals} onSelect={handleSelectPairById} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} />
+        {view === "pulse" ? <>
+          <LivePulseStrip snapshot={snapshotData} signals={pulseSignals} onSelect={openPair} />
+          <OpportunityStream snapshot={snapshotData} signals={pulseSignals} sinceLastSignals={sinceLastSignals} onSelect={openPair} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} />
+          <MarketDiscovery
+            compact
+            snapshot={snapshotData}
+            selectedPair={selectedPairWithLiveChart}
+            recentPairIds={recentPairIds}
+            onSelect={openPair}
+            isPairPinned={isPairPinned}
+            onTogglePin={togglePinnedPair}
+            pendingUpdateCount={pendingSnapshot?.changedPairIds.length ?? 0}
+            onApplyPendingUpdates={() => pendingSnapshot && applySnapshot(pendingSnapshot)}
+            onRefresh={() => void refreshProviderSnapshot()}
+            refreshStatus={providerHealth.status}
+            onInteractionChange={setInteractionLocked}
+            updatedPairIds={lastAppliedChangedPairIds}
+          />
+        </> : null}
 
-        <section className="grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="min-w-0 space-y-3">
+        {view === "markets" || view === "watchlist" ? (
             <MarketDiscovery
+              key={view}
+              initialCategory={view === "watchlist" ? "watchlist" : "volume"}
               snapshot={snapshotData}
               selectedPair={selectedPairWithLiveChart}
               recentPairIds={recentPairIds}
-              onSelect={handleSelectPairById}
+              onSelect={openPair}
               isPairPinned={isPairPinned}
               onTogglePin={togglePinnedPair}
               pendingUpdateCount={pendingSnapshot?.changedPairIds.length ?? 0}
@@ -303,20 +355,31 @@ export function BaseTerminal({
               onInteractionChange={setInteractionLocked}
               updatedPairIds={lastAppliedChangedPairIds}
             />
+        ) : null}
 
-            <section className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(270px,2fr)]" aria-label="Market workspace">
+        {view === "pair" ? <>
+          <button type="button" onClick={() => navigateView(returnView)} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-base-elevated px-3 text-[11px] font-semibold text-base-muted hover:text-base-text" data-testid="back-from-pair"><ArrowLeft size={14} />{returnView === "markets" ? t("common.backToMarkets") : t("common.backToPulse")}</button>
+          <section className="grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]" data-testid="pair-workspace">
+            <section className="min-w-0 space-y-3">
+            <section className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(270px,2fr)]" aria-label={t("workspace.marketWorkspace")}>
               <SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} />
               <MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} />
             </section>
 
             <PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} />
+            </section>
+            <div className="min-w-0 xl:sticky xl:top-[64px]"><SwapTicket pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} /></div>
           </section>
+        </> : null}
 
-          <div className="min-w-0 xl:sticky xl:top-[64px]">
-            <SwapTicket pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} />
-          </div>
-        </section>
+        {view === "alerts" ? <section className="mx-auto w-full max-w-3xl" data-testid="alerts-workspace"><AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} embedded /></section> : null}
+
+        {view === "wallet" ? <section className="mx-auto w-full max-w-xl" data-testid="wallet-workspace"><div className="mb-3 flex items-center gap-2"><WalletCards size={18} className="text-base-mint" /><h2 className="text-lg font-semibold">{t("nav.wallet")}</h2></div><SwapTicket pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} /></section> : null}
       </div>
     </main>
   );
+}
+
+function normalizeTerminalView(value: string | undefined): TerminalView {
+  return value === "markets" || value === "watchlist" || value === "alerts" || value === "wallet" || value === "pair" ? value : "pulse";
 }
