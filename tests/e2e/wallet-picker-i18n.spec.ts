@@ -140,6 +140,7 @@ test.describe("TR/EN and progressive disclosure", () => {
     await expect(page.getByText("CANLI HAREKETLER", { exact: true })).toBeVisible();
     await page.getByTestId("discovery-row-blob-usdc").first().getByRole("button").first().click();
     await expect(page.getByTestId("pair-workspace")).toBeVisible();
+    await expect(page).toHaveURL(/\?data=mock&view=pair&pair=blob-usdc$/);
     const pairUrl = page.url();
 
     await page.getByTestId("locale-switcher").getByRole("button", { name: "en" }).click();

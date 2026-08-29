@@ -320,7 +320,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       await page.goto("/?data=mock");
       await page.getByTestId("refresh-market-board").click();
       await expect.poll(() => refreshRequests).toBe(1);
-      await expect(page.getByText(locale === "tr" ? /Yerine örnek fiyat konmadı/ : /No sample prices were substituted/)).toBeVisible();
+      await expect(page.getByText(locale === "tr" ? "Veri gecikmeli" : "Delayed data", { exact: true })).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`delayed-desktop-${locale}-1440x900.png`), fullPage: true });
       await page.unroute("**/api/market-snapshot**");
     }
