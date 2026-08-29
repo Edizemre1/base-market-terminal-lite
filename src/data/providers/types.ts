@@ -38,6 +38,8 @@ export type MarketTerminalSnapshot = {
   providerName: string;
   feedStatusLabel: FeedStatusLabel;
   generatedAt: string;
+  sourceUpdatedAt: string;
+  freshness: "fresh" | "delayed" | "static";
   defaultPairId: string;
   allPairs: BasePair[];
   newPairs: BasePair[];

@@ -7,11 +7,11 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("loads the explicitly selected sample terminal and keeps swap read-only", async ({ page }) => {
-    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen.finance");
+    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen Finance");
     await expect(page.getByTestId("market-discovery")).toContainText("Market Discovery");
     await expect(page.getByTestId("market-discovery")).toContainText("Volume Leaders");
     await expect(page.getByTestId("selected-pair-panel")).toContainText("Selected market");
-    await expect(page.getByTestId("swap-preview-panel")).toContainText("Wallet & quote");
+    await expect(page.getByTestId("swap-preview-panel")).toContainText("Wallet Lens");
     await expect(page.getByTestId("swap-preview-panel")).toContainText("Indicative quote unavailable");
     await expect(page.getByTestId("swap-preview-panel")).not.toContainText("$0.84");
     await expect(page.getByTestId("swap-preview-panel")).not.toContainText("-0.24%");
@@ -28,8 +28,8 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen.finance");
-    await expect(page.getByRole("button", { name: "Read-only", exact: true })).toBeVisible();
+    await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen Finance");
+    await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible();
     await expect(page.locator("body")).toContainText(
       /Selected market|Live market data is temporarily unavailable/
     );
@@ -112,6 +112,72 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("review-swap-button")).toBeDisabled();
   });
 
+  test("queues board changes during interaction, applies them without losing selection and flashes the row", async ({ page, request }) => {
+    const response = await request.get("/api/market-snapshot?data=mock");
+    const snapshot = await response.json();
+    const selectedTitle = await page.getByTestId("selected-pair-title").innerText();
+    const pairId = snapshot.allPairs[0].id as string;
+    const nextPrice = (snapshot.allPairs[0].priceUsdValue as number) * 1.03;
+    const updatedAt = "2026-08-29T12:00:12.000Z";
+    const updatePair = (pair: Record<string, unknown>) => pair.id === pairId
+      ? { ...pair, priceUsdValue: nextPrice, priceUsd: `$${nextPrice}` }
+      : pair;
+    const updatedSnapshot = {
+      ...snapshot,
+      generatedAt: updatedAt,
+      sourceUpdatedAt: updatedAt,
+      allPairs: snapshot.allPairs.map(updatePair),
+      newPairs: snapshot.newPairs.map(updatePair),
+      volumeInflows: snapshot.volumeInflows.map(updatePair),
+      momentumPairs: snapshot.momentumPairs.map(updatePair)
+    };
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: updatedSnapshot }));
+
+    await page.getByTestId("refresh-market-board").click();
+    await expect(page.getByTestId("apply-market-updates")).toContainText("1 new market updates");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText(selectedTitle);
+
+    await page.getByTestId("apply-market-updates").click();
+    await expect(page.getByTestId("apply-market-updates")).toHaveCount(0);
+    await expect(page.getByTestId("selected-pair-title")).toHaveText(selectedTitle);
+    await expect(page.locator(`[data-testid="discovery-row-${pairId}"]:visible`)).toHaveClass(/market-update-flash/);
+  });
+
+  test("keeps multiple local alerts open, persists them and requests permission only after the explicit action", async ({ page }) => {
+    await page.addInitScript(() => {
+      const alertWindow = window as Window & { __notificationPermissionRequests?: number };
+      alertWindow.__notificationPermissionRequests = 0;
+      if (typeof Notification !== "undefined") {
+        Object.defineProperty(Notification, "requestPermission", {
+          configurable: true,
+          value: () => {
+            alertWindow.__notificationPermissionRequests = (alertWindow.__notificationPermissionRequests ?? 0) + 1;
+            return Promise.resolve("denied" as NotificationPermission);
+          }
+        });
+      }
+    });
+    await page.reload();
+    await expectTerminalShell(page);
+    expect(await page.evaluate(() => (window as Window & { __notificationPermissionRequests?: number }).__notificationPermissionRequests)).toBe(0);
+
+    await page.getByRole("button", { name: /^alerts/i }).click();
+    await page.locator("#alert-center-panel input").fill("1");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.locator("#alert-center-panel select").selectOption("liquidity");
+    await page.locator("#alert-center-panel input").fill("25000");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByTestId("alert-center-panel")).toBeVisible();
+    await expect(page.getByTestId("alert-rule")).toHaveCount(2);
+    await page.getByRole("button", { name: "Enable browser notifications" }).click();
+    expect(await page.evaluate(() => (window as Window & { __notificationPermissionRequests?: number }).__notificationPermissionRequests)).toBe(1);
+
+    await page.reload();
+    await expectTerminalShell(page);
+    await page.getByRole("button", { name: /^alerts/i }).click();
+    await expect(page.getByTestId("alert-rule")).toHaveCount(2);
+  });
+
   test("status and health surfaces expose safe read-only metadata", async ({ page, request }) => {
     const response = await request.get("/api/health");
     expect(response.ok()).toBeTruthy();
@@ -123,6 +189,10 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       version: "0.1.0",
       readOnly: true,
       publicReadOnlyReady: true,
+      livePulseEnabled: true,
+      opportunityStreamEnabled: true,
+      stableMarketUpdatesEnabled: true,
+      localAlertsEnabled: true,
       walletConnectionEnabled: true,
       walletTargetChainId: 8453,
       approvalRequestEnabled: false,
@@ -131,6 +201,16 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     });
     expect(JSON.stringify(health).toLowerCase()).not.toContain("secret");
     expect(JSON.stringify(health).toLowerCase()).not.toContain("api_key");
+
+    const pulseResponse = await request.get("/api/pulse?data=mock");
+    expect(pulseResponse.ok()).toBeTruthy();
+    expect(await pulseResponse.json()).toMatchObject({
+      ok: true,
+      readOnly: true,
+      freshness: "static",
+      signalMode: "verified-client-snapshot-diff",
+      fabricatedEvents: false
+    });
 
     await page.goto("/status");
     await expect(page.getByRole("heading", { name: "Public terminal status" })).toBeVisible();
@@ -171,6 +251,27 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     }
 
     expect(consoleProblems).toEqual([]);
+  });
+
+  test("captures dark-theme visual evidence for the required responsive breakpoints", async ({ page }, testInfo) => {
+    const viewports = [
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 }
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto("/?data=mock");
+      await expect(page.getByTestId("pulse-terminal")).toBeVisible();
+      const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      expect(background).toMatch(/^rgb\((?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2])\)$/);
+      await page.screenshot({
+        path: testInfo.outputPath(`pulse-${viewport.width}x${viewport.height}.png`),
+        fullPage: true
+      });
+    }
   });
 
   test("serves core routes and brand assets without console or server errors", async ({ page, request }) => {

@@ -18,7 +18,7 @@ export function buildProviderHealth(
     feedStatusLabel: snapshot.feedStatusLabel,
     status,
     lastSuccessAt,
-    stale: status === "failed" || isSnapshotStale(lastSuccessAt),
+    stale: status === "failed" || snapshot.freshness === "delayed" || isSnapshotStale(lastSuccessAt),
     fallbackReason: snapshot.fallbackReason,
     failureReason
   };
@@ -62,7 +62,7 @@ export function shouldKeepCurrentSnapshotOnRefresh(
 }
 
 function getSnapshotLastSuccessAt(snapshot: MarketTerminalSnapshot) {
-  return snapshot.generatedAt === "mock-static" ? undefined : snapshot.generatedAt;
+  return snapshot.generatedAt === "mock-static" ? undefined : snapshot.sourceUpdatedAt;
 }
 
 function isSnapshotStale(lastSuccessAt: string | undefined) {

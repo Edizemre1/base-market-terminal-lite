@@ -22,6 +22,16 @@ export type {
 const DEFAULT_MARKET_DATA_MODE: MarketDataMode = "dexscreener";
 const READ_ONLY_DATA_UNAVAILABLE_LABEL =
   "Read-only market data is temporarily unavailable. No sample prices were substituted.";
+const SNAPSHOT_CACHE_TTL_MS = 12_000;
+const SNAPSHOT_FAIL_SOFT_MS = 3 * 60_000;
+const SNAPSHOT_RETRY_BACKOFF_MS = 5_000;
+type SnapshotCacheEntry = {
+  snapshot?: MarketTerminalSnapshot;
+  cachedAt?: number;
+  retryAfter?: number;
+  inFlight?: Promise<MarketTerminalSnapshot>;
+};
+const snapshotCache = new Map<MarketDataMode, SnapshotCacheEntry>();
 const NEUTRAL_DEFAULT_PAIR_ORDER = [
   ["WETH", "USDC"],
   ["USDC", "WETH"],
@@ -76,18 +86,48 @@ export async function getMarketTerminalSnapshot(
     return buildMarketTerminalSnapshot(mockMarketDataProvider);
   }
 
-  try {
-    const provider = await getMarketDataProvider(mode);
-    const snapshot = await buildMarketTerminalSnapshot(provider);
-
-    if (mode === "dexscreener") {
-      return fillDexScreenerSnapshot(snapshot);
-    }
-
-    return snapshot;
-  } catch {
-    return buildDexScreenerFallbackSnapshot();
+  const now = Date.now();
+  const entry = snapshotCache.get(mode) ?? {};
+  if (entry.snapshot && entry.cachedAt && now - entry.cachedAt < SNAPSHOT_CACHE_TTL_MS) {
+    return entry.snapshot;
   }
+  if (entry.inFlight) {
+    return entry.inFlight;
+  }
+  if (entry.snapshot && entry.retryAfter && now < entry.retryAfter) {
+    return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
+  }
+
+  const inFlight = loadLiveMarketTerminalSnapshot(mode)
+    .then((snapshot) => {
+      snapshotCache.set(mode, { snapshot, cachedAt: Date.now() });
+      return snapshot;
+    })
+    .catch(() => {
+      const cached = entry.snapshot;
+      const cachedAt = entry.cachedAt ?? 0;
+      snapshotCache.set(mode, {
+        ...entry,
+        inFlight: undefined,
+        retryAfter: Date.now() + SNAPSHOT_RETRY_BACKOFF_MS
+      });
+      if (cached && Date.now() - cachedAt <= SNAPSHOT_FAIL_SOFT_MS) {
+        return markSnapshotDelayed(cached, "Provider refresh failed; using the last healthy snapshot.");
+      }
+      return buildDexScreenerFallbackSnapshot();
+    });
+
+  snapshotCache.set(mode, { ...entry, inFlight });
+  return inFlight;
+}
+
+async function loadLiveMarketTerminalSnapshot(mode: MarketDataMode) {
+  const provider = await getMarketDataProvider(mode);
+  const snapshot = await buildMarketTerminalSnapshot(provider);
+  if (mode === "dexscreener" && snapshot.allPairs.length === 0) {
+    throw new Error("Provider returned no qualified Base pairs");
+  }
+  return mode === "dexscreener" ? fillDexScreenerSnapshot(snapshot) : snapshot;
 }
 
 async function buildMarketTerminalSnapshot(
@@ -109,11 +149,14 @@ async function buildMarketTerminalSnapshot(
   const momentumPairs = selectHydratedPairs(momentumPairInputs, pairsById);
   const defaultPairId = allPairs[0]?.id ?? "";
 
+  const generatedAt = provider.mode === "mock" ? "mock-static" : new Date().toISOString();
   return {
     mode: provider.mode,
     providerName: provider.name,
     feedStatusLabel: getMarketFeedStatusLabel(provider.mode),
-    generatedAt: provider.mode === "mock" ? "mock-static" : new Date().toISOString(),
+    generatedAt,
+    sourceUpdatedAt: generatedAt,
+    freshness: provider.mode === "mock" ? "static" : "fresh",
     defaultPairId,
     allPairs,
     newPairs,
@@ -186,17 +229,33 @@ function selectHydratedPairs(inputs: BasePair[], pairsById: Map<string, BasePair
 }
 
 function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
+  const generatedAt = new Date().toISOString();
   return {
     mode: "dexscreener",
     providerName: "DexScreener read-only market data",
     feedStatusLabel: "READ-ONLY DATA",
-    generatedAt: new Date().toISOString(),
+    generatedAt,
+    sourceUpdatedAt: generatedAt,
+    freshness: "delayed",
     defaultPairId: "",
     allPairs: [],
     newPairs: [],
     volumeInflows: [],
     momentumPairs: [],
     fallbackReason: READ_ONLY_DATA_UNAVAILABLE_LABEL
+  };
+}
+
+function markSnapshotDelayed(snapshot: MarketTerminalSnapshot, reason: string): MarketTerminalSnapshot {
+  return {
+    ...snapshot,
+    generatedAt: new Date().toISOString(),
+    freshness: "delayed",
+    fallbackReason: reason,
+    allPairs: snapshot.allPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
+    newPairs: snapshot.newPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
+    volumeInflows: snapshot.volumeInflows.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
+    momentumPairs: snapshot.momentumPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason }))
   };
 }
 

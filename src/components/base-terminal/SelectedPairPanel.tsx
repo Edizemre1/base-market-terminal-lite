@@ -30,7 +30,7 @@ export function SelectedPairPanel({
   return (
     <section
       id="selected-market"
-      className="flex min-h-0 flex-col overflow-hidden rounded-sm border border-base-line bg-base-panel shadow-panel"
+      className="pulse-surface flex min-h-0 flex-col overflow-hidden rounded-xl"
       data-testid="selected-pair-panel"
     >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
@@ -181,6 +181,8 @@ function ChartPanel({
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("1h");
   const [expanded, setExpanded] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number>();
+  const [livePaused, setLivePaused] = useState(false);
+  const [frozenCandles, setFrozenCandles] = useState<BasePair["chartCandles"]>();
   const width = 820;
   const height = 270;
   const priceHeight = 198;
@@ -189,7 +191,8 @@ function ChartPanel({
   const plotLeft = 10;
   const plotRight = 66;
   const plotWidth = width - plotLeft - plotRight;
-  const candles = useMemo(() => getDisplayCandles(pair), [pair]);
+  const sourceCandles = useMemo(() => getDisplayCandles(pair), [pair]);
+  const candles = livePaused && frozenCandles ? frozenCandles : sourceCandles;
   const visibleCandles = useMemo(
     () => candles.slice(-getVisibleCandleCount(timeframe)),
     [candles, timeframe]
@@ -248,7 +251,7 @@ function ChartPanel({
   return (
     <div
       className={cx(
-        "market-scanline flex flex-col overflow-hidden rounded-sm border border-base-line bg-base-panel",
+        "market-scanline flex flex-col overflow-hidden rounded-xl border border-base-line/60 bg-base-panel",
         expanded
           ? "fixed inset-3 z-[80] h-auto bg-base-panel shadow-2xl sm:inset-6"
           : "h-[320px] sm:h-[340px] lg:h-[360px] 2xl:h-[380px]"
@@ -319,6 +322,19 @@ function ChartPanel({
             />
             {refreshStatus === "refreshing" ? "Refreshing" : "Refresh chart"}
           </button>
+          {livePaused ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLivePaused(false);
+                setFrozenCandles(undefined);
+              }}
+              data-testid="resume-live-chart"
+              className="relative z-40 h-6 rounded-full bg-base-mint px-2 font-mono text-[10px] font-bold text-[#031411]"
+            >
+              Resume live
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setExpanded((current) => !current)}
@@ -346,6 +362,12 @@ function ChartPanel({
           className="h-full min-h-0 w-full max-w-full touch-none p-2"
           role="img"
           aria-label={`${pair.pair} ${timeframe} candlestick and volume chart`}
+          onPointerEnter={() => {
+            if (!livePaused) {
+              setFrozenCandles(sourceCandles);
+              setLivePaused(true);
+            }
+          }}
           onPointerMove={(event) => {
             const bounds = event.currentTarget.getBoundingClientRect();
             const chartX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * width;

@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Bell,
   BookOpenText,
   Droplets,
   Radar,
@@ -22,10 +23,10 @@ import type { BasePair } from "@/types/baseTerminal";
 import { APP_VERSION } from "@/lib/appInfo";
 
 const navItems = [
-  { href: "/", label: "Discovery", icon: Radar, active: "/" },
-  { href: "/#selected-market", label: "Market Data", icon: Droplets, active: "/market-data" },
-  { href: "/#risk", label: "Data Checks", icon: AlertTriangle, active: "/risk" },
-  { href: "/swap", label: "Wallet & Quote", icon: Shuffle, active: "/swap" },
+  { href: "/", label: "Pulse", icon: Radar, active: "/" },
+  { href: "/#market-discovery", label: "Markets", icon: Droplets, active: "/market-data" },
+  { href: "/#selected-market", label: "Workspace", icon: AlertTriangle, active: "/risk" },
+  { href: "/swap", label: "Wallet", icon: Shuffle, active: "/swap" },
   { href: "/docs", label: "Docs", icon: BookOpenText, active: "/docs" }
 ] as const;
 
@@ -37,10 +38,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       <TerminalSearchProvider>
       <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
         <header
-          className="fixed left-0 right-0 top-0 z-50 h-12 border-b border-base-line bg-base-panel"
+          className="fixed left-0 right-0 top-0 z-50 h-14 border-b border-base-line/60 bg-base-panel/95 backdrop-blur-xl"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(112px,180px)_minmax(90px,1fr)_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(206px,238px)_minmax(260px,1fr)_auto_auto]">
+          <div className="grid h-full grid-cols-[minmax(120px,210px)_minmax(90px,1fr)_auto] items-center gap-2 px-2.5 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto] lg:px-4">
             <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
@@ -48,10 +49,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className="block truncate text-[13px] font-semibold leading-4 text-base-text"
                   data-testid="product-brand"
                 >
-                  Mergen<span className="text-base-mint">.finance</span>
+                  Mergen <span className="text-base-mint">Finance</span>
                 </span>
                 <span className="block truncate font-mono text-[9px] uppercase tracking-[0.14em] text-base-muted">
-                  Base Swap Terminal
+                  Pulse Terminal
                 </span>
               </span>
             </Link>
@@ -59,21 +60,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             <TerminalSearchBox />
 
             <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.08em] lg:flex">
+              <HeaderHeartbeat />
               <TopChip
-                label="Base · Read-only"
+                label="Base Mainnet"
                 tone="mint"
                 icon={<BaseNetworkIcon className="h-4 w-4" />}
               />
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
               </Suspense>
+              <Link href="/#alerts" className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label="Open local alert center"><Bell size={13} /></Link>
             </div>
             <WalletButton compact />
           </div>
         </header>
 
-        <aside className="fixed bottom-0 left-0 top-12 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
-          <nav className="space-y-1 p-1.5" aria-label="Base terminal">
+        <aside className="fixed bottom-0 left-0 top-14 z-40 hidden w-[80px] border-r border-base-line/60 bg-base-panel/80 backdrop-blur-xl md:flex md:flex-col">
+          <nav className="space-y-1 p-2" aria-label="Base terminal">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = item.active === "/" ? pathname === "/" : pathname === item.active;
@@ -83,13 +86,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                   key={item.label}
                   href={item.href}
                   className={cx(
-                    "flex h-8 items-center gap-2 border-l-2 px-2 text-[11px] font-medium",
+                    "flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold",
                     active
-                      ? "border-base-mint bg-base-mint/10 text-base-mint"
-                      : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
+                      ? "bg-base-mint/10 text-base-mint"
+                      : "text-base-muted hover:bg-base-elevated hover:text-base-text"
                   )}
                 >
-                  <span className="grid h-5 w-5 shrink-0 place-items-center bg-base-elevated text-base-muted">
+                  <span className="grid h-5 w-5 shrink-0 place-items-center text-current">
                     <Icon size={13} aria-hidden="true" />
                   </span>
                   <span className="truncate">{item.label}</span>
@@ -98,52 +101,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          <div className="mt-auto p-1.5">
-            <div className="border border-base-line bg-base-elevated p-2">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-text">
-                  Built on Base
-                </p>
-                <BaseNetworkIcon className="h-5 w-5" />
-              </div>
-              <p className="text-[11px] leading-4 text-base-muted">
-                Public read-only terminal powered by Base ecosystem market data.
-              </p>
-              <div className="mt-2 grid grid-cols-1 gap-1 font-mono text-[10px]">
-                <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
-                  Network
-                  <span className="block text-base-text">Base Mainnet</span>
-                </span>
-                <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
-                  Chain
-                  <span className="block text-base-text">8453</span>
-                </span>
-                <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
-                  Mode
-                  <span className="block text-base-mint">Read-only</span>
-                </span>
-              </div>
-              <Suspense fallback={<SidebarNetworkCopy mode="mock" />}>
-                <SidebarNetworkCard />
-              </Suspense>
-              <p className="mt-2 border-t border-base-line pt-2 text-[10px] leading-4 text-base-muted">
-                Wallet connection is available for account and balance display. Transactions stay disabled.
-              </p>
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-base-muted">
-              <span>Public access.</span>
+          <div className="mt-auto p-2 text-center">
+              <BaseNetworkIcon className="mx-auto h-6 w-6" />
               <Link
                 href="/status"
-                className="font-mono uppercase tracking-[0.1em] hover:text-base-mint"
+                className="mt-2 block font-mono text-[9px] uppercase tracking-[0.1em] text-base-muted hover:text-base-mint"
                 data-testid="app-version-label"
               >
                 Status v{APP_VERSION}
               </Link>
-            </div>
           </div>
         </aside>
 
-        <div className="min-w-0 pt-12 md:pl-[160px]">{children}</div>
+        <div className="min-w-0 pb-16 pt-14 md:pb-0 md:pl-[80px]">{children}</div>
+        <nav className="fixed bottom-0 left-0 right-0 z-50 grid h-14 grid-cols-5 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" aria-label="Mobile terminal navigation">
+          {navItems.map((item) => { const Icon = item.icon; return <Link key={`mobile-${item.label}`} href={item.href} className="flex flex-col items-center justify-center gap-1 text-[9px] font-semibold text-base-muted"><Icon size={15} /><span>{item.label}</span></Link>; })}
+        </nav>
       </div>
       </TerminalSearchProvider>
     </WalletProvider>
@@ -343,7 +316,7 @@ function DataSourceSwitcher() {
         onClick={() => selectMode("mock")}
       />
       <DataSourceButton
-        label="Read-only"
+        label="Live"
         active={activeMode === "dexscreener"}
         onClick={() => selectMode("dexscreener")}
       />
@@ -384,21 +357,23 @@ function DataSourceFallback() {
   );
 }
 
-function SidebarNetworkCard() {
-  const searchParams = useSearchParams();
-  const activeMode: MarketDataMode =
-    searchParams.get("data") === "mock" ? "mock" : "dexscreener";
-
-  return <SidebarNetworkCopy mode={activeMode} />;
+function HeaderHeartbeat() {
+  const { providerHealth } = useTerminalSearch();
+  const label = providerHealth?.status === "refreshing"
+    ? "Heartbeat · checking"
+    : providerHealth?.stale
+      ? "Heartbeat · delayed"
+      : providerHealth?.lastSuccessAt
+        ? `Heartbeat · ${formatHeartbeat(providerHealth.lastSuccessAt)}`
+        : "Heartbeat · starting";
+  return <TopChip label={label} tone={providerHealth?.stale ? "amber" : "mint"} />;
 }
 
-function SidebarNetworkCopy({ mode }: { mode: MarketDataMode }) {
-  const copy =
-    mode === "dexscreener"
-      ? "Read-only provider mode. Wallet account display is separate from signing and execution."
-      : "Mock provider mode. Demo rows only; no transactions are sent.";
-
-  return <p className="mt-2 text-[10px] leading-4 text-base-muted">{copy}</p>;
+function formatHeartbeat(value: string) {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime())
+    ? "source ready"
+    : `${timestamp.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" })} UTC`;
 }
 
 function TopChip({

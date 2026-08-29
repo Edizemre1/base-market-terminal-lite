@@ -1,6 +1,7 @@
 "use client";
 
-import { SlidersHorizontal, Star, X } from "lucide-react";
+import { RefreshCw, SlidersHorizontal, Star, X } from "lucide-react";
+import type { ProviderHealthState } from "@/components/TerminalSearchContext";
 import { useMemo, useState } from "react";
 import { PairAvatarStack } from "@/components/TokenIdentity";
 import type { MarketTerminalSnapshot } from "@/data/providers";
@@ -30,7 +31,13 @@ export function MarketDiscovery({
   recentPairIds,
   onSelect,
   isPairPinned,
-  onTogglePin
+  onTogglePin,
+  pendingUpdateCount,
+  onApplyPendingUpdates,
+  onRefresh,
+  refreshStatus,
+  onInteractionChange,
+  updatedPairIds
 }: {
   snapshot: MarketTerminalSnapshot;
   selectedPair: BasePair;
@@ -38,6 +45,12 @@ export function MarketDiscovery({
   onSelect: (id: string) => void;
   isPairPinned: (pair: BasePair) => boolean;
   onTogglePin: (pair: BasePair) => void;
+  pendingUpdateCount: number;
+  onApplyPendingUpdates: () => void;
+  onRefresh: () => void;
+  refreshStatus: ProviderHealthState["status"];
+  onInteractionChange: (active: boolean) => void;
+  updatedPairIds: string[];
 }) {
   const [category, setCategory] = useState<DiscoveryCategory>("volume");
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_DISCOVERY_FILTERS);
@@ -94,22 +107,48 @@ export function MarketDiscovery({
   return (
     <section
       id="market-discovery"
-      className="overflow-hidden rounded-sm border border-base-line bg-base-panel shadow-panel"
+      className="pulse-surface overflow-hidden rounded-xl"
       data-testid="market-discovery"
+      onPointerEnter={() => onInteractionChange(true)}
+      onPointerLeave={() => onInteractionChange(false)}
+      onFocusCapture={() => onInteractionChange(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractionChange(false);
+      }}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-line bg-base-raised px-3 py-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-line/60 px-3 py-3 sm:px-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-            Market Discovery
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">
+            Market Discovery · Live Board
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <h2 className="text-[15px] font-semibold text-base-text">Find active Base markets</h2>
+            <h2 className="text-[16px] font-semibold text-base-text">Stable updates while you inspect</h2>
             <span className="font-mono text-[10px] text-base-muted">
               {formatSnapshotFreshness(snapshot.generatedAt)} · {snapshot.providerName}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshStatus === "refreshing"}
+            data-testid="refresh-market-board"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-base-elevated px-2.5 font-mono text-[10px] text-base-muted hover:text-base-mint disabled:cursor-wait disabled:opacity-60"
+          >
+            <RefreshCw size={11} className={refreshStatus === "refreshing" ? "animate-spin" : undefined} />
+            {refreshStatus === "refreshing" ? "Checking" : "Refresh board"}
+          </button>
+          {pendingUpdateCount > 0 ? (
+            <button
+              type="button"
+              onClick={onApplyPendingUpdates}
+              data-testid="apply-market-updates"
+              className="inline-flex h-8 items-center rounded-full bg-base-mint px-3 text-[10px] font-bold text-[#031411] shadow-[0_0_18px_rgb(var(--color-mint)/0.16)]"
+            >
+              {pendingUpdateCount} new market updates
+            </button>
+          ) : null}
           <span className="font-mono text-[11px] text-base-muted" data-testid="discovery-result-count">
             {rows.length} results
           </span>
@@ -231,6 +270,7 @@ export function MarketDiscovery({
                 row={row}
                 freshness={freshnessLabel}
                 selected={row.pair.id === selectedPair.id}
+                updated={updatedPairIds.includes(row.pair.id)}
                 isPinned={isPairPinned(row.pair)}
                 onSelect={onSelect}
                 onTogglePin={onTogglePin}
@@ -247,6 +287,7 @@ export function MarketDiscovery({
             row={row}
             freshness={freshnessLabel}
             selected={row.pair.id === selectedPair.id}
+            updated={updatedPairIds.includes(row.pair.id)}
             isPinned={isPairPinned(row.pair)}
             onSelect={onSelect}
             onTogglePin={onTogglePin}
@@ -268,6 +309,7 @@ function DiscoveryTableRow({
   row,
   freshness,
   selected,
+  updated,
   isPinned,
   onSelect,
   onTogglePin
@@ -275,6 +317,7 @@ function DiscoveryTableRow({
   row: DiscoveryRow;
   freshness: string;
   selected: boolean;
+  updated: boolean;
   isPinned: boolean;
   onSelect: (id: string) => void;
   onTogglePin: (pair: BasePair) => void;
@@ -284,7 +327,7 @@ function DiscoveryTableRow({
 
   return (
     <tr
-      className={cx("border-t border-base-line hover:bg-base-mint/5", selected && "bg-base-mint/10")}
+      className={cx("border-t border-base-line/60 hover:bg-base-mint/5", selected && "bg-base-mint/10", updated && "market-update-flash")}
       data-testid={`discovery-row-${pair.id}`}
     >
       <td className="p-0">
@@ -322,7 +365,7 @@ function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
   const change = getChange24h(pair);
 
   return (
-    <article className={cx("p-3", selected && "bg-base-mint/10")} data-testid={`discovery-row-${pair.id}`}>
+    <article className={cx("p-3", selected && "bg-base-mint/10", props.updated && "market-update-flash")} data-testid={`discovery-row-${pair.id}`}>
       <div className="flex items-start gap-2">
         <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
           <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} size="md" />

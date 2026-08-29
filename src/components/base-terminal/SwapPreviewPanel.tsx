@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, LockKeyhole, LogOut, WalletCards } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, LockKeyhole, LogOut, WalletCards } from "lucide-react";
+import { useState } from "react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { TokenAvatar } from "@/components/TokenIdentity";
 import { useWallet } from "@/components/WalletContext";
@@ -24,22 +25,24 @@ export function SwapTicket({
   const connected = wallet.status === "connected" && Boolean(walletAddress);
   const amountNumber = Number.parseFloat(amount);
   const amountValid = Number.isFinite(amountNumber) && amountNumber > 0;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <aside
-      className="min-w-0 overflow-hidden rounded-sm border border-base-line bg-base-panel shadow-panel"
+      className="pulse-surface min-w-0 overflow-hidden rounded-xl"
       data-testid="swap-preview-panel"
     >
-      <div className="flex min-h-12 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3 py-2">
+      <div className="flex min-h-12 items-center justify-between gap-3 border-b border-base-line/60 px-3 py-2.5">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-            Wallet & quote
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">
+            Wallet Lens · Action Dock
           </p>
           <h2 className="mt-0.5 text-[13px] font-semibold text-base-text">{pair.pair}</h2>
         </div>
-        <span className="rounded-full border border-base-mint/35 bg-base-mint/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-base-mint">
-          Read-only
-        </span>
+        <button type="button" onClick={() => setExpanded((current) => !current)} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-base-elevated px-2.5 font-mono text-[10px] text-base-muted" aria-expanded={expanded}>
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {expanded ? "Collapse" : "Details"}
+        </button>
       </div>
 
       <div className="space-y-3 p-3">
@@ -93,6 +96,19 @@ export function SwapTicket({
               <p className="mt-1 text-[11px] leading-5 text-base-muted">
                 View your public address, Base network and native balance. Connecting does not enable approvals or swaps.
               </p>
+              {wallet.providers.length > 1 ? (
+                <label className="mt-3 block text-left text-[10px] text-base-muted">
+                  <span className="mb-1 block">Choose wallet</span>
+                  <select
+                    value={wallet.selectedProviderId}
+                    onChange={(event) => wallet.selectProvider(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-base-line bg-base-panel px-2 text-[11px] text-base-text outline-none"
+                    aria-label="Choose wallet provider"
+                  >
+                    {wallet.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                  </select>
+                </label>
+              ) : null}
               <button
                 type="button"
                 data-testid="wallet-panel-connect"
@@ -115,7 +131,7 @@ export function SwapTicket({
           ) : null}
         </section>
 
-        <section aria-label="Pair quote context" className="space-y-2">
+        {expanded ? <section aria-label="Pair quote context" className="space-y-2">
           <TokenBox
             label="From"
             token={pair.quoteToken}
@@ -132,15 +148,15 @@ export function SwapTicket({
             value="Unavailable"
             readOnly
           />
-        </section>
+        </section> : null}
 
-        {!amountValid ? (
+        {expanded && !amountValid ? (
           <p className="rounded-sm border border-base-amber/35 bg-base-amber/10 px-2.5 py-2 text-[11px] text-base-amber">
             Enter an amount greater than zero to inspect the pair context.
           </p>
         ) : null}
 
-        <section className="rounded-sm border border-base-line p-3">
+        {expanded ? <section className="rounded-lg bg-base-elevated/60 p-3">
           <div className="flex items-start gap-2">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-base-amber" aria-hidden="true" />
             <div>
@@ -150,9 +166,14 @@ export function SwapTicket({
               </p>
             </div>
           </div>
-        </section>
+        </section> : (
+          <div className="rounded-lg bg-base-elevated/60 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
+            <p className="font-semibold text-base-text">Trading preview is not configured</p>
+            <p>Indicative quote unavailable. Open Details for pair context; no executable route is built.</p>
+          </div>
+        )}
 
-        <div className="rounded-sm border border-base-mint/30 bg-base-mint/5 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
+        <div className="rounded-lg bg-base-mint/5 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
           <p className="font-semibold text-base-text">Wallet connection is read-only</p>
           <p>Approval, swap and transaction creation remain disabled, even while a wallet is connected.</p>
         </div>
