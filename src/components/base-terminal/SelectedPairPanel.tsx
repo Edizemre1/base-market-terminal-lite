@@ -8,6 +8,8 @@ import type { BasePair } from "@/types/baseTerminal";
 import type { ChartRefreshStatus } from "@/components/base-terminal/types";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel } from "@/i18n/dictionaries";
+import { getChange24h, getLiquidityUsd, getVolume24h } from "@/lib/base-terminal/discovery";
+import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 
 export function SelectedPairPanel({
   pair,
@@ -29,9 +31,13 @@ export function SelectedPairPanel({
         ? t("header.demoFallback")
         : t("workspace.readOnlyData")
       : t("market.sampleDataset");
+  const change24h = getChange24h(pair);
+  const volume24h = getVolume24h(pair);
+  const liquidityUsd = getLiquidityUsd(pair);
 
   return (
     <section
+      {...getMarketInvariantAttributes(pair)}
       id="selected-market"
       className="pulse-surface flex min-h-0 flex-col overflow-hidden rounded-xl"
       data-testid="selected-pair-panel"
@@ -50,12 +56,12 @@ export function SelectedPairPanel({
               {t("workspace.selected")}
             </p>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-              <h1
+              <h2
                 className="truncate text-[15px] font-semibold leading-5 text-base-text"
                 data-testid="selected-pair-title"
               >
                 {pair.pair}
-              </h1>
+              </h2>
               <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
                 {pair.dexName ?? pair.dex}
               </span>
@@ -79,7 +85,7 @@ export function SelectedPairPanel({
                 <a
                   href={pair.sourceUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="grid h-5 w-5 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
                   aria-label={t("workspace.openSource", { pair: pair.pair })}
                 >
@@ -106,18 +112,18 @@ export function SelectedPairPanel({
         <Metric label={t("workspace.price", { quote: pair.quoteToken })} value={pair.price} detail={pair.priceUsd} />
         <Metric
           label={t("workspace.change24h")}
-          value={localPercent(pair.change24h)}
+          value={typeof change24h === "number" ? localPercent(change24h) : t("common.noData")}
           detail={`5m ${typeof pair.priceChanges?.m5 === "number" ? localPercent(pair.priceChanges.m5) : t("common.noData")} / 1h ${typeof pair.priceChanges?.h1 === "number" ? localPercent(pair.priceChanges.h1) : t("common.noData")}`}
-          tone={pair.change24h >= 0 ? "mint" : "rose"}
+          tone={typeof change24h !== "number" || change24h === 0 ? "default" : change24h > 0 ? "mint" : "rose"}
         />
         <Metric
           label={t("workspace.volume24h")}
-          value={localCurrency(pair.volume24h)}
+          value={typeof volume24h === "number" ? localCurrency(volume24h) : t("common.noData")}
           detail={readOnlyDetail}
         />
         <Metric
           label={t("workspace.liquidity")}
-          value={localCurrency(pair.liquidity)}
+          value={typeof liquidityUsd === "number" ? localCurrency(liquidityUsd) : t("common.noData")}
           detail={readOnlyDetail}
         />
         <Metric label={t("workspace.age")} value={localizeAgeLabel(pair.age, locale)} detail={formatPairCreatedAt(pair, locale, t)} />
@@ -274,7 +280,7 @@ function ChartPanel({
             <p className="mt-1 font-mono text-[10px] text-base-mint">
               O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
               {formatChartValue(latest.low)} C {formatChartValue(latest.close)} V{" "}
-              {localCurrency(latest.volume || pair.volume24h)}
+              {localCurrency(latest.volume)}
             </p>
           ) : (
             <p className="mt-1 font-mono text-[10px] text-base-amber">

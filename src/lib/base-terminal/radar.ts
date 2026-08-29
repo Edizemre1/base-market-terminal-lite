@@ -1,6 +1,8 @@
 import type { PinnedPair } from "@/components/TerminalSearchContext";
 import { formatCompactCurrency } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
+import { safeGetStorageItem } from "@/lib/safeStorage";
+import { parseStrictFiniteNumber } from "@/lib/marketMath";
 
 export type RadarSort =
   | "feed"
@@ -117,7 +119,7 @@ export function readRadarStateFromStorage() {
   }
 
   try {
-    const rawValue = window.localStorage.getItem(RADAR_FILTER_STORAGE_KEY);
+    const rawValue = safeGetStorageItem(RADAR_FILTER_STORAGE_KEY);
     const parsedValue = rawValue ? (JSON.parse(rawValue) as unknown) : undefined;
 
     return normalizeRadarState(parsedValue);
@@ -322,10 +324,7 @@ export function toOptionalNumber(value: unknown) {
     return undefined;
   }
 
-  const parsed =
-    typeof value === "number" ? value : Number.parseFloat(String(value).replace(/,/g, ""));
-
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return parseStrictFiniteNumber(value);
 }
 
 export function getRadarOptionLabel(value: number) {

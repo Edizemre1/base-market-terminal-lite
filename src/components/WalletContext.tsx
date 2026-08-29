@@ -18,6 +18,7 @@ import {
   type WalletProviderOption
 } from "@/lib/wallet";
 import { WalletPicker } from "@/components/WalletPicker";
+import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
 
 export type WalletStatus = WalletControllerStatus;
 
@@ -60,7 +61,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     controller.start(undefined, preferredProviderId);
     const migrationTimer = window.setTimeout(() => {
       if (preferredProviderId && !controller.getState().providers.some((provider) => provider.id === preferredProviderId)) {
-        window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+        safeRemoveStorageItem(WALLET_PROVIDER_STORAGE_KEY);
       }
     }, 500);
     return () => {
@@ -86,7 +87,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (state.status !== "connected" || !state.selectedProviderId) return;
     const selected = state.providers.find((provider) => provider.id === state.selectedProviderId);
     if (!selected || selected.compatibility === "unverified") return;
-    window.localStorage.setItem(WALLET_PROVIDER_STORAGE_KEY, JSON.stringify({
+    safeSetStorageItem(WALLET_PROVIDER_STORAGE_KEY, JSON.stringify({
       id: selected.id,
       name: selected.name,
       rdns: selected.rdns,
@@ -117,21 +118,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 function readPreferredProviderId() {
   if (typeof window === "undefined") return undefined;
   for (const key of LEGACY_WALLET_PROVIDER_STORAGE_KEYS) {
-    const legacyValue = window.localStorage.getItem(key);
-    if (legacyValue !== null) window.localStorage.removeItem(key);
+    const legacyValue = safeGetStorageItem(key);
+    if (legacyValue !== null) safeRemoveStorageItem(key);
   }
   try {
-    const raw = window.localStorage.getItem(WALLET_PROVIDER_STORAGE_KEY);
+    const raw = safeGetStorageItem(WALLET_PROVIDER_STORAGE_KEY);
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as { id?: unknown; name?: unknown; rdns?: unknown; compatibility?: unknown };
     const identity = `${String(parsed.id ?? "")} ${String(parsed.name ?? "")} ${String(parsed.rdns ?? "")}`.toLowerCase();
-    if (identity.includes("keplr") || parsed.compatibility === "unverified" || typeof parsed.id !== "string") {
-      window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+    if (identity.includes("keplr") || parsed.compatibility === "unverified" || typeof parsed.id !== "string" || !/^[\w:.-]{1,160}$/.test(parsed.id)) {
+      safeRemoveStorageItem(WALLET_PROVIDER_STORAGE_KEY);
       return undefined;
     }
     return parsed.id;
   } catch {
-    window.localStorage.removeItem(WALLET_PROVIDER_STORAGE_KEY);
+    safeRemoveStorageItem(WALLET_PROVIDER_STORAGE_KEY);
     return undefined;
   }
 }

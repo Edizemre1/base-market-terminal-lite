@@ -9,6 +9,8 @@ import {
   getVolume24h
 } from "@/lib/base-terminal/discovery";
 import type { BasePair } from "@/types/baseTerminal";
+import { canonicalPairKey, calculatePercentChange } from "@/lib/marketMath";
+import { shouldAcceptMarketSnapshot } from "@/lib/base-terminal/providerHealth";
 
 export type PulseEventType =
   | "new_pool"
@@ -66,6 +68,7 @@ export function diffMarketSnapshots(
     now = new Date(current.generatedAt === "mock-static" ? Date.now() : current.generatedAt)
   }: { watchedPairIds?: string[]; now?: Date } = {}
 ) {
+  if (!shouldAcceptMarketSnapshot(previous, current)) return [];
   const events: PulseSignal[] = [];
   const previousPairs = new Map(previous.allPairs.map((pair) => [getPairIdentity(pair), pair]));
   const watched = new Set(watchedPairIds);
@@ -263,6 +266,32 @@ export function createVisitSnapshot(snapshot: MarketTerminalSnapshot): VisitSnap
   };
 }
 
+export function parseVisitSnapshot(value: unknown, now = Date.now()): VisitSnapshot | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as { savedAt?: unknown; pairs?: unknown };
+  if (typeof candidate.savedAt !== "string") return undefined;
+  const savedAt = Date.parse(candidate.savedAt);
+  if (!Number.isFinite(savedAt) || savedAt > now + 60_000 || !Array.isArray(candidate.pairs)) return undefined;
+  const pairs = candidate.pairs.slice(0, 40).flatMap((row): VisitPairSnapshot[] => {
+    if (!row || typeof row !== "object") return [];
+    const pair = row as Partial<VisitPairSnapshot>;
+    const id = readBoundedSnapshotText(pair.id, 128);
+    const identity = readBoundedSnapshotText(pair.identity, 256);
+    const label = readBoundedSnapshotText(pair.pair, 80);
+    if (!id || !identity || !label) return [];
+    return [{
+      id,
+      identity,
+      pair: label,
+      priceUsd: readOptionalPositiveNumber(pair.priceUsd),
+      volume24h: readOptionalNonNegativeNumber(pair.volume24h),
+      liquidityUsd: readOptionalNonNegativeNumber(pair.liquidityUsd),
+      activityRank: typeof pair.activityRank === "number" && Number.isSafeInteger(pair.activityRank) && pair.activityRank > 0 ? pair.activityRank : undefined
+    }];
+  });
+  return { savedAt: new Date(savedAt).toISOString(), pairs };
+}
+
 export function diffSinceLastVisit(
   previous: VisitSnapshot | undefined,
   current: MarketTerminalSnapshot,
@@ -375,25 +404,31 @@ function createPairSignal(
 
 function getTrendingPairIds(pairs: BasePair[]) {
   return pairs
-    .map((pair) => ({ id: pair.id, score: calculateActivityScore(pair) }))
-    .filter((row): row is { id: string; score: number } => row.score !== undefined)
-    .sort((left, right) => right.score - left.score)
+    .map((pair) => ({ pair, score: calculateActivityScore(pair) }))
+    .filter((row): row is { pair: BasePair; score: number } => row.score !== undefined)
+    .sort((left, right) => right.score - left.score || getPairIdentity(left.pair).localeCompare(getPairIdentity(right.pair), "en-US"))
     .slice(0, 8)
-    .map((row) => row.id);
+    .map((row) => row.pair.id);
 }
 
 function getTopGainerPairIds(pairs: BasePair[]) {
   return pairs
     .filter(isQualifiedMarket)
-    .map((pair) => ({ id: pair.id, change: getChange24h(pair) }))
-    .filter((row): row is { id: string; change: number } => row.change !== undefined && row.change > 0)
-    .sort((left, right) => right.change - left.change)
+    .map((pair) => ({ pair, change: getChange24h(pair) }))
+    .filter((row): row is { pair: BasePair; change: number } => row.change !== undefined && row.change > 0)
+    .sort((left, right) => right.change - left.change || getPairIdentity(left.pair).localeCompare(getPairIdentity(right.pair), "en-US"))
     .slice(0, 8)
-    .map((row) => row.id);
+    .map((row) => row.pair.id);
 }
 
 function getPairIdentity(pair: BasePair) {
-  return pair.pairAddress?.toLowerCase() ?? pair.id;
+  return canonicalPairKey({
+    chainId: pair.chainId,
+    pairAddress: pair.pairAddress,
+    baseTokenAddress: pair.baseTokenAddress,
+    quoteTokenAddress: pair.quoteTokenAddress,
+    fallbackId: pair.id
+  });
 }
 
 function isDelayedSnapshot(snapshot: MarketTerminalSnapshot) {
@@ -401,8 +436,7 @@ function isDelayedSnapshot(snapshot: MarketTerminalSnapshot) {
 }
 
 function percentChange(previous: number | undefined, current: number | undefined) {
-  if (!isFinitePositive(previous) || !isFinitePositive(current)) return undefined;
-  return ((current - previous) / previous) * 100;
+  return calculatePercentChange(previous, current);
 }
 
 function isFinitePositive(value: number | undefined): value is number {
@@ -416,6 +450,20 @@ function formatUsd(value: number | undefined) {
 
 function formatPercent(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function readBoundedSnapshotText(value: unknown, maximumLength: number) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return text ? text.slice(0, maximumLength) : undefined;
+}
+
+function readOptionalPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readOptionalNonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function formatVisitTime(value: string) {

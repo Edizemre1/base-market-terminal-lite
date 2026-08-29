@@ -9,6 +9,8 @@ import { cx } from "@/lib/format";
 import { BASE_CHAIN_ID, shortenWalletAddress } from "@/lib/wallet";
 import type { BasePair } from "@/types/baseTerminal";
 import { useI18n } from "@/i18n/I18nProvider";
+import { parseLocaleDecimalInput } from "@/lib/marketMath";
+import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 
 export function SwapTicket({
   pair,
@@ -25,12 +27,13 @@ export function SwapTicket({
   const { t } = useI18n();
   const walletAddress = wallet.address;
   const connected = wallet.status === "connected" && Boolean(walletAddress);
-  const amountNumber = Number.parseFloat(amount);
-  const amountValid = Number.isFinite(amountNumber) && amountNumber > 0;
+  const amountNumber = parseLocaleDecimalInput(amount);
+  const amountValid = typeof amountNumber === "number" && amountNumber > 0;
   const [expanded, setExpanded] = useState(false);
 
   return (
     <aside
+      {...getMarketInvariantAttributes(pair)}
       className="pulse-surface min-w-0 overflow-hidden rounded-xl"
       data-testid="swap-preview-panel"
       data-market-mode={marketDataMode}
@@ -72,10 +75,10 @@ export function SwapTicket({
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <WalletMetric
                   label={t("wallet.network")}
-                  value={wallet.chainId === BASE_CHAIN_ID ? "Base Mainnet" : `Chain ${wallet.chainId ?? t("common.unknown")}`}
+                  value={wallet.chainId === BASE_CHAIN_ID ? t("header.baseMainnet") : t("wallet.chain", { id: wallet.chainId ?? t("common.unknown") })}
                   tone={wallet.wrongNetwork ? "amber" : "mint"}
                 />
-                <WalletMetric label={t("wallet.balance")} value={wallet.balanceEth ? `${wallet.balanceEth} ETH` : t("common.unavailable")} />
+                <WalletMetric label={t("wallet.balance")} value={!wallet.wrongNetwork && wallet.balanceEth !== undefined ? `${wallet.balanceEth} ETH` : t("common.unavailable")} />
               </div>
               {wallet.wrongNetwork ? (
                 <div className="mt-3 rounded-sm border border-base-amber/35 bg-base-amber/10 p-2.5 text-[11px] text-base-amber" data-testid="wrong-network-warning">
@@ -206,6 +209,7 @@ function TokenBox({
   onValueChange?: (value: string) => void;
   readOnly?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <label className="block">
       <span className="mb-1 block text-[10px] font-medium text-base-muted">{label}</span>
@@ -218,7 +222,7 @@ function TokenBox({
           </span>
         </span>
         <input
-          aria-label={`${label} amount`}
+          aria-label={t("wallet.amountLabel", { label })}
           value={value}
           readOnly={readOnly}
           inputMode="decimal"

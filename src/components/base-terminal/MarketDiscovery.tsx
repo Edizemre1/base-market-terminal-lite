@@ -24,6 +24,7 @@ import {
 } from "@/lib/base-terminal/discovery";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
+import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
 
@@ -335,6 +336,7 @@ function DiscoveryTableRow({
 
   return (
     <tr
+      {...getMarketInvariantAttributes(pair)}
       className={cx("border-t border-base-line/60 hover:bg-base-mint/5", selected && "bg-base-mint/10", updated && "market-update-flash")}
       data-testid={`discovery-row-${pair.id}`}
     >
@@ -349,12 +351,12 @@ function DiscoveryTableRow({
       </td>
       <td className="px-2 py-2 font-mono text-[11px] text-base-muted">{formatAge(pair, locale, t)}</td>
       <td className="px-2 py-2 text-right font-mono text-[11px]">
-        <span className="block text-base-text">{pair.priceUsdValue || pair.dataSource === "mock" ? pair.priceUsd : "N/A"}</span>
+        <span className="block text-base-text">{getDisplayPrice(pair, t("common.noData"))}</span>
         <span className={getChangeTone(change24h)}>{formatOptionalPercent(change24h, localPercent)}</span>
         <span className="block text-[9px] text-base-muted">5m {formatOptionalPercent(pair.priceChanges?.m5, localPercent)} · 1h {formatOptionalPercent(pair.priceChanges?.h1, localPercent)}</span>
       </td>
-      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getVolume24h(pair), localCurrency)}</td>
-      <td className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)}</td>
+      <td title={formatFullCurrency(getVolume24h(pair), locale)} className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getVolume24h(pair), localCurrency)}</td>
+      <td title={formatFullCurrency(getLiquidityUsd(pair), locale)} className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)}</td>
       <td className="px-2 py-2 text-[10px] text-base-muted">
         {row.activityScore !== undefined ? <span className="mr-1 inline-flex rounded-sm border border-base-cyan/30 bg-base-cyan/10 px-1.5 py-0.5 font-mono text-base-cyan">{t("market.activity", { score: row.activityScore })}</span> : null}
         <span className={cx("inline-flex rounded-sm border px-1.5 py-0.5", pair.stale ? "border-base-amber/35 bg-base-amber/10 text-base-amber" : "border-base-line bg-base-elevated")}>{getDataStatus(pair, t)}</span>
@@ -374,7 +376,7 @@ function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
   const change = getChange24h(pair);
 
   return (
-    <article className={cx("p-3", selected && "bg-base-mint/10", props.updated && "market-update-flash")} data-testid={`discovery-row-${pair.id}`}>
+    <article {...getMarketInvariantAttributes(pair)} className={cx("p-3", selected && "bg-base-mint/10", props.updated && "market-update-flash")} data-testid={`discovery-row-${pair.id}`}>
       <div className="flex items-start gap-2">
         <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
           <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} size="md" />
@@ -386,7 +388,7 @@ function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
         <PinButton pair={pair} isPinned={isPinned} onTogglePin={onTogglePin} />
       </div>
       <button type="button" onClick={() => onSelect(pair.id)} className="mt-2 grid min-h-11 w-full grid-cols-3 gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
-        <MobileMetric label={t("market.priceChange")} value={pair.priceUsdValue || pair.dataSource === "mock" ? pair.priceUsd : t("common.noData")} detail={formatOptionalPercent(change, localPercent)} tone={getChangeTone(change)} />
+        <MobileMetric label={t("market.priceChange")} value={getDisplayPrice(pair, t("common.noData"))} detail={formatOptionalPercent(change, localPercent)} tone={getChangeTone(change)} />
         <MobileMetric label={t("market.volume24h")} value={formatOptionalCurrency(getVolume24h(pair), localCurrency)} detail={locale === "tr" ? "24s" : "24h"} />
         <MobileMetric label={t("market.liquidity")} value={formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)} detail={`${getDataStatus(pair, t)} · ${freshness}`} />
       </button>
@@ -480,6 +482,16 @@ function formatOptionalCurrency(value: number | undefined, formatter: (value: nu
 
 function formatOptionalPercent(value: number | undefined, formatter: (value: number) => string = formatPercent) {
   return value === undefined ? "N/A" : formatter(value);
+}
+
+function getDisplayPrice(pair: BasePair, fallback: string) {
+  return typeof pair.priceUsdValue === "number" && Number.isFinite(pair.priceUsdValue) && pair.priceUsdValue > 0 ? pair.priceUsd : fallback;
+}
+
+function formatFullCurrency(value: number | undefined, locale: "tr" | "en") {
+  return typeof value === "number" && Number.isFinite(value)
+    ? new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value)
+    : undefined;
 }
 
 function getChangeTone(value: number | undefined) {

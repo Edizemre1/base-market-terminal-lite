@@ -1,31 +1,27 @@
+import type { Metadata } from "next";
 import { StatusPill, TerminalPanel } from "@/components/TerminalWidgets";
+import { translate } from "@/i18n/dictionaries";
+import { getInitialLocale } from "@/i18n/server";
+import { APP_NAME } from "@/lib/appInfo";
 
-const safetyItems = [
-  "DexScreener read-only data by default",
-  "Sample data only through an explicit Mock selection",
-  "No wallet signing",
-  "No approvals",
-  "No real swaps or blockchain transactions",
-  "No API keys or backend secrets",
-  "No private product logic"
-];
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getInitialLocale();
+  return { title: { absolute: `${translate(locale, "docs.h1")} | ${APP_NAME}` } };
+}
 
-const buildItems = [
-  "Focused single-page Base pair radar",
-  "Clickable new pair, inflow, and momentum feeds",
-  "Selected pair chart, risk, liquidity, and activity modules",
-  "Always-visible disabled swap ticket",
-  "Read-only provider boundary with an explicit unavailable state"
-];
-
-export default function DocsPage() {
+export default async function DocsPage() {
+  const locale = await getInitialLocale();
+  const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
+  const safetyItems = t("docs.safetyItems").split("|");
+  const buildItems = t("docs.buildItems").split("|");
   return (
-    <main className="min-h-[calc(100vh-40px)] bg-base-black p-2">
+    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-base-black p-2 outline-none">
+      <h1 className="sr-only">{t("docs.h1")}</h1>
       <section className="grid gap-2 xl:grid-cols-[320px_minmax(0,1fr)]">
         <TerminalPanel
-          label="SAFETY"
-          title="Public MVP boundaries"
-          meta={<StatusPill label="Required" tone="amber" />}
+          label={t("docs.safety")}
+          title={t("docs.safetyTitle")}
+          meta={<StatusPill label={t("docs.required")} tone="amber" />}
         >
           <div className="space-y-1">
             {safetyItems.map((item) => (
@@ -42,9 +38,9 @@ export default function DocsPage() {
 
         <div className="space-y-2">
           <TerminalPanel
-            label="BUILDER LOG"
-            title="Mergen.finance terminal direction"
-            meta={<StatusPill label="Swap/radar" />}
+            label={t("docs.builder")}
+            title={t("docs.builderTitle")}
+            meta={<StatusPill label={t("docs.builderBadge")} />}
           >
             <div className="grid gap-1 md:grid-cols-2">
               {buildItems.map((item, index) => (
@@ -63,12 +59,9 @@ export default function DocsPage() {
             </div>
           </TerminalPanel>
 
-          <TerminalPanel label="ROADMAP" title="Future integration boundaries">
+          <TerminalPanel label={t("docs.roadmap")} title={t("docs.roadmapTitle")}>
             <p className="text-[11px] leading-4 text-base-muted">
-              Base pair discovery can run through read-only provider adapters.
-              Wallet connection, swap routing, and fee handling should be added
-              behind explicit boundaries later. This MVP keeps execution
-              disabled and never substitutes sample prices when providers are unavailable.
+              {t("docs.roadmapBody")}
             </p>
           </TerminalPanel>
         </div>

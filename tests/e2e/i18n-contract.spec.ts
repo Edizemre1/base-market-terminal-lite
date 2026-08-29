@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { en, tr, translate } from "../../src/i18n/dictionaries";
 
 test.describe("typed TR/EN dictionary contract", () => {
@@ -24,4 +26,24 @@ test.describe("typed TR/EN dictionary contract", () => {
     expect(trValue).toBe("1.234.567,89");
     expect(Number.parseFloat(String(value))).toBe(value);
   });
+
+  test("reports unused static keys and keeps dynamic key families explicit", async ({}, testInfo) => {
+    const source = readSourceTree(path.resolve(process.cwd(), "src"));
+    const unused = Object.keys(en).filter((key) => !source.includes(`"${key}"`) && !source.includes(`'${key}'`));
+    await testInfo.attach("unused-translation-keys.json", {
+      body: Buffer.from(JSON.stringify({ count: unused.length, keys: unused }, null, 2)),
+      contentType: "application/json"
+    });
+    const dynamicPrefixes = ["market.category.", "market.categoryDescription.", "details.signal.", "signal."];
+    for (const prefix of dynamicPrefixes) expect(Object.keys(en).some((key) => key.startsWith(prefix)), prefix).toBeTruthy();
+  });
 });
+
+function readSourceTree(directory: string): string {
+  return readdirSync(directory, { withFileTypes: true }).map((entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return readSourceTree(target);
+    if (target.endsWith(path.join("i18n", "dictionaries.ts"))) return "";
+    return /\.(?:ts|tsx)$/.test(entry.name) ? readFileSync(target, "utf8") : "";
+  }).join("\n");
+}

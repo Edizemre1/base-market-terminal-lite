@@ -32,7 +32,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
           : "border-base-mint bg-base-mint text-white hover:bg-base-mint/90",
         compact ? "max-w-[116px] text-[10px]" : "text-[11px]"
       )}
-      aria-label={connected ? `Wallet ${label}` : t("wallet.connect")}
+      aria-label={connected ? t("wallet.openDetails", { address: label }) : t("wallet.connect")}
     >
       <WalletCards size={13} aria-hidden="true" />
       <span className="truncate">{label}</span>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { cx } from "@/lib/format";
+import { sanitizeTokenLogoUrl } from "@/lib/safeUrl";
 
 type TokenAvatarProps = {
   symbol: string;
@@ -63,6 +64,7 @@ export function TokenAvatar({
 }: TokenAvatarProps) {
   const [failed, setFailed] = useState(false);
   const initial = symbol.trim().slice(0, 2).toUpperCase() || "?";
+  const safeLogoUrl = sanitizeTokenLogoUrl(logoUrl);
 
   return (
     <span
@@ -73,10 +75,10 @@ export function TokenAvatar({
       )}
       title={symbol}
     >
-      {logoUrl && !failed ? (
+      {safeLogoUrl && !failed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={logoUrl}
+          src={safeLogoUrl}
           alt=""
           className="h-full w-full object-cover"
           loading="lazy"

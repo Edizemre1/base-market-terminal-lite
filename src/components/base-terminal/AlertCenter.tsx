@@ -15,6 +15,9 @@ import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
+import { parseLocaleDecimalInput } from "@/lib/marketMath";
+import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 
 const ALERT_RULES_STORAGE_KEY = "mergen-pulse:alert-rules:v1";
 const ALERT_TRIGGER_STORAGE_KEY = "mergen-pulse:alert-triggers:v1";
@@ -49,26 +52,27 @@ export function AlertCenter({
   const [triggers, setTriggers] = useState<AlertTrigger[]>([]);
   const [metric, setMetric] = useState<AlertMetric>("price_above");
   const [threshold, setThreshold] = useState("");
+  const [thresholdError, setThresholdError] = useState(false);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">("default");
   const [loaded, setLoaded] = useState(false);
   const previousSnapshotRef = useRef(snapshot);
   const selectedMetric = METRICS.find((item) => item.id === metric)!;
 
   useEffect(() => {
-    setRules(readStoredArray<LocalAlertRule>(ALERT_RULES_STORAGE_KEY));
-    setTriggers(readStoredArray<AlertTrigger>(ALERT_TRIGGER_STORAGE_KEY));
+    setRules(readStoredArray(ALERT_RULES_STORAGE_KEY, isStoredAlertRule).slice(0, 40));
+    setTriggers(readStoredArray(ALERT_TRIGGER_STORAGE_KEY, isStoredAlertTrigger).slice(0, 30));
     setNotificationState(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
     setLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
-    window.localStorage.setItem(ALERT_RULES_STORAGE_KEY, JSON.stringify(rules));
+    safeSetStorageItem(ALERT_RULES_STORAGE_KEY, JSON.stringify(rules));
   }, [loaded, rules]);
 
   useEffect(() => {
     if (!loaded) return;
-    window.localStorage.setItem(ALERT_TRIGGER_STORAGE_KEY, JSON.stringify(triggers.slice(0, 30)));
+    safeSetStorageItem(ALERT_TRIGGER_STORAGE_KEY, JSON.stringify(triggers.slice(0, 30)));
   }, [loaded, triggers]);
 
   useEffect(() => {
@@ -86,7 +90,11 @@ export function AlertCenter({
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       for (const trigger of result.triggers.slice(0, 3)) {
         const copy = localizedTrigger(trigger, result.rules.find((rule) => rule.id === trigger.ruleId), t);
-        new Notification(copy.title, { body: copy.detail, tag: trigger.ruleId });
+        try {
+          new Notification(copy.title, { body: copy.detail, tag: trigger.ruleId });
+        } catch {
+          // In-app alert history remains authoritative when OS notifications fail.
+        }
       }
     }
   }, [loaded, rules, signals, snapshot, t]);
@@ -94,8 +102,11 @@ export function AlertCenter({
   const activeRules = useMemo(() => rules.filter((rule) => rule.enabled), [rules]);
 
   function addRule() {
-    const parsedThreshold = selectedMetric.threshold ? Number.parseFloat(threshold) : undefined;
-    if (selectedMetric.threshold && !Number.isFinite(parsedThreshold)) return;
+    const parsedThreshold = selectedMetric.threshold ? parseLocaleDecimalInput(threshold) : undefined;
+    if (selectedMetric.threshold && !isValidAlertThreshold(metric, parsedThreshold)) {
+      setThresholdError(true);
+      return;
+    }
     const rule = createAlertRule({
       pairId: metric === "new_pair" ? undefined : selectedPair.id,
       pairLabel: metric === "new_pair" ? t("alerts.anyPair") : selectedPair.pair,
@@ -104,6 +115,7 @@ export function AlertCenter({
     });
     setRules((current) => [rule, ...current].slice(0, 40));
     setThreshold("");
+    setThresholdError(false);
   }
 
   async function enableNotifications() {
@@ -115,7 +127,7 @@ export function AlertCenter({
   }
 
   return (
-    <section id="alerts" className="relative" data-testid="alert-center">
+    <section {...getMarketInvariantAttributes(selectedPair)} id="alerts" className="relative" data-testid="alert-center">
       {!embedded ? <button
         type="button"
         onClick={() => setOpen((current) => !current)}
@@ -123,13 +135,13 @@ export function AlertCenter({
         aria-expanded={open}
         aria-controls="alert-center-panel"
       >
-        {triggers.length > 0 ? <BellRing size={14} className="text-base-amber" /> : <Bell size={14} />}
+        {triggers.length > 0 ? <BellRing size={14} className="text-base-amber" aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
         {t("alerts.title")}
         <span className="rounded-full bg-base-panel px-1.5 font-mono text-[9px]">{activeRules.length}</span>
       </button> : null}
 
       {open ? (
-        <div id="alert-center-panel" data-testid="alert-center-panel" className={cx("mt-2 w-full rounded-xl bg-base-panel p-3 shadow-2xl ring-1 ring-base-line", !embedded && "lg:absolute lg:right-0 lg:z-50 lg:w-[430px]")} role="dialog" aria-label={t("alerts.center")}>
+        <div id="alert-center-panel" data-testid="alert-center-panel" className={cx("mt-2 w-full rounded-xl bg-base-panel p-3 shadow-2xl ring-1 ring-base-line", !embedded && "lg:absolute lg:right-0 lg:z-50 lg:w-[430px]")} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={t("alerts.center")}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("alerts.center")}</p>
@@ -140,10 +152,11 @@ export function AlertCenter({
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_auto]">
-            <label className="block"><span className="sr-only">{t("alerts.condition")}</span><select value={metric} onChange={(event) => setMetric(event.target.value as AlertMetric)} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 text-[11px] text-base-text outline-none">{METRICS.map((item) => <option key={item.id} value={item.id}>{t(item.labelKey)}</option>)}</select></label>
-            {selectedMetric.threshold ? <label><span className="sr-only">{t("alerts.threshold")}</span><input value={threshold} onChange={(event) => setThreshold(event.target.value)} inputMode="decimal" placeholder={selectedMetric.placeholder} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 font-mono text-[11px] text-base-text outline-none" /></label> : <div className="hidden sm:block" />}
+            <label className="block"><span className="sr-only">{t("alerts.condition")}</span><select value={metric} onChange={(event) => { setMetric(event.target.value as AlertMetric); setThresholdError(false); }} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 text-[11px] text-base-text outline-none">{METRICS.map((item) => <option key={item.id} value={item.id}>{t(item.labelKey)}</option>)}</select></label>
+            {selectedMetric.threshold ? <label><span className="sr-only">{t("alerts.threshold")}</span><input value={threshold} onChange={(event) => { setThreshold(event.target.value); setThresholdError(false); }} inputMode="decimal" placeholder={selectedMetric.placeholder} aria-invalid={thresholdError} aria-describedby={thresholdError ? "alert-threshold-error" : undefined} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 font-mono text-[11px] text-base-text outline-none aria-[invalid=true]:border-base-rose" /></label> : <div className="hidden sm:block" />}
             <button type="button" onClick={addRule} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-base-mint px-3 text-[11px] font-bold text-[#031411]"><Plus size={13} /> {t("alerts.add")}</button>
           </div>
+          {thresholdError ? <p id="alert-threshold-error" className="mt-2 text-[10px] text-base-rose" role="alert">{t("alerts.invalidThreshold")}</p> : null}
           <p className="mt-2 text-[10px] text-base-muted">{t("alerts.target", { target: metric === "new_pair" ? t("alerts.anyPair") : selectedPair.pair, timeframe: alertTimeframe(metric, t) })}</p>
 
           <div className="mt-3 max-h-[220px] space-y-1.5 overflow-y-auto">
@@ -172,14 +185,39 @@ export function AlertCenter({
   );
 }
 
-function readStoredArray<T>(key: string): T[] {
+function readStoredArray<T>(key: string, guard: (value: unknown) => value is T): T[] {
   try {
-    const value = window.localStorage.getItem(key);
+    const value = safeGetStorageItem(key);
     const parsed = value ? JSON.parse(value) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter(guard) : [];
   } catch {
     return [];
   }
+}
+
+function isValidAlertThreshold(metric: AlertMetric, value: number | undefined): value is number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  return metric.startsWith("change_") || value > 0;
+}
+
+function isStoredAlertRule(value: unknown): value is LocalAlertRule {
+  if (!value || typeof value !== "object") return false;
+  const rule = value as Partial<LocalAlertRule>;
+  return typeof rule.id === "string" &&
+    METRICS.some((metric) => metric.id === rule.metric) &&
+    typeof rule.createdAt === "string" && Number.isFinite(Date.parse(rule.createdAt)) &&
+    typeof rule.cooldownMs === "number" && Number.isFinite(rule.cooldownMs) && rule.cooldownMs >= 0 && rule.cooldownMs <= 24 * 60 * 60_000 &&
+    typeof rule.enabled === "boolean" &&
+    (rule.threshold === undefined || isValidAlertThreshold(rule.metric!, rule.threshold));
+}
+
+function isStoredAlertTrigger(value: unknown): value is AlertTrigger {
+  if (!value || typeof value !== "object") return false;
+  const trigger = value as Partial<AlertTrigger>;
+  return typeof trigger.key === "string" && typeof trigger.ruleId === "string" &&
+    typeof trigger.title === "string" && typeof trigger.detail === "string" &&
+    typeof trigger.source === "string" && typeof trigger.timeframe === "string" &&
+    typeof trigger.triggeredAt === "string" && Number.isFinite(Date.parse(trigger.triggeredAt));
 }
 
 function metricLabel(metric: AlertMetric, t: (key: TranslationKey) => string) {

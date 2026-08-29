@@ -189,6 +189,9 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   test("status and health surfaces expose safe read-only metadata", async ({ page, request }) => {
     const response = await request.get("/api/health");
     expect(response.ok()).toBeTruthy();
+    expect(response.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers()["x-frame-options"]).toBe("DENY");
+    expect(response.headers()["permissions-policy"]).toContain("payment=()");
     const health = await response.json();
 
     expect(health).toMatchObject({
@@ -223,17 +226,20 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await page.goto("/status");
     await expect(page.getByRole("heading", { name: "Public terminal status" })).toBeVisible();
     await expect(page.getByText("No transaction execution")).toBeVisible();
-    await expect(page.getByText("No API keys or secrets are exposed")).toBeVisible();
-    await expect(page.getByText("CI smoke tests")).toBeVisible();
+    await expect(page.getByText("No API key or secret is exposed")).toBeVisible();
+    await expect(page.getByText("CI verification")).toBeVisible();
   });
 
   test("keeps the primary terminal usable across desktop, tablet, and mobile", async ({ page }) => {
     const viewports = [
+      { width: 1920, height: 1080, minChart: 340, maxChart: 400 },
       { width: 1440, height: 900, minChart: 340, maxChart: 400 },
       { width: 1280, height: 800, minChart: 300, maxChart: 360 },
       { width: 1024, height: 768, minChart: 300, maxChart: 360 },
       { width: 768, height: 1024, minChart: 300, maxChart: 360 },
-      { width: 390, height: 844, minChart: 260, maxChart: 320 }
+      { width: 430, height: 932, minChart: 260, maxChart: 320 },
+      { width: 390, height: 844, minChart: 260, maxChart: 320 },
+      { width: 360, height: 800, minChart: 260, maxChart: 320 }
     ];
 
     const consoleProblems: string[] = [];
@@ -265,19 +271,52 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   });
 
   test("captures dark-theme visual evidence for the required responsive breakpoints", async ({ page }, testInfo) => {
-    const viewports = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
+    test.setTimeout(180_000);
 
     for (const locale of ["en", "tr"] as const) {
       await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
-      for (const viewport of viewports) {
-        await page.setViewportSize(viewport);
-        await page.goto("/?data=mock");
+      await page.setViewportSize({ width: 1440, height: 900 });
+      for (const [name, route] of [
+        ["pulse-desktop", "/?data=mock"],
+        ["markets-desktop", "/?data=mock&view=markets"],
+        ["pair-desktop", "/?data=mock&view=pair&pair=blob-usdc"],
+        ["alerts-desktop", "/?data=mock&view=alerts"]
+      ] as const) {
+        await page.goto(route);
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await expect(page.getByTestId("pulse-terminal")).toBeVisible();
         const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
         expect(background).toMatch(/^rgb\((?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2]),\s*(?:[0-2]?\d|3[0-2])\)$/);
-        await page.screenshot({ path: testInfo.outputPath(`pulse-${locale}-${viewport.width}x${viewport.height}.png`), fullPage: true });
+        await page.screenshot({ path: testInfo.outputPath(`${name}-${locale}-1440x900.png`), fullPage: true });
       }
+
+      await page.goto("/?data=mock&view=wallet");
+      await page.getByTestId("wallet-panel-connect").click();
+      await expect(page.getByTestId("wallet-picker")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`wallet-picker-desktop-${locale}-1440x900.png`), fullPage: true });
+      await page.keyboard.press("Escape");
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (const [name, route] of [
+        ["pulse-mobile", "/?data=mock"],
+        ["markets-mobile", "/?data=mock&view=markets"],
+        ["pair-mobile", "/?data=mock&view=pair&pair=blob-usdc"],
+        ["wallet-mobile", "/?data=mock&view=wallet"]
+      ] as const) {
+        await page.goto(route);
+        await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+        await page.screenshot({ path: testInfo.outputPath(`${name}-${locale}-390x844.png`), fullPage: true });
+      }
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const snapshot = await (await page.request.get("/api/market-snapshot?data=mock")).json();
+      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: { ...snapshot, generatedAt: `${locale}-delayed`, freshness: "delayed", fallbackReason: "Provider unavailable" } }));
+      await page.goto("/?data=mock");
+      await page.getByTestId("refresh-market-board").click();
+      await expect(page.getByText(locale === "tr" ? /Yerine örnek fiyat konmadı/ : /No sample prices were substituted/)).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`delayed-desktop-${locale}-1440x900.png`), fullPage: true });
+      await page.unroute("**/api/market-snapshot?data=mock");
     }
   });
 
@@ -291,7 +330,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
       if (response.status() >= 500) serverErrors.push(`${response.status()} ${response.url()}`);
     });
 
-    for (const route of ["/?data=mock", "/dashboard?data=mock", "/swap?data=mock", "/status?data=mock"]) {
+    for (const route of ["/?data=mock", "/dashboard?data=mock", "/swap?data=mock", "/status?data=mock", "/docs"]) {
       await page.goto(route);
       await expect(page.getByTestId("terminal-topbar")).toBeVisible();
     }

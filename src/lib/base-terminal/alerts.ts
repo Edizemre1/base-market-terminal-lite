@@ -2,6 +2,7 @@ import type { MarketTerminalSnapshot } from "@/data/providers";
 import { getChange24h, getLiquidityUsd, getVolume24h } from "@/lib/base-terminal/discovery";
 import type { PulseSignal } from "@/lib/base-terminal/pulse";
 import type { BasePair } from "@/types/baseTerminal";
+import { shouldAcceptMarketSnapshot } from "@/lib/base-terminal/providerHealth";
 
 export type AlertMetric =
   | "price_above"
@@ -64,7 +65,7 @@ export function evaluateAlertRules({
   signals: PulseSignal[];
   now?: Date;
 }) {
-  if (!previous) return { rules, triggers: [] as AlertTrigger[] };
+  if (!previous || !shouldAcceptMarketSnapshot(previous, current)) return { rules, triggers: [] as AlertTrigger[] };
   const previousPairs = new Map(previous.allPairs.map((pair) => [pair.id, pair]));
   const currentPairs = new Map(current.allPairs.map((pair) => [pair.id, pair]));
   const triggers: AlertTrigger[] = [];
@@ -157,7 +158,8 @@ function crossedBelow(previous: number | undefined, current: number | undefined,
 function isCoolingDown(rule: LocalAlertRule, now: Date) {
   if (!rule.lastTriggeredAt) return false;
   const lastTriggered = Date.parse(rule.lastTriggeredAt);
-  return Number.isFinite(lastTriggered) && now.getTime() - lastTriggered < rule.cooldownMs;
+  const elapsed = now.getTime() - lastTriggered;
+  return Number.isFinite(lastTriggered) && elapsed >= 0 && elapsed < rule.cooldownMs;
 }
 
 function isFiniteNumber(value: number | undefined): value is number {

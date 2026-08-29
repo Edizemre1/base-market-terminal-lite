@@ -2,12 +2,13 @@ import type { BasePair, PairActivity } from "@/types/baseTerminal";
 import {
   fetchJsonWithTimeout,
   readArray,
-  readHttpUrl,
+  readAllowedHttpsUrl,
   readNumber,
   readRecord,
   readString
 } from "./responseValidation";
 import type { MarketDataProvider, PairRiskDetails } from "./types";
+import { parseStrictFiniteNumber } from "@/lib/marketMath";
 
 const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const BASE_CHAIN_ID = "base";
@@ -114,21 +115,18 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
       const freshPairs = allPairs.filter(isFreshPair);
       const source = freshProfilePairs.length > 0 ? freshProfilePairs : freshPairs;
       return [...source]
-        .sort(
-          (left, right) =>
-            left.ageMinutes - right.ageMinutes || right.volume24h - left.volume24h
-        )
+        .sort((left, right) => left.ageMinutes - right.ageMinutes || right.volume24h - left.volume24h || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT);
     },
     getVolumeInflows: () =>
       [...allPairs]
         .filter((pair) => hasMinimumMarketQuality(pair, MIN_VOLUME_INFLOW_24H_USD))
-        .sort((left, right) => right.volume24h - left.volume24h)
+        .sort((left, right) => right.volume24h - left.volume24h || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT),
     getMomentumPairs: () =>
       [...allPairs]
         .filter((pair) => hasMinimumMarketQuality(pair))
-        .sort((left, right) => getMomentumRank(right) - getMomentumRank(left))
+        .sort((left, right) => getMomentumRank(right) - getMomentumRank(left) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT),
     getPairById: async (id) => {
       const cachedPair = pairsById.get(id);
@@ -219,15 +217,15 @@ function toDexPair(payload: unknown): DexPair | undefined {
   }
 
   const normalized = {
-    chainId: readString(pair.chainId),
-    dexId: readString(pair.dexId),
-    pairAddress: readString(pair.pairAddress),
-    url: readHttpUrl(pair.url),
+    chainId: readBoundedString(pair.chainId, 32),
+    dexId: readBoundedString(pair.dexId, 64),
+    pairAddress: readEvmAddress(pair.pairAddress),
+    url: readAllowedHttpsUrl(pair.url, ["dexscreener.com"]),
     info: toDexPairInfo(pair.info),
     baseToken: toDexToken(pair.baseToken),
     quoteToken: toDexToken(pair.quoteToken),
-    priceNative: readString(pair.priceNative),
-    priceUsd: readString(pair.priceUsd) ?? readNumber(pair.priceUsd)?.toString() ?? null,
+    priceNative: readStrictNumericString(pair.priceNative),
+    priceUsd: readStrictNumericString(pair.priceUsd) ?? readNumber(pair.priceUsd)?.toString() ?? null,
     fdv: readNumber(pair.fdv) ?? null,
     marketCap: readNumber(pair.marketCap) ?? null,
     txns: toDexTxnWindows(pair.txns),
@@ -256,7 +254,7 @@ function toDexPairInfo(payload: unknown): DexPair["info"] {
     return undefined;
   }
 
-  const imageUrl = readHttpUrl(info.imageUrl);
+  const imageUrl = readAllowedHttpsUrl(info.imageUrl, ["dexscreener.com", "coingecko.com"]);
   return imageUrl ? { imageUrl } : undefined;
 }
 
@@ -267,9 +265,9 @@ function toDexToken(payload: unknown): DexToken | undefined {
     return undefined;
   }
 
-  const address = readString(token.address);
-  const name = readString(token.name);
-  const symbol = readString(token.symbol);
+  const address = readEvmAddress(token.address);
+  const name = readBoundedString(token.name, 120);
+  const symbol = readBoundedString(token.symbol, 32);
 
   if (!address && !name && !symbol) {
     return undefined;
@@ -285,8 +283,8 @@ function toDexTokenProfile(payload: unknown): DexTokenProfile | undefined {
     return undefined;
   }
 
-  const chainId = readString(profile.chainId);
-  const tokenAddress = readString(profile.tokenAddress);
+  const chainId = readBoundedString(profile.chainId, 32);
+  const tokenAddress = readEvmAddress(profile.tokenAddress);
 
   if (!chainId && !tokenAddress) {
     return undefined;
@@ -396,7 +394,8 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const volume6h = toNumber(pair.volume?.h6);
   const liquidity = toNumber(pair.liquidity?.usd);
   const change24h = toNumber(pair.priceChange?.h24);
-  const ageMinutes = getAgeMinutes(pair.pairCreatedAt);
+  const pairCreatedAtMs = getValidPairCreatedAtMs(pair.pairCreatedAt);
+  const ageMinutes = getAgeMinutes(pairCreatedAtMs);
   const h24Txns = pair.txns?.h24;
   const buys = toNumber(h24Txns?.buys);
   const sells = toNumber(h24Txns?.sells);
@@ -406,7 +405,6 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const priceUsd = toNumber(pair.priceUsd);
   const fdv = toNumber(pair.fdv);
   const marketCap = toNumber(pair.marketCap);
-  const pairCreatedAtMs = toNumber(pair.pairCreatedAt);
 
   return {
     dataSource: "dexscreener",
@@ -522,10 +520,10 @@ function getActivityRow(
 
 function normalizeNumberWindows(windows: Record<string, number | undefined> | undefined | null) {
   return {
-    m5: getPositiveWindowValue(windows?.m5),
-    h1: getPositiveWindowValue(windows?.h1),
-    h6: getPositiveWindowValue(windows?.h6),
-    h24: getPositiveWindowValue(windows?.h24)
+    m5: getNonNegativeWindowValue(windows?.m5),
+    h1: getNonNegativeWindowValue(windows?.h1),
+    h6: getNonNegativeWindowValue(windows?.h6),
+    h24: getNonNegativeWindowValue(windows?.h24)
   };
 }
 
@@ -557,16 +555,11 @@ function normalizeTxnWindow(window: DexTxnWindow | undefined) {
   const buys = toNumber(window.buys);
   const sells = toNumber(window.sells);
 
-  if (buys <= 0 && sells <= 0) {
-    return undefined;
-  }
-
   return { buys, sells };
 }
 
-function getPositiveWindowValue(value: number | undefined) {
-  const parsed = toNumber(value);
-  return parsed > 0 ? parsed : undefined;
+function getNonNegativeWindowValue(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function getFiniteWindowValue(value: number | undefined) {
@@ -590,18 +583,20 @@ function getMomentumScore({
   totalTxns: number;
 }) {
   const priceSignal = clamp(change24h + 20, 0, 45);
-  const volumeSignal = liquidity > 0 ? clamp((volume24h / liquidity) * 18, 0, 35) : 0;
+  const volumeSignal = clamp(Math.log10(Math.max(volume24h, 0) + 1) * 4, 0, 25);
+  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(volume24h, liquidity), 0) + 1) * 2, 0, 10);
   const txnSignal = clamp(totalTxns / 10, 0, 20);
 
-  return clamp(Math.round(priceSignal + volumeSignal + txnSignal), 1, 100);
+  return clamp(Math.round(priceSignal + volumeSignal + matchedActivitySignal + txnSignal), 1, 100);
 }
 
 function getMomentumRank(pair: BasePair) {
   const priceSignal = clamp(pair.change24h, -35, 85);
-  const volumeLiquiditySignal = clamp((pair.volume24h / Math.max(pair.liquidity, 1)) * 35, 0, 45);
+  const volumeSignal = clamp(Math.log10(Math.max(pair.volume24h, 0) + 1) * 6, 0, 45);
+  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(pair.volume24h, pair.liquidity), 0) + 1) * 3, 0, 24);
   const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity, 1)) * 3, 0, 18);
 
-  return priceSignal + volumeLiquiditySignal + liquiditySignal + pair.momentumScore * 0.2;
+  return priceSignal + volumeSignal + matchedActivitySignal + liquiditySignal + pair.momentumScore * 0.2;
 }
 
 function dedupeDexPairs(pairs: DexPair[]) {
@@ -666,17 +661,17 @@ function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
     Boolean(pair.baseToken?.symbol && pair.baseToken.address) &&
     Boolean(pair.quoteToken?.symbol && pair.quoteToken.address) &&
     toNumber(pair.priceUsd) > 0 &&
-    toNumber(pair.liquidity?.usd) > MIN_LIQUIDITY_USD &&
-    toNumber(pair.volume?.h24) > minVolume24h
+    toNumber(pair.liquidity?.usd) >= MIN_LIQUIDITY_USD &&
+    toNumber(pair.volume?.h24) >= minVolume24h
   );
 }
 
 function hasMinimumMarketQuality(pair: BasePair, minVolume24h = MIN_VOLUME_24H_USD) {
-  return pair.liquidity > MIN_LIQUIDITY_USD && pair.volume24h > minVolume24h;
+  return pair.liquidity >= MIN_LIQUIDITY_USD && pair.volume24h >= minVolume24h;
 }
 
 function isFreshPair(pair: BasePair) {
-  return pair.ageMinutes > 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
+  return pair.ageMinutes >= 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
 }
 
 function getDexPairQualityScore(pair: DexPair) {
@@ -707,11 +702,16 @@ function getDexTokenPairKey(pair: DexPair) {
 function getAgeMinutes(pairCreatedAt: number | null | undefined) {
   const createdAt = toNumber(pairCreatedAt);
 
-  if (createdAt <= 0) {
+  if (createdAt <= 0 || createdAt > Date.now() + 60_000) {
     return UNKNOWN_AGE_MINUTES;
   }
 
-  return Math.max(1, Math.floor((Date.now() - createdAt) / 60_000));
+  return Math.max(0, Math.floor((Date.now() - createdAt) / 60_000));
+}
+
+function getValidPairCreatedAtMs(pairCreatedAt: number | null | undefined) {
+  const createdAt = toNumber(pairCreatedAt);
+  return createdAt > 0 && createdAt <= Date.now() + 60_000 ? createdAt : 0;
 }
 
 function formatAgeLabel(minutes: number) {
@@ -733,10 +733,10 @@ function formatAgeLabel(minutes: number) {
 }
 
 function formatNativePrice(value: string) {
-  const parsed = Number.parseFloat(value);
+  const parsed = parseStrictFiniteNumber(value);
 
-  if (!Number.isFinite(parsed)) {
-    return value || "0";
+  if (parsed === undefined) {
+    return "N/A";
   }
 
   if (parsed > 0 && parsed < 0.0001) {
@@ -794,16 +794,22 @@ function getKnownTokenLogoUrl(symbol: string | undefined) {
 }
 
 function toNumber(value: number | string | null | undefined) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
+  return parseStrictFiniteNumber(value) ?? 0;
+}
 
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
+function readEvmAddress(value: unknown) {
+  const address = readString(value);
+  return address && /^0x[0-9a-f]{40}$/i.test(address) ? address : undefined;
+}
 
-  return 0;
+function readBoundedString(value: unknown, maximumLength: number) {
+  const text = readString(value)?.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return text ? text.slice(0, maximumLength) : undefined;
+}
+
+function readStrictNumericString(value: unknown) {
+  const number = parseStrictFiniteNumber(value);
+  return number === undefined ? undefined : String(number);
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPairChart } from "@/data/providers/chart";
 import type { ChartPairInput, ChartTimeframe } from "@/data/providers/chart/types";
 import { resolveMarketDataMode } from "@/data/providers";
+import { parseStrictFiniteNumber } from "@/lib/marketMath";
 
 type ChartRefreshBody = {
   id?: unknown;
@@ -55,14 +56,5 @@ function normalizeChartTimeframe(value: unknown): ChartTimeframe {
 }
 
 function toNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  return 0;
+  return parseStrictFiniteNumber(value) ?? 0;
 }

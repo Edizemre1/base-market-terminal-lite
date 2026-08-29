@@ -11,6 +11,8 @@ import {
 } from "react";
 import type { FeedStatusLabel, MarketDataMode } from "@/data/providers/types";
 import type { BasePair } from "@/types/baseTerminal";
+import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { sanitizeTokenLogoUrl } from "@/lib/safeUrl";
 
 type SelectPairHandler = (pairId: string) => void;
 const PINNED_PAIRS_STORAGE_KEY = "base-terminal-lite:pinned-pairs";
@@ -84,7 +86,7 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    window.localStorage.setItem(
+    safeSetStorageItem(
       PINNED_PAIRS_STORAGE_KEY,
       JSON.stringify(pinnedSnapshots.map(toStoredPinnedPair))
     );
@@ -208,14 +210,14 @@ function readPinnedPairs() {
   }
 
   try {
-    const rawValue = window.localStorage.getItem(PINNED_PAIRS_STORAGE_KEY);
+    const rawValue = safeGetStorageItem(PINNED_PAIRS_STORAGE_KEY);
     const parsedValue = rawValue ? (JSON.parse(rawValue) as unknown) : [];
 
     if (!Array.isArray(parsedValue)) {
       return [];
     }
 
-    return parsedValue.map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
+    return parsedValue.slice(0, 24).map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
   } catch {
     return [];
   }
@@ -228,27 +230,34 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
 
   const candidate = value as Partial<PinnedPair>;
 
-  if (!candidate.key || !candidate.pair || !candidate.baseToken || !candidate.quoteToken) {
+  const key = readStoredText(candidate.key, 128);
+  const pair = readStoredText(candidate.pair, 80);
+  const baseToken = readStoredText(candidate.baseToken, 32);
+  const quoteToken = readStoredText(candidate.quoteToken, 32);
+  if (!key || !pair || !baseToken || !quoteToken || !isFiniteNumber(candidate.change24h) || !isFiniteNumber(candidate.volume24h) || !isFiniteNumber(candidate.liquidity)) {
     return undefined;
   }
 
+  const pairAddress = readStoredText(candidate.pairAddress, 42);
+  if (pairAddress && !/^0x[0-9a-f]{40}$/i.test(pairAddress)) return undefined;
+
   return {
-    key: candidate.key,
-    pairIdentity: candidate.pairIdentity ?? normalizePairIdentity(candidate.pair),
-    id: candidate.id,
-    pairAddress: candidate.pairAddress,
-    tokenLogoUrl: candidate.tokenLogoUrl,
-    quoteTokenLogoUrl: candidate.quoteTokenLogoUrl,
-    pair: candidate.pair,
-    baseToken: candidate.baseToken,
-    quoteToken: candidate.quoteToken,
-    dex: candidate.dex ?? "Unknown",
-    price: candidate.price ?? "N/A",
-    priceUsd: candidate.priceUsd ?? "N/A",
-    change24h: toNumber(candidate.change24h),
-    volume24h: toNumber(candidate.volume24h),
-    liquidity: toNumber(candidate.liquidity),
-    dataSource: candidate.dataSource,
+    key,
+    pairIdentity: normalizePairIdentity(readStoredText(candidate.pairIdentity, 128) ?? pair),
+    id: readStoredText(candidate.id, 128),
+    pairAddress,
+    tokenLogoUrl: sanitizeTokenLogoUrl(candidate.tokenLogoUrl),
+    quoteTokenLogoUrl: sanitizeTokenLogoUrl(candidate.quoteTokenLogoUrl),
+    pair,
+    baseToken,
+    quoteToken,
+    dex: readStoredText(candidate.dex, 64) ?? "Unknown",
+    price: readStoredText(candidate.price, 64) ?? "N/A",
+    priceUsd: readStoredText(candidate.priceUsd, 64) ?? "N/A",
+    change24h: candidate.change24h,
+    volume24h: candidate.volume24h,
+    liquidity: candidate.liquidity,
+    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" ? candidate.dataSource : undefined,
     stale: true
   };
 }
@@ -325,6 +334,12 @@ function normalizePairIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function toNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function readStoredText(value: unknown, maximumLength: number) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return normalized ? normalized.slice(0, maximumLength) : undefined;
 }

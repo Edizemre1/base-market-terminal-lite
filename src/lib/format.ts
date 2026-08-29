@@ -1,37 +1,45 @@
+import { normalizeSignedZero } from "@/lib/marketMath";
+
 export function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
 export function formatCurrency(value: number, maximumFractionDigits = 2) {
+  if (!Number.isFinite(value)) return "N/A";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits
-  }).format(value);
+  }).format(normalizeSignedZero(value));
 }
 
 export function formatCompactCurrency(value: number) {
+  if (!Number.isFinite(value)) return "N/A";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     notation: "compact",
     maximumFractionDigits: 1
-  }).format(value);
+  }).format(normalizeSignedZero(value));
 }
 
 export function formatNumber(value: number) {
+  if (!Number.isFinite(value)) return "N/A";
   return new Intl.NumberFormat("en-US", {
     notation: value > 9999 ? "compact" : "standard",
     maximumFractionDigits: 1
-  }).format(value);
+  }).format(normalizeSignedZero(value));
 }
 
 export function formatPercent(value: number) {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
+  if (!Number.isFinite(value)) return "N/A";
+  const normalized = normalizeSignedZero(value);
+  const sign = normalized > 0 ? "+" : "";
+  return `${sign}${normalized.toFixed(1)}%`;
 }
 
 export function formatAge(hours: number) {
+  if (!Number.isFinite(hours) || hours < 0) return "N/A";
   if (hours < 24) {
     return `${hours}h`;
   }

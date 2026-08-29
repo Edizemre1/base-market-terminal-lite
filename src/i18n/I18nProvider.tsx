@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isLocale, translate, type Locale, type TranslationKey } from "@/i18n/dictionaries";
+import { normalizeSignedZero } from "@/lib/marketMath";
+import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
 
 export const LOCALE_STORAGE_KEY = "mergen-pulse:locale:v1";
 export const LOCALE_COOKIE_NAME = "mergen_locale";
@@ -28,7 +30,7 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
     if (!storageCheckedRef.current) {
       storageCheckedRef.current = true;
       const hasLocaleCookie = document.cookie.split(";").some((entry) => entry.trim().startsWith(`${LOCALE_COOKIE_NAME}=`));
-      const storedLocale = hasLocaleCookie ? undefined : window.localStorage.getItem(LOCALE_STORAGE_KEY);
+      const storedLocale = hasLocaleCookie ? undefined : safeGetStorageItem(LOCALE_STORAGE_KEY);
       if (isLocale(storedLocale) && storedLocale !== locale) {
         document.cookie = `${LOCALE_COOKIE_NAME}=${storedLocale}; Path=/; Max-Age=31536000; SameSite=Lax`;
         document.documentElement.lang = storedLocale;
@@ -37,7 +39,7 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
       }
     }
     document.documentElement.lang = locale;
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    safeSetStorageItem(LOCALE_STORAGE_KEY, locale);
   }, [locale]);
 
   const setLocale = useCallback((nextLocale: Locale) => {
@@ -53,11 +55,18 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
       locale,
       setLocale,
       t: (key, values) => translate(locale, key, values),
-      formatCurrency: (number, maximumFractionDigits = 2) => new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", maximumFractionDigits }).format(number),
-      formatCompactCurrency: (number) => new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(number),
-      formatNumber: (number, maximumFractionDigits = 1) => new Intl.NumberFormat(intlLocale, { notation: Math.abs(number) > 9999 ? "compact" : "standard", maximumFractionDigits }).format(number),
-      formatPercent: (number) => `${number > 0 ? "+" : ""}${new Intl.NumberFormat(intlLocale, { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(number)}%`,
-      formatDateTime: (date, options) => new Intl.DateTimeFormat(intlLocale, options).format(new Date(date)),
+      formatCurrency: (number, maximumFractionDigits = 2) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", maximumFractionDigits }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
+      formatCompactCurrency: (number) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
+      formatNumber: (number, maximumFractionDigits = 1) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { notation: Math.abs(number) > 9999 ? "compact" : "standard", maximumFractionDigits }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
+      formatPercent: (number) => {
+        if (!Number.isFinite(number)) return translate(locale, "common.noData");
+        const normalized = normalizeSignedZero(number);
+        return `${normalized > 0 ? "+" : ""}${new Intl.NumberFormat(intlLocale, { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(normalized)}%`;
+      },
+      formatDateTime: (date, options) => {
+        const parsed = new Date(date);
+        return Number.isNaN(parsed.getTime()) ? translate(locale, "common.noData") : new Intl.DateTimeFormat(intlLocale, options).format(parsed);
+      },
       formatRelativeTime: (date) => formatRelative(date, locale)
     };
   }, [locale, setLocale]);

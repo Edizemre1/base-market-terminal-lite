@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlertTriangle, Copy, ExternalLink } from "lucide-react";
 import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 import type { DetailTab } from "@/components/base-terminal/types";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
+import { getChange24h, getLiquidityUsd, getPairAgeMinutes, getVolume24h } from "@/lib/base-terminal/discovery";
+import { getBaseScanAddressUrl } from "@/lib/safeUrl";
 
 const tabs: Array<{ id: DetailTab; labelKey: TranslationKey }> = [
   { id: "overview", labelKey: "details.overview" },
@@ -33,8 +35,12 @@ export function PairDetailTabs({
             key={tab.id}
             type="button"
             role="tab"
+            id={`pair-detail-tab-${tab.id}`}
+            aria-controls={`pair-detail-panel-${tab.id}`}
             aria-selected={activeTab === tab.id}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             onClick={() => onTabChange(tab.id)}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.id, onTabChange)}
             className={cx(
               "h-full min-w-0 border-r border-base-line px-2 text-[11px] font-semibold uppercase tracking-[0.14em] last:border-r-0",
               activeTab === tab.id
@@ -46,7 +52,7 @@ export function PairDetailTabs({
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div id={`pair-detail-panel-${activeTab}`} role="tabpanel" aria-labelledby={`pair-detail-tab-${activeTab}`} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto p-2 outline-none">
         {renderTab(pair, activeTab, providerStale, i18n)}
       </div>
     </section>
@@ -55,6 +61,8 @@ export function PairDetailTabs({
 
 function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean, i18n: ReturnType<typeof useI18n>) {
   const { t, locale, formatCompactCurrency, formatPercent } = i18n;
+  const change24h = getChange24h(pair);
+  const volume24h = getVolume24h(pair);
   if (activeTab === "overview") {
     return (
       <div className="space-y-2">
@@ -108,8 +116,8 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
           />
           <OverviewCell
             label={t("details.change", { timeframe: "24h" })}
-            value={formatOptionalPercent(pair.priceChanges?.h24 ?? pair.change24h, formatPercent, t("common.noData"))}
-            tone={getChangeTone(pair.priceChanges?.h24 ?? pair.change24h)}
+            value={formatOptionalPercent(change24h, formatPercent, t("common.noData"))}
+            tone={getChangeTone(change24h)}
           />
         </div>
 
@@ -119,7 +127,7 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
           <OverviewCell label={t("details.volume", { timeframe: "6h" })} value={formatOptionalCompactCurrency(pair.volumes?.h6, formatCompactCurrency, t("common.noData"))} />
           <OverviewCell
             label={t("details.volume", { timeframe: "24h" })}
-            value={formatOptionalCompactCurrency(pair.volumes?.h24 ?? pair.volume24h, formatCompactCurrency, t("common.noData"))}
+            value={formatOptionalCompactCurrency(volume24h, formatCompactCurrency, t("common.noData"))}
           />
         </div>
 
@@ -261,13 +269,22 @@ function AddressCell({
 
 function CopyValueButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
   const { t } = useI18n();
+
+  useEffect(() => () => {
+    if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+  }, []);
 
   async function copyValue() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => {
+        resetTimerRef.current = undefined;
+        setCopied(false);
+      }, 1200);
     } catch {
       setCopied(false);
     }
@@ -291,7 +308,7 @@ function ExternalDataLink({ href, label }: { href: string; label: string }) {
     <a
       href={href}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-panel px-1.5 font-mono text-[10px] text-base-muted hover:border-base-mint hover:text-base-mint"
     >
       <ExternalLink size={10} aria-hidden="true" />
@@ -337,7 +354,10 @@ function PublicSignalsPanel({
 
 function getPublicMarketSignals(pair: BasePair, providerStale: boolean, t: (key: TranslationKey) => string) {
   const signals: string[] = [];
-  const volumeLiquidityRatio = pair.liquidity > 0 ? pair.volume24h / pair.liquidity : 0;
+  const liquidity = getLiquidityUsd(pair);
+  const volume24h = getVolume24h(pair);
+  const ageMinutes = getPairAgeMinutes(pair);
+  const volumeLiquidityRatio = typeof liquidity === "number" && liquidity > 0 && typeof volume24h === "number" ? volume24h / liquidity : undefined;
   const shortTermMove = Math.max(
     Math.abs(pair.priceChanges?.m5 ?? 0),
     Math.abs(pair.priceChanges?.h1 ?? 0),
@@ -348,15 +368,15 @@ function getPublicMarketSignals(pair: BasePair, providerStale: boolean, t: (key:
     signals.push(t("details.signal.stale"));
   }
 
-  if (pair.liquidity > 0 && pair.liquidity < 50_000) {
+  if (typeof liquidity === "number" && liquidity > 0 && liquidity < 50_000) {
     signals.push(t("details.signal.lowLiquidity"));
   }
 
-  if (volumeLiquidityRatio >= 2) {
+  if (typeof volumeLiquidityRatio === "number" && volumeLiquidityRatio >= 2) {
     signals.push(t("details.signal.volumeLiquidity"));
   }
 
-  if (pair.ageMinutes > 0 && pair.ageMinutes <= 24 * 60) {
+  if (typeof ageMinutes === "number" && ageMinutes >= 0 && ageMinutes <= 24 * 60) {
     signals.push(t("details.signal.newPair"));
   }
 
@@ -375,16 +395,12 @@ function getExternalLink(label: string, href: string | undefined) {
   return href ? { label, href } : undefined;
 }
 
-function getBaseScanAddressUrl(address: string | undefined) {
-  return address ? `https://basescan.org/address/${address}` : undefined;
-}
-
 function formatOptionalCurrency(value: number | undefined, formatter: (value: number) => string, fallback: string) {
-  return value && value > 0 ? formatter(value) : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? formatter(value) : fallback;
 }
 
 function formatOptionalCompactCurrency(value: number | undefined, formatter: (value: number) => string, fallback: string) {
-  return typeof value === "number" && value > 0 ? formatter(value) : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? formatter(value) : fallback;
 }
 
 function formatOptionalPercent(value: number | undefined, formatter: (value: number) => string, fallback: string) {
@@ -424,4 +440,18 @@ function RiskRow({ label, value }: { label: string; value: string }) {
       />
     </div>
   );
+}
+
+function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentTab: DetailTab, onTabChange: (tab: DetailTab) => void) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+  event.preventDefault();
+  const currentIndex = tabs.findIndex((tab) => tab.id === currentTab);
+  const nextIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? tabs.length - 1
+      : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  onTabChange(nextTab.id);
+  window.requestAnimationFrame(() => document.getElementById(`pair-detail-tab-${nextTab.id}`)?.focus());
 }

@@ -35,6 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <WalletProvider>
       <TerminalSearchProvider>
       <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
+        <SkipLink />
         <header
           className="fixed left-0 right-0 top-0 z-50 h-14 border-b border-base-line/60 bg-base-panel/95 backdrop-blur-xl"
           data-testid="terminal-topbar"
@@ -60,7 +61,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.08em] lg:flex">
               <HeaderHeartbeat />
               <TopChip
-                label="Base Mainnet"
+                label={<HeaderBaseNetworkLabel />}
                 tone="mint"
                 icon={<BaseNetworkIcon className="h-4 w-4" />}
               />
@@ -89,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </aside>
 
-        <div className="min-w-0 pb-16 pt-14 md:pb-0 md:pl-[80px]">{children}</div>
+        <div className="min-w-0 pb-[calc(4rem+env(safe-area-inset-bottom))] pt-14 md:pb-0 md:pl-[80px]">{children}</div>
         <Suspense><TerminalNavigation mobile /></Suspense>
       </div>
       </TerminalSearchProvider>
@@ -98,11 +99,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 function TerminalSearchBox() {
-  const { t, formatCompactCurrency } = useI18n();
+  const { t, locale, formatCompactCurrency } = useI18n();
   const { pairs, selectedPairId, selectPair, isPairPinned, togglePinnedPair } = useTerminalSearch();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const results = useMemo(() => getSearchResults(pairs, query), [pairs, query]);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const results = useMemo(() => getSearchResults(pairs, query, locale), [locale, pairs, query]);
   const shouldShowResults = open && query.trim().length > 0;
 
   function selectResult(pairId: string) {
@@ -117,9 +119,15 @@ function TerminalSearchBox() {
       return;
     }
 
-    if (event.key === "Enter" && results[0]) {
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && results.length > 0) {
       event.preventDefault();
-      selectResult(results[0].id);
+      setActiveResultIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length);
+      return;
+    }
+
+    if (event.key === "Enter" && results[activeResultIndex]) {
+      event.preventDefault();
+      selectResult(results[activeResultIndex].id);
     }
   }
 
@@ -138,25 +146,35 @@ function TerminalSearchBox() {
         onChange={(event) => {
           setQuery(event.target.value);
           setOpen(true);
+          setActiveResultIndex(0);
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={handleKeyDown}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={shouldShowResults}
+        aria-controls="terminal-search-results"
+        aria-activedescendant={shouldShowResults && results[activeResultIndex] ? `terminal-search-option-${results[activeResultIndex].id}` : undefined}
         placeholder={t("header.searchPlaceholder")}
         className="h-9 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint lg:h-8"
       />
       {shouldShowResults ? (
-        <div className="absolute left-0 right-0 top-[32px] z-[60] max-h-[300px] overflow-y-auto border border-base-line bg-base-panel shadow-none">
+        <div id="terminal-search-results" role="listbox" aria-label={t("header.search")} className="absolute left-0 right-0 top-[32px] z-[60] max-h-[300px] overflow-y-auto border border-base-line bg-base-panel shadow-none">
           {results.length > 0 ? (
-            results.map((pair) => (
+            results.map((pair, resultIndex) => (
               <div
                 key={pair.id}
                 className={cx(
                   "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-base-line px-2 py-1.5 text-left text-[11px] last:border-b-0 hover:bg-base-mint/5",
-                  pair.id === selectedPairId && "bg-base-mint/10"
+                  pair.id === selectedPairId && "bg-base-mint/10",
+                  resultIndex === activeResultIndex && "ring-1 ring-inset ring-base-mint/45"
                 )}
               >
                 <button
+                  id={`terminal-search-option-${pair.id}`}
+                  role="option"
+                  aria-selected={pair.id === results[activeResultIndex]?.id}
                   data-testid={`search-result-${pair.id}`}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
@@ -193,7 +211,7 @@ function TerminalSearchBox() {
                     "grid h-6 w-6 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint",
                     isPairPinned(pair) && "border-base-mint/45 bg-base-mint/10 text-base-mint"
                   )}
-                  aria-label={isPairPinned(pair) ? `Unpin ${pair.pair}` : `Pin ${pair.pair}`}
+                  aria-label={t(isPairPinned(pair) ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })}
                 >
                   <Star
                     size={12}
@@ -214,15 +232,15 @@ function TerminalSearchBox() {
   );
 }
 
-function getSearchResults(pairs: BasePair[], query: string) {
-  const normalizedQuery = normalizeSearch(query);
+function getSearchResults(pairs: BasePair[], query: string, locale: "tr" | "en" = "en") {
+  const normalizedQuery = normalizeSearch(query, locale);
 
   if (!normalizedQuery) {
     return [];
   }
 
   return pairs
-    .filter((pair) => getSearchPairShape(pair).haystack.includes(normalizedQuery))
+    .filter((pair) => getSearchPairShape(pair, locale).haystack.includes(normalizedQuery))
     .slice(0, 8);
 }
 
@@ -237,7 +255,7 @@ function getSearchPairShape(pair: {
   quoteToken: string;
   project: string;
   dex: string;
-}) {
+}, locale: "tr" | "en" = "en") {
   return {
     haystack: [
       pair.id,
@@ -252,13 +270,18 @@ function getSearchPairShape(pair: {
       pair.dex
     ]
       .filter(Boolean)
-      .map((value) => normalizeSearch(String(value)))
+      .map((value) => normalizeSearch(String(value), locale))
       .join(" ")
   };
 }
 
-function normalizeSearch(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeSearch(value: string, locale: "tr" | "en" = "en") {
+  return value
+    .toLocaleLowerCase(locale === "tr" ? "tr-TR" : "en-US")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/ı/g, "i")
+    .replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 function DataSourceSwitcher() {
@@ -335,23 +358,32 @@ function DataSourceFallback() {
 }
 
 function HeaderHeartbeat() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { providerHealth } = useTerminalSearch();
   const label = providerHealth?.status === "refreshing"
     ? t("header.heartbeatChecking")
     : providerHealth?.stale
       ? t("header.heartbeatDelayed")
       : providerHealth?.lastSuccessAt
-        ? `Heartbeat · ${formatHeartbeat(providerHealth.lastSuccessAt)}`
+        ? `${locale === "tr" ? "Veri akışı" : "Heartbeat"} · ${formatHeartbeat(providerHealth.lastSuccessAt, locale, t("header.sourceReady"))}`
         : t("header.heartbeatStarting");
   return <TopChip label={label} tone={providerHealth?.stale ? "amber" : "mint"} />;
 }
 
-function formatHeartbeat(value: string) {
+function SkipLink() {
+  const { t } = useI18n();
+  return <a href="#terminal-main" className="fixed left-3 top-2 z-[100] -translate-y-20 rounded-md bg-base-mint px-3 py-2 text-[12px] font-bold text-[#031411] transition-transform focus:translate-y-0">{t("a11y.skipContent")}</a>;
+}
+
+function HeaderBaseNetworkLabel() {
+  return <>{useI18n().t("header.baseMainnet")}</>;
+}
+
+function formatHeartbeat(value: string, locale: "tr" | "en", fallback: string) {
   const timestamp = new Date(value);
   return Number.isNaN(timestamp.getTime())
-    ? "source ready"
-    : `${timestamp.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" })} UTC`;
+    ? fallback
+    : `${timestamp.toLocaleTimeString(locale === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" })} UTC`;
 }
 
 function HeaderProductLabel() {
@@ -370,11 +402,14 @@ function LocaleSwitcher() {
 
 function TerminalNavigation({ mobile = false }: { mobile?: boolean }) {
   const { t } = useI18n();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const activeView = searchParams.get("view") ?? "pulse";
+  const requestedView = searchParams.get("view");
+  const activeView = requestedView === "markets" || requestedView === "watchlist" || requestedView === "alerts" || requestedView === "wallet" ? requestedView : "pulse";
+  const isTerminalRoute = pathname === "/" || pathname === "/dashboard" || pathname === "/swap";
   const items = navItems.filter((item) => !(mobile && "desktopOnly" in item && item.desktopOnly));
-  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = activeView === item.view; return <Link key={`mobile-${item.view}`} href={item.href} className={cx("flex flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} /><span>{t(item.labelKey as TranslationKey)}</span></Link>; })}</nav>;
-  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = activeView === item.view; return <Link key={item.view} href={item.href} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold", active ? "bg-base-mint/10 text-base-mint" : "text-base-muted hover:bg-base-elevated hover:text-base-text")}><span className="grid h-5 w-5 shrink-0 place-items-center text-current"><Icon size={13} aria-hidden="true" /></span><span className="truncate">{t(item.labelKey as TranslationKey)}</span></Link>; })}</nav>;
+  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid min-h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.view}`} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
+  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold", active ? "bg-base-mint/10 text-base-mint" : "text-base-muted hover:bg-base-elevated hover:text-base-text")}><span className="grid h-5 w-5 shrink-0 place-items-center text-current"><Icon size={13} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
 }
 
 function TopChip({
@@ -384,7 +419,7 @@ function TopChip({
   title,
   dataTestId
 }: {
-  label: string;
+  label: ReactNode;
   tone?: "mint" | "blue" | "amber" | "muted";
   icon?: ReactNode;
   title?: string;

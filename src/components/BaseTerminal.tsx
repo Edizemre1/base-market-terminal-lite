@@ -30,17 +30,21 @@ import {
   diffSinceLastVisit,
   getChangedPairIds,
   mergePulseSignals,
+  parseVisitSnapshot,
   type PulseSignal,
   type VisitSnapshot
 } from "@/lib/base-terminal/pulse";
 import {
   buildProviderHealth,
   preserveSelectedPair,
+  shouldAcceptMarketSnapshot,
   shouldKeepCurrentSnapshotOnRefresh
 } from "@/lib/base-terminal/providerHealth";
 import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 import { useI18n } from "@/i18n/I18nProvider";
+import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { APP_NAME } from "@/lib/appInfo";
 
 const AUTO_APPLY_DELAY_MS = 4_000;
 const VISIT_STORAGE_KEY = "mergen-pulse:last-visit:v1";
@@ -91,6 +95,7 @@ export function BaseTerminal({
   const snapshotRefreshInFlightRef = useRef(false);
   const snapshotRefreshRequestIdRef = useRef(0);
   const refreshAbortRef = useRef<AbortController | undefined>(undefined);
+  const changedIdsTimerRef = useRef<number | undefined>(undefined);
   const { selectedPair, handleSelectPairById } = useSelectedPairState({
     initialSnapshot: data,
     snapshotData,
@@ -103,6 +108,18 @@ export function BaseTerminal({
     [chartOverrides, selectedPair]
   );
   const recentPairIds = useRecentPairs(selectedPairWithLiveChart?.id);
+  const viewTitle = useMemo(() => {
+    if (view === "markets") return t("route.marketsTitle");
+    if (view === "watchlist") return t("route.watchlistTitle");
+    if (view === "alerts") return t("route.alertsTitle");
+    if (view === "wallet") return t("route.walletTitle");
+    if (view === "pair") return t("route.pairTitle", { pair: selectedPairWithLiveChart?.pair ?? t("common.unknown") });
+    return t("route.pulseTitle");
+  }, [selectedPairWithLiveChart?.pair, t, view]);
+
+  useEffect(() => {
+    document.title = `${viewTitle} | ${APP_NAME}`;
+  }, [viewTitle]);
 
   const navigateView = useCallback((nextView: TerminalView) => {
     setView(nextView);
@@ -133,6 +150,12 @@ export function BaseTerminal({
   }, [snapshotData]);
 
   useEffect(() => {
+    const nextView = initialPairParam ? "pair" : normalizeTerminalView(initialViewParam);
+    setView(nextView);
+    if (nextView === "pulse" || nextView === "markets") setReturnView(nextView);
+  }, [initialPairParam, initialViewParam]);
+
+  useEffect(() => {
     watchedPairIdsRef.current = pinnedPairs
       .map((pair) => pair.currentPairId ?? pair.id)
       .filter((id): id is string => Boolean(id));
@@ -160,7 +183,11 @@ export function BaseTerminal({
     setLastAppliedChangedPairIds(candidate.changedPairIds);
     setPendingSnapshot(undefined);
     setProviderHealth(buildProviderHealth(next, "idle"));
-    window.setTimeout(() => setLastAppliedChangedPairIds([]), 1_200);
+    if (changedIdsTimerRef.current) window.clearTimeout(changedIdsTimerRef.current);
+    changedIdsTimerRef.current = window.setTimeout(() => {
+      changedIdsTimerRef.current = undefined;
+      setLastAppliedChangedPairIds([]);
+    }, 1_200);
   }, []);
 
   const refreshProviderSnapshot = useCallback(async () => {
@@ -185,6 +212,10 @@ export function BaseTerminal({
       if (!response.ok) throw new Error("Snapshot refresh failed");
       const nextSnapshot = (await response.json()) as MarketTerminalSnapshot;
       if (snapshotRefreshRequestIdRef.current !== requestId) return;
+      if (!shouldAcceptMarketSnapshot(snapshotRef.current, nextSnapshot)) {
+        setProviderHealth(buildProviderHealth(snapshotRef.current, "idle"));
+        return;
+      }
       if (shouldKeepCurrentSnapshotOnRefresh(snapshotRef.current, nextSnapshot)) {
         throw new Error("Provider returned fallback-only refresh");
       }
@@ -211,6 +242,10 @@ export function BaseTerminal({
       if (snapshotRefreshRequestIdRef.current === requestId) snapshotRefreshInFlightRef.current = false;
     }
   }, [applySnapshot]);
+
+  useEffect(() => () => {
+    if (changedIdsTimerRef.current) window.clearTimeout(changedIdsTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!pendingSnapshot || interactionLocked) return;
@@ -273,23 +308,37 @@ export function BaseTerminal({
   }, [refreshProviderSnapshot, snapshotData.mode]);
 
   useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") return;
+    const handleOnline = () => void refreshProviderSnapshot();
+    const handleOffline = () => setProviderHealth((current) => current
+      ? { ...current, status: "failed", stale: true, failureReason: "Offline; using last good data." }
+      : buildProviderHealth(snapshotRef.current, "failed", "Offline; using last good data."));
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [refreshProviderSnapshot, snapshotData.mode]);
+
+  useEffect(() => {
     let previousVisit: VisitSnapshot | undefined;
     try {
-      const stored = window.localStorage.getItem(VISIT_STORAGE_KEY);
-      previousVisit = stored ? JSON.parse(stored) as VisitSnapshot : undefined;
+      const stored = safeGetStorageItem(VISIT_STORAGE_KEY);
+      previousVisit = stored ? parseVisitSnapshot(JSON.parse(stored)) : undefined;
     } catch {
       previousVisit = undefined;
     }
     setSinceLastSignals(diffSinceLastVisit(previousVisit, data, watchedPairIdsRef.current));
     const timeoutId = window.setTimeout(() => {
-      window.localStorage.setItem(VISIT_STORAGE_KEY, JSON.stringify(createVisitSnapshot(snapshotRef.current)));
+      safeSetStorageItem(VISIT_STORAGE_KEY, JSON.stringify(createVisitSnapshot(snapshotRef.current)));
     }, 2_000);
     return () => window.clearTimeout(timeoutId);
   }, [data]);
 
   if (!selectedPairWithLiveChart) {
     return (
-      <main className="min-h-[calc(100vh-56px)] bg-base-black p-4">
+      <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] scroll-mt-16 bg-base-black p-4 outline-none">
         <section className="pulse-surface mx-auto max-w-3xl rounded-xl p-6">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-base-mint">Mergen Pulse</p>
           <h1 className="mt-2 text-xl font-semibold text-base-text">{t("terminal.unavailableTitle")}</h1>
@@ -300,21 +349,21 @@ export function BaseTerminal({
   }
 
   return (
-    <main className="min-h-[calc(100vh-56px)] w-full overflow-x-hidden bg-base-black px-2.5 py-3 sm:px-4 lg:px-5" data-testid="pulse-terminal">
+    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] w-full scroll-mt-16 overflow-x-hidden bg-base-black px-2.5 py-3 outline-none sm:px-4 lg:px-5" data-testid="pulse-terminal">
       <div className="mx-auto max-w-[1720px] space-y-3">
         {snapshotData.fallbackReason ? <div className="rounded-lg bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">{t("terminal.unavailableBody")}</div> : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-1">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-base-mint/10 text-base-mint"><DatabaseZap size={17} /></span>
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-base-mint/10 text-base-mint"><DatabaseZap size={17} aria-hidden="true" /></span>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-muted">{t("terminal.eyebrow")}</p>
-              <h1 className="text-[18px] font-semibold tracking-tight text-base-text">{t("terminal.title")}</h1>
+              <h1 className="text-[18px] font-semibold tracking-tight text-base-text">{viewTitle}</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={cx("inline-flex h-9 items-center gap-2 rounded-full bg-base-elevated px-3 font-mono text-[10px]", providerHealth.stale ? "text-base-amber" : "text-base-mint")}><Activity size={12} />{providerHealth.status === "refreshing" ? t("terminal.checkingSource") : providerHealth.stale ? t("terminal.delayedData") : t("terminal.heartbeatHealthy")}</span>
-            {view === "pulse" ? <button type="button" onClick={() => navigateView("alerts")} className="grid h-9 w-9 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={14} /></button> : null}
+            <span className={cx("inline-flex h-9 items-center gap-2 rounded-full bg-base-elevated px-3 font-mono text-[10px]", providerHealth.stale ? "text-base-amber" : "text-base-mint")}><Activity size={12} aria-hidden="true" />{providerHealth.status === "refreshing" ? t("terminal.checkingSource") : providerHealth.stale ? t("terminal.delayedData") : t("terminal.heartbeatHealthy")}</span>
+            {view === "pulse" ? <button type="button" onClick={() => navigateView("alerts")} className="grid h-9 w-9 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={14} aria-hidden="true" /></button> : null}
           </div>
         </div>
 

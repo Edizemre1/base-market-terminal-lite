@@ -98,7 +98,7 @@ test.describe("provider response fixture hardening", () => {
       quoteToken: "WETH",
       dexName: "Uniswap",
       sourceUrl: "https://dexscreener.com/base/0x1111111111111111111111111111111111111111",
-      tokenLogoUrl: "https://example.com/token.png",
+      tokenLogoUrl: undefined,
       volume24h: 190000,
       liquidity: 250000,
       change24h: 14.6,
@@ -171,18 +171,16 @@ test.describe("provider response fixture hardening", () => {
         low: 0.8,
         close: 1.1,
         volume: 1000
-      },
-      {
-        timestamp: 1710007200,
-        open: 1.1,
-        high: 1.3,
-        low: 1,
-        close: 1.2,
-        volume: 0
       }
     ]);
     expect(parseGeckoTerminalOhlcvResponse({ data: {} })).toEqual([]);
     expect(parseGeckoTerminalOhlcvResponse("bad")).toEqual([]);
+  });
+
+  test("never substitutes FDV for a missing market cap", () => {
+    const normalized = normalizeDexScreenerPair({ ...validDexPair, fdv: "1200000", marketCap: null });
+    expect(normalized?.fdv).toBe(1_200_000);
+    expect(normalized?.marketCap).toBeUndefined();
   });
 });
 

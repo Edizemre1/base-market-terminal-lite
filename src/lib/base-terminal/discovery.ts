@@ -1,4 +1,5 @@
 import type { BasePair } from "@/types/baseTerminal";
+import { canonicalPairKey } from "@/lib/marketMath";
 
 export const DISCOVERY_MIN_LIQUIDITY_USD = 25_000;
 export const DISCOVERY_MIN_VOLUME_24H_USD = 10_000;
@@ -111,7 +112,7 @@ export function buildDiscoveryRows({
  * It is available only when every input is present and the pair clears $25k
  * liquidity and $10k 24h volume. The deterministic 0-100 formula is:
  * liquidity (0-25, log scaled) + volume (0-30, log scaled) +
- * volume/liquidity turnover (0-20) + absolute 24h move (0-15) +
+ * matched market activity (0-20, monotonic in liquidity and volume) + absolute 24h move (0-15) +
  * 24h transaction count (0-10, log scaled).
  */
 export function calculateActivityScore(pair: BasePair) {
@@ -132,19 +133,25 @@ export function calculateActivityScore(pair: BasePair) {
   }
 
   const transactionCount = txns.buys + txns.sells;
+  if (!Number.isFinite(transactionCount) || transactionCount < 0) return undefined;
   const liquidityScore = logScale(liquidity, DISCOVERY_MIN_LIQUIDITY_USD, 5_000_000, 25);
   const volumeScore = logScale(volume24h, DISCOVERY_MIN_VOLUME_24H_USD, 10_000_000, 30);
-  const turnoverScore = clamp((volume24h / liquidity) * 10, 0, 20);
+  const matchedActivityScore = logScale(
+    Math.min(volume24h, liquidity),
+    DISCOVERY_MIN_VOLUME_24H_USD,
+    5_000_000,
+    20
+  );
   const moveScore = clamp((Math.abs(change24h) / 25) * 15, 0, 15);
   const transactionScore = logScale(transactionCount, 1, 10_000, 10);
 
   return Math.round(
-    liquidityScore + volumeScore + turnoverScore + moveScore + transactionScore
+    liquidityScore + volumeScore + matchedActivityScore + moveScore + transactionScore
   );
 }
 
 export function getChange24h(pair: BasePair) {
-  if (typeof pair.priceChanges?.h24 === "number") {
+  if (typeof pair.priceChanges?.h24 === "number" && Number.isFinite(pair.priceChanges.h24)) {
     return pair.priceChanges.h24;
   }
 
@@ -154,34 +161,34 @@ export function getChange24h(pair: BasePair) {
 }
 
 export function getVolume24h(pair: BasePair) {
-  if (typeof pair.volumes?.h24 === "number") {
+  if (typeof pair.volumes?.h24 === "number" && Number.isFinite(pair.volumes.h24) && pair.volumes.h24 >= 0) {
     return pair.volumes.h24;
   }
 
-  return pair.dataSource === "mock" && pair.volume24h > 0 ? pair.volume24h : undefined;
+  return pair.dataSource === "mock" && Number.isFinite(pair.volume24h) && pair.volume24h >= 0 ? pair.volume24h : undefined;
 }
 
 export function getLiquidityUsd(pair: BasePair) {
-  if (typeof pair.liquidityUsd === "number") {
+  if (typeof pair.liquidityUsd === "number" && Number.isFinite(pair.liquidityUsd) && pair.liquidityUsd >= 0) {
     return pair.liquidityUsd;
   }
 
-  return pair.dataSource === "mock" && pair.liquidity > 0 ? pair.liquidity : undefined;
+  return pair.dataSource === "mock" && Number.isFinite(pair.liquidity) && pair.liquidity >= 0 ? pair.liquidity : undefined;
 }
 
 export function getPairAgeMinutes(pair: BasePair) {
-  if (pair.pairCreatedAtMs && pair.pairCreatedAtMs > 0 && Number.isFinite(pair.ageMinutes)) {
+  if (pair.pairCreatedAtMs && pair.pairCreatedAtMs > 0 && pair.pairCreatedAtMs <= Date.now() + 60_000 && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0) {
     return pair.ageMinutes;
   }
 
-  return pair.dataSource === "mock" && pair.ageMinutes < 999_999
+  return pair.dataSource === "mock" && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0 && pair.ageMinutes < 999_999
     ? pair.ageMinutes
     : undefined;
 }
 
 export function isDiscoveryDataComplete(pair: BasePair) {
   return Boolean(
-    pair.priceUsdValue &&
+    typeof pair.priceUsdValue === "number" && Number.isFinite(pair.priceUsdValue) && pair.priceUsdValue > 0 &&
       getChange24h(pair) !== undefined &&
       getVolume24h(pair) !== undefined &&
       getLiquidityUsd(pair) !== undefined &&
@@ -266,21 +273,40 @@ function compareDiscoveryRows(
   category: DiscoveryCategory,
   recentOrder: Map<string, number>
 ) {
+  let comparison = 0;
   if (sort !== "category") {
-    if (sort === "price-change-desc") return compareDesc(getChange24h(left.pair), getChange24h(right.pair));
-    if (sort === "volume-desc") return compareDesc(getVolume24h(left.pair), getVolume24h(right.pair));
-    if (sort === "liquidity-desc") return compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
-    return compareAsc(getPairAgeMinutes(left.pair), getPairAgeMinutes(right.pair));
+    if (sort === "price-change-desc") comparison = compareDesc(getChange24h(left.pair), getChange24h(right.pair));
+    else if (sort === "volume-desc") comparison = compareDesc(getVolume24h(left.pair), getVolume24h(right.pair));
+    else if (sort === "liquidity-desc") comparison = compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
+    else comparison = compareAsc(getPairAgeMinutes(left.pair), getPairAgeMinutes(right.pair));
+    return comparison || compareCanonicalPair(left.pair, right.pair);
   }
 
-  if (category === "trending") return compareDesc(left.activityScore, right.activityScore);
-  if (category === "gainers") return compareDesc(getChange24h(left.pair), getChange24h(right.pair));
-  if (category === "new") return compareAsc(getPairAgeMinutes(left.pair), getPairAgeMinutes(right.pair));
-  if (category === "volume") return compareDesc(getVolume24h(left.pair), getVolume24h(right.pair));
-  if (category === "liquidity") return compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
-  if (category === "volatile") return compareDesc(Math.abs(getChange24h(left.pair) ?? 0), Math.abs(getChange24h(right.pair) ?? 0));
-  if (category === "recent") return (recentOrder.get(left.pair.id) ?? 999) - (recentOrder.get(right.pair.id) ?? 999);
-  return compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
+  if (category === "trending") comparison = compareDesc(left.activityScore, right.activityScore);
+  else if (category === "gainers") comparison = compareDesc(getChange24h(left.pair), getChange24h(right.pair));
+  else if (category === "new") comparison = compareAsc(getPairAgeMinutes(left.pair), getPairAgeMinutes(right.pair));
+  else if (category === "volume") comparison = compareDesc(getVolume24h(left.pair), getVolume24h(right.pair));
+  else if (category === "liquidity") comparison = compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
+  else if (category === "volatile") comparison = compareDesc(Math.abs(getChange24h(left.pair) ?? 0), Math.abs(getChange24h(right.pair) ?? 0));
+  else if (category === "recent") comparison = (recentOrder.get(left.pair.id) ?? 999) - (recentOrder.get(right.pair.id) ?? 999);
+  else comparison = compareDesc(getLiquidityUsd(left.pair), getLiquidityUsd(right.pair));
+  return comparison || compareCanonicalPair(left.pair, right.pair);
+}
+
+function compareCanonicalPair(left: BasePair, right: BasePair) {
+  return canonicalPairKey({
+    chainId: left.chainId,
+    pairAddress: left.pairAddress,
+    baseTokenAddress: left.baseTokenAddress,
+    quoteTokenAddress: left.quoteTokenAddress,
+    fallbackId: left.id
+  }).localeCompare(canonicalPairKey({
+    chainId: right.chainId,
+    pairAddress: right.pairAddress,
+    baseTokenAddress: right.baseTokenAddress,
+    quoteTokenAddress: right.quoteTokenAddress,
+    fallbackId: right.id
+  }), "en-US");
 }
 
 function compareAsc(left: number | undefined, right: number | undefined) {
