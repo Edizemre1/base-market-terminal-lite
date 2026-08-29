@@ -61,16 +61,16 @@ test.describe("Base Terminal Lite smoke coverage", () => {
   test("watchlist pins persist in localStorage and can be removed", async ({ page }) => {
     await waitForWatchlistStorage(page);
 
-    await page.getByTestId("pin-discovery-blob-usdc").click();
+    await page.locator('[data-testid="pin-discovery-blob-usdc"]:visible').click();
     await page.getByTestId("discovery-category-watchlist").click();
-    await expect(page.getByTestId("discovery-row-blob-usdc")).toContainText("BLOB / USDC");
+    await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toContainText("BLOB / USDC");
 
     await page.reload();
     await expectTerminalShell(page);
     await page.getByTestId("discovery-category-watchlist").click();
-    await expect(page.getByTestId("discovery-row-blob-usdc")).toContainText("BLOB / USDC");
+    await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toContainText("BLOB / USDC");
 
-    await page.getByTestId("pin-discovery-blob-usdc").click();
+    await page.locator('[data-testid="pin-discovery-blob-usdc"]:visible').click();
     await expect(page.getByTestId("discovery-row-blob-usdc")).toHaveCount(0);
   });
 
@@ -84,7 +84,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("discovery-result-count")).toContainText("0 results");
     await expect(page.getByText(/is hidden by this category or the current filters/i)).toBeVisible();
     await page.getByRole("button", { name: "Show selected" }).click();
-    await expect(page.getByTestId(`discovery-row-${await selectedPairIdFromUrl(page)}`)).toBeVisible();
+    await expect(page.locator(`[data-testid="discovery-row-${await selectedPairIdFromUrl(page)}"]:visible`)).toBeVisible();
     await expect(page.getByTestId("selected-pair-title")).toHaveText(initialPair);
 
     await page.getByRole("button", { name: "Clear filters" }).click();
@@ -98,7 +98,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await page.reload();
     await expectTerminalShell(page);
     await page.getByTestId("discovery-category-recent").click();
-    await expect(page.getByTestId("discovery-row-blob-usdc")).toBeVisible();
+    await expect(page.locator('[data-testid="discovery-row-blob-usdc"]:visible')).toBeVisible();
   });
 
   test("provider health and chart refresh keep last good terminal data visible", async ({ page }) => {
