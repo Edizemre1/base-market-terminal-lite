@@ -110,6 +110,12 @@ async function installWalletStub(
       let reentrantRequests = 0;
 
       const emit = (event: string, value: unknown) => {
+        if (event === "accountsChanged" && Array.isArray(value)) {
+          accounts = value.filter((item): item is string => typeof item === "string");
+        }
+        if (event === "chainChanged" && typeof value === "string") {
+          activeChainId = value;
+        }
         for (const listener of listeners.get(event) ?? []) listener(value);
       };
       const provider = {
