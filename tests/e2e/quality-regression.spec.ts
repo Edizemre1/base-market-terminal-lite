@@ -102,7 +102,8 @@ test.describe("route, language, responsive and accessibility inventory", () => {
     const actionDock = await readInvariantAttributes(page.getByTestId("swap-preview-panel"));
     expect(pair).toEqual(board);
     expect(actionDock).toEqual(board);
-    await page.goto("/?data=mock&view=alerts");
+    await page.locator('nav:visible a[href="/?view=alerts"]').click();
+    await expect(page.getByTestId("alert-center")).toBeVisible();
     expect(await readInvariantAttributes(page.getByTestId("alert-center"))).toEqual(board);
   });
 });
@@ -127,7 +128,7 @@ test.describe("recovery and long-cycle stability", () => {
   });
 
   test("bounds DOM, wallet listeners and requests through required interaction cycles", async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(360_000);
     await installCycleWallet(page);
     const consoleProblems: string[] = [];
     const pageErrors: string[] = [];

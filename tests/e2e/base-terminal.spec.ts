@@ -311,7 +311,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
       await page.setViewportSize({ width: 1440, height: 900 });
       const snapshot = await (await page.request.get("/api/market-snapshot?data=mock")).json();
-      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: { ...snapshot, generatedAt: `${locale}-delayed`, freshness: "delayed", fallbackReason: "Provider unavailable" } }));
+      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: { ...snapshot, generatedAt: new Date().toISOString(), freshness: "delayed", fallbackReason: "Provider unavailable" } }));
       await page.goto("/?data=mock");
       await page.getByTestId("refresh-market-board").click();
       await expect(page.getByText(locale === "tr" ? /Yerine örnek fiyat konmadı/ : /No sample prices were substituted/)).toBeVisible();
