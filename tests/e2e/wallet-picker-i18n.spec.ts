@@ -102,22 +102,27 @@ test.describe("wallet picker safety contract", () => {
 });
 
 test.describe("TR/EN and progressive disclosure", () => {
-  test("English default and Turkish Accept-Language hydrate without errors", async ({ page }) => {
+  test("English default and Turkish browser locale hydrate without errors", async ({ browser }) => {
     const errors: string[] = [];
-    page.on("console", (message) => { if (message.type() === "error" || /hydration/i.test(message.text())) errors.push(message.text()); });
-    page.on("pageerror", (error) => errors.push(error.message));
-    await page.goto("/?data=mock");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.getByText("Now on Base")).toBeVisible();
+    const englishContext = await browser.newContext({ locale: "en-US" });
+    const englishPage = await englishContext.newPage();
+    englishPage.on("console", (message) => { if (message.type() === "error" || /hydration/i.test(message.text())) errors.push(message.text()); });
+    englishPage.on("pageerror", (error) => errors.push(error.message));
+    await englishPage.goto("http://127.0.0.1:3000/?data=mock");
+    await expect(englishPage.locator("html")).toHaveAttribute("lang", "en");
+    await expect(englishPage.getByText("Now on Base")).toBeVisible();
     expect(errors).toEqual([]);
+    await englishContext.close();
 
-    await page.context().clearCookies();
-    await page.evaluate(() => localStorage.removeItem("mergen-pulse:locale:v1"));
-    await page.setExtraHTTPHeaders({ "Accept-Language": "tr-TR,tr;q=0.9" });
-    await page.goto("/?data=mock");
-    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
-    await expect(page.getByText("Şimdi Base'te")).toBeVisible();
+    const turkishContext = await browser.newContext({ locale: "tr-TR" });
+    const turkishPage = await turkishContext.newPage();
+    turkishPage.on("console", (message) => { if (message.type() === "error" || /hydration/i.test(message.text())) errors.push(message.text()); });
+    turkishPage.on("pageerror", (error) => errors.push(error.message));
+    await turkishPage.goto("http://127.0.0.1:3000/?data=mock");
+    await expect(turkishPage.locator("html")).toHaveAttribute("lang", "tr");
+    await expect(turkishPage.getByText("Şimdi Base'te")).toBeVisible();
     expect(errors).toEqual([]);
+    await turkishContext.close();
   });
 
   test("saved Turkish preference wins after hydration and persists", async ({ page }) => {
