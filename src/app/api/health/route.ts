@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { APP_NAME, APP_VERSION } from "@/lib/appInfo";
+import { getTradeCapabilities } from "@/lib/trade/quoteProviders";
 
 export const dynamic = "force-dynamic";
 
 export function GET() {
+  const trade = getTradeCapabilities();
   return NextResponse.json({
     ok: true,
     app: APP_NAME,
     version: APP_VERSION,
     timestamp: new Date().toISOString(),
-    readOnly: true,
+    readOnly: !trade.transactionExecutionEnabled,
     publicReadOnlyReady: true,
     marketDataReady: true,
     livePulseEnabled: true,
@@ -24,9 +26,11 @@ export function GET() {
     walletAccountReadEnabled: true,
     walletBalanceReadEnabled: true,
     walletTargetChainId: 8453,
-    approvalRequestEnabled: false,
-    swapRequestEnabled: false,
-    transactionExecutionEnabled: false,
+    quoteRequestEnabled: trade.quoteRequestEnabled,
+    quoteProviders: trade.providers,
+    approvalRequestEnabled: trade.approvalRequestEnabled,
+    swapRequestEnabled: trade.swapRequestEnabled,
+    transactionExecutionEnabled: trade.transactionExecutionEnabled,
     authenticationRequiredForPrivateData: true
   });
 }

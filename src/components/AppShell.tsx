@@ -2,8 +2,9 @@
 
 import {
   Bell,
+  BriefcaseBusiness,
   Droplets,
-  Radar,
+  PanelsTopLeft,
   Search,
   Star,
   WalletCards
@@ -23,11 +24,12 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 
 const navItems = [
-  { href: "/", labelKey: "nav.pulse", view: "pulse", icon: Radar },
-  { href: "/?view=markets", labelKey: "nav.markets", view: "markets", icon: Droplets },
-  { href: "/?view=watchlist", labelKey: "nav.watchlist", view: "watchlist", icon: Star },
-  { href: "/?view=alerts", labelKey: "nav.alerts", view: "alerts", icon: Bell, desktopOnly: true },
-  { href: "/?view=wallet", labelKey: "nav.wallet", view: "wallet", icon: WalletCards }
+  { href: "/terminal", labelKey: "nav.terminal", view: "terminal", icon: PanelsTopLeft },
+  { href: "/terminal?view=markets", labelKey: "nav.markets", view: "markets", icon: Droplets },
+  { href: "/terminal?view=watchlist", labelKey: "nav.watchlist", view: "watchlist", icon: Star, mobileHidden: true },
+  { href: "/terminal?view=portfolio", labelKey: "nav.portfolio", view: "portfolio", icon: BriefcaseBusiness },
+  { href: "/terminal?view=alerts", labelKey: "nav.alerts", view: "alerts", icon: Bell, desktopOnly: true },
+  { href: "/terminal?view=portfolio", labelKey: "nav.wallet", view: "portfolio", icon: WalletCards, mobileOnly: true }
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -41,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-testid="terminal-topbar"
         >
           <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto] items-center gap-1.5 px-2 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto] lg:gap-2 lg:px-4">
-            <Link href="/" className="flex min-w-0 items-center gap-2.5">
+            <Link href="/terminal" className="flex min-w-0 items-center gap-2.5">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
                 <span
@@ -87,6 +89,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 Status v{APP_VERSION}
               </Link>
+              <div className="mt-2 flex justify-center gap-2 text-[8px] uppercase tracking-[0.08em]"><Link href="/docs" className="text-base-muted hover:text-base-mint">Docs</Link><Link href="/settings" className="text-base-muted hover:text-base-mint"><SettingsLabel /></Link></div>
           </div>
         </aside>
 
@@ -370,6 +373,10 @@ function HeaderHeartbeat() {
   return <TopChip label={label} tone={providerHealth?.stale ? "amber" : "mint"} />;
 }
 
+function SettingsLabel() {
+  return useI18n().t("settings.nav");
+}
+
 function SkipLink() {
   const { t } = useI18n();
   return <a href="#terminal-main" className="fixed left-3 top-2 z-[100] -translate-y-20 rounded-md bg-base-mint px-3 py-2 text-[12px] font-bold text-[#031411] transition-transform focus:translate-y-0">{t("a11y.skipContent")}</a>;
@@ -392,7 +399,7 @@ function HeaderProductLabel() {
 
 function HeaderAlertLink() {
   const { t } = useI18n();
-  return <Link href="/?view=alerts" className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={13} /></Link>;
+  return <Link href="/terminal?view=alerts" className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={13} /></Link>;
 }
 
 function LocaleSwitcher() {
@@ -405,10 +412,10 @@ function TerminalNavigation({ mobile = false }: { mobile?: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedView = searchParams.get("view");
-  const activeView = requestedView === "markets" || requestedView === "watchlist" || requestedView === "alerts" || requestedView === "wallet" ? requestedView : "pulse";
-  const isTerminalRoute = pathname === "/" || pathname === "/dashboard" || pathname === "/swap";
-  const items = navItems.filter((item) => !(mobile && "desktopOnly" in item && item.desktopOnly));
-  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid min-h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.view}`} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
+  const activeView = requestedView === "markets" || requestedView === "watchlist" || requestedView === "alerts" || requestedView === "portfolio" ? requestedView : "terminal";
+  const isTerminalRoute = pathname === "/terminal" || pathname === "/" || pathname === "/dashboard" || pathname === "/swap";
+  const items = navItems.filter((item) => mobile ? !("desktopOnly" in item && item.desktopOnly) && !("mobileHidden" in item && item.mobileHidden) : !("mobileOnly" in item && item.mobileOnly));
+  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid min-h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.labelKey}`} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
   return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold", active ? "bg-base-mint/10 text-base-mint" : "text-base-muted hover:bg-base-elevated hover:text-base-text")}><span className="grid h-5 w-5 shrink-0 place-items-center text-current"><Icon size={13} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
 }
 

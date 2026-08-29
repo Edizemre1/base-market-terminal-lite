@@ -15,8 +15,10 @@ import {
   ReadOnlyWalletController,
   type WalletControllerState,
   type WalletControllerStatus,
-  type WalletProviderOption
+  type WalletProviderOption,
+  type WalletSimulationResult
 } from "@/lib/wallet";
+import type { TransactionDraft } from "@/lib/trade/types";
 import { WalletPicker } from "@/components/WalletPicker";
 import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
 
@@ -38,6 +40,10 @@ type WalletContextValue = {
   connect: () => Promise<void>;
   switchToBase: () => Promise<void>;
   disconnect: () => void;
+  readContract: (to: string, data: string) => Promise<string>;
+  simulateTransaction: (draft: TransactionDraft) => Promise<WalletSimulationResult>;
+  sendTransaction: (draft: TransactionDraft) => Promise<string>;
+  readTransactionReceipt: (hash: string) => Promise<Record<string, unknown> | undefined>;
   pickerOpen: boolean;
   openPicker: () => void;
   closePicker: () => void;
@@ -80,6 +86,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [controller]);
   const switchToBase = useCallback(() => controller.switchToBase(), [controller]);
   const disconnect = useCallback(() => controller.disconnect(), [controller]);
+  const readContract = useCallback((to: string, data: string) => controller.readContract(to, data), [controller]);
+  const simulateTransaction = useCallback((draft: TransactionDraft) => controller.simulateTransaction(draft), [controller]);
+  const sendTransaction = useCallback((draft: TransactionDraft) => controller.sendTransaction(draft), [controller]);
+  const readTransactionReceipt = useCallback((hash: string) => controller.readTransactionReceipt(hash), [controller]);
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
 
@@ -105,11 +115,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       connect,
       switchToBase,
       disconnect,
+      readContract,
+      simulateTransaction,
+      sendTransaction,
+      readTransactionReceipt,
       pickerOpen,
       openPicker,
       closePicker
     }),
-    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, selectProvider, state, switchToBase]
+    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, readContract, readTransactionReceipt, selectProvider, sendTransaction, simulateTransaction, state, switchToBase]
   );
 
   return <WalletContext.Provider value={value}>{children}<WalletPicker /></WalletContext.Provider>;

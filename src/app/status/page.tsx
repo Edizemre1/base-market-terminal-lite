@@ -5,6 +5,7 @@ import { getMarketTerminalSnapshot, resolveUrlMarketDataMode } from "@/data/prov
 import { APP_NAME, APP_VERSION } from "@/lib/appInfo";
 import { translate } from "@/i18n/dictionaries";
 import { getInitialLocale } from "@/i18n/server";
+import { getTradeCapabilities } from "@/lib/trade/quoteProviders";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = await getInitialLocale();
   return {
     title: { absolute: `${translate(locale, "status.h1")} | ${APP_NAME}` },
-    description: `Public read-only terminal status for ${APP_NAME}.`
+    description: `Market data and transaction capability status for ${APP_NAME}.`
   };
 }
 
@@ -26,6 +27,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   const params = await searchParams;
   const mode = resolveUrlMarketDataMode(params?.data);
   const snapshot = await getMarketTerminalSnapshot(mode);
+  const trade = getTradeCapabilities();
   const locale = await getInitialLocale();
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
   const lastUpdate =
@@ -38,16 +40,16 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
         <TerminalPanel
           label={t("status.label")}
           title={t("status.title")}
-          meta={<StatusPill label={t("status.readOnly")} />}
+          meta={<StatusPill label={trade.transactionExecutionEnabled ? t("status.stagingExecution") : t("status.readOnly")} tone={trade.transactionExecutionEnabled ? "amber" : "mint"} />}
         >
           <div className="space-y-2">
             <StatusRow label={t("status.app")} value={APP_NAME} />
             <StatusRow label={t("status.version")} value={`v${APP_VERSION}`} />
             <StatusRow label={t("status.state")} value={t("status.operational")} tone="mint" />
-            <StatusRow label={t("status.boundary")} value={t("status.noTransactions")} tone="amber" />
+            <StatusRow label={t("status.boundary")} value={trade.transactionExecutionEnabled ? t("status.explicitTransactions") : t("status.noTransactions")} tone="amber" />
           </div>
           <Link
-            href="/"
+            href="/terminal"
             className="mt-3 inline-flex border border-base-line bg-base-panel px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-base-mint hover:border-base-mint hover:text-base-text"
           >
             {t("status.openTerminal")}
@@ -74,7 +76,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
 
           <TerminalPanel label={t("status.boundary")} title={t("status.boundaryTitle")}>
             <div className="grid gap-1 md:grid-cols-2">
-              {t("status.boundaryItems").split("|").map((item) => (
+              {t(trade.transactionExecutionEnabled ? "status.executionItems" : "status.boundaryItems").split("|").map((item) => (
                 <div
                   key={item}
                   className="border border-base-line bg-base-elevated px-2 py-1.5 text-[11px] text-base-text"

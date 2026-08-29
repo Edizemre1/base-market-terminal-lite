@@ -1,29 +1,12 @@
-import { BaseTerminal } from "@/components/BaseTerminal";
-import { getMarketTerminalSnapshot, resolveUrlMarketDataMode } from "@/data/providers";
+import { redirect } from "next/navigation";
 
-export const revalidate = 60;
-
-type PageProps = {
-  searchParams?: Promise<{
-    data?: string | string[];
-    pair?: string | string[];
-    view?: string | string[];
-  }>;
-};
+type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const mode = resolveUrlMarketDataMode(params?.data);
-
-  return (
-    <BaseTerminal
-      data={await getMarketTerminalSnapshot(mode)}
-      initialPairParam={getFirstSearchParam(params?.pair)}
-      initialViewParam={getFirstSearchParam(params?.view)}
-    />
-  );
-}
-
-function getFirstSearchParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    for (const item of Array.isArray(value) ? value : value ? [value] : []) query.append(key, item);
+  }
+  redirect(query.size ? `/terminal?${query}` : "/terminal");
 }

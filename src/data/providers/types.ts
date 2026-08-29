@@ -23,6 +23,7 @@ export type MarketDataProvider = {
   mode: MarketDataMode;
   name: string;
   readOnly: true;
+  getAllPairs: () => MaybePromise<BasePair[]>;
   getNewPairs: () => MaybePromise<BasePair[]>;
   getVolumeInflows: () => MaybePromise<BasePair[]>;
   getMomentumPairs: () => MaybePromise<BasePair[]>;
@@ -37,6 +38,8 @@ export type MarketTerminalSnapshot = {
   mode: MarketDataMode;
   providerName: string;
   feedStatusLabel: FeedStatusLabel;
+  version: string;
+  receivedAt: string;
   generatedAt: string;
   sourceUpdatedAt: string;
   freshness: "fresh" | "delayed" | "static";

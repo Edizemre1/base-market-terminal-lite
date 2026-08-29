@@ -134,14 +134,15 @@ async function buildMarketTerminalSnapshot(
   provider: MarketDataProvider,
   fallbackReason?: string
 ): Promise<MarketTerminalSnapshot> {
-  const [newPairInputs, volumeInflowInputs, momentumPairInputs] = await Promise.all([
+  const [allPairInputs, newPairInputs, volumeInflowInputs, momentumPairInputs] = await Promise.all([
+    provider.getAllPairs(),
     provider.getNewPairs(),
     provider.getVolumeInflows(),
     provider.getMomentumPairs()
   ]);
   const allPairs = await hydratePairs(
     provider,
-    dedupePairs([...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
+    dedupePairs([...allPairInputs, ...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
   );
   const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
   const newPairs = selectHydratedPairs(newPairInputs, pairsById);
@@ -149,11 +150,14 @@ async function buildMarketTerminalSnapshot(
   const momentumPairs = selectHydratedPairs(momentumPairInputs, pairsById);
   const defaultPairId = allPairs[0]?.id ?? "";
 
-  const generatedAt = provider.mode === "mock" ? "mock-static" : new Date().toISOString();
+  const receivedAt = new Date().toISOString();
+  const generatedAt = provider.mode === "mock" ? "mock-static" : receivedAt;
   return {
     mode: provider.mode,
     providerName: provider.name,
     feedStatusLabel: getMarketFeedStatusLabel(provider.mode),
+    version: provider.mode === "mock" ? "mock-static-v3" : generatedAt,
+    receivedAt,
     generatedAt,
     sourceUpdatedAt: generatedAt,
     freshness: provider.mode === "mock" ? "static" : "fresh",
@@ -234,6 +238,8 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
     mode: "dexscreener",
     providerName: "DexScreener read-only market data",
     feedStatusLabel: "READ-ONLY DATA",
+    version: generatedAt,
+    receivedAt: generatedAt,
     generatedAt,
     sourceUpdatedAt: generatedAt,
     freshness: "delayed",
@@ -249,7 +255,7 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
 function markSnapshotDelayed(snapshot: MarketTerminalSnapshot, reason: string): MarketTerminalSnapshot {
   return {
     ...snapshot,
-    generatedAt: new Date().toISOString(),
+    receivedAt: new Date().toISOString(),
     freshness: "delayed",
     fallbackReason: reason,
     allPairs: snapshot.allPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason })),

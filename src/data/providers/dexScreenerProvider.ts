@@ -14,8 +14,10 @@ const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const BASE_CHAIN_ID = "base";
 const REVALIDATE_SECONDS = 60;
 const REQUEST_TIMEOUT_MS = 8_000;
-const MAX_PROFILE_TOKENS = 12;
+const MAX_PROFILE_TOKENS = 36;
+const REQUEST_CONCURRENCY = 6;
 const FEED_LIMIT = 8;
+const MARKET_UNIVERSE_LIMIT = 96;
 const MIN_LIQUIDITY_USD = 10_000;
 const MIN_VOLUME_24H_USD = 5_000;
 const MIN_VOLUME_INFLOW_24H_USD = 10_000;
@@ -28,7 +30,25 @@ const CURATED_BASE_QUERIES = [
   "BRETT WETH",
   "TOSHI WETH",
   "VIRTUAL WETH",
-  "CLANKER WETH"
+  "CLANKER WETH",
+  "USDC WETH",
+  "CBBTC WETH",
+  "EURC USDC",
+  "WETH USDBC",
+  "CBBTC USDC",
+  "CBETH WETH",
+  "AERO WETH",
+  "WELL USDC",
+  "MORPHO USDC",
+  "BRETT USDC",
+  "HIGHER WETH",
+  "KEYCAT WETH",
+  "MOG WETH",
+  "SKI WETH",
+  "VIRTUAL USDC",
+  "ZORA WETH",
+  "DAI USDC",
+  "USDS USDC"
 ];
 
 type DexToken = {
@@ -103,13 +123,16 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
   const { searchPairs, profilePairs } = await loadDexScreenerPairs();
   const normalizedSearchPairs = normalizePairs(searchPairs);
   const normalizedProfilePairs = normalizePairs(profilePairs);
-  const allPairs = dedupePairs([...normalizedProfilePairs, ...normalizedSearchPairs]);
+  const allPairs = dedupePairs([...normalizedProfilePairs, ...normalizedSearchPairs])
+    .sort((left, right) => getBasePairQualityScore(right) - getBasePairQualityScore(left) || left.id.localeCompare(right.id))
+    .slice(0, MARKET_UNIVERSE_LIMIT);
   const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
 
   return {
     mode: "dexscreener",
     name: "DexScreener read-only Base data",
     readOnly: true,
+    getAllPairs: () => allPairs,
     getNewPairs: () => {
       const freshProfilePairs = normalizedProfilePairs.filter(isFreshPair);
       const freshPairs = allPairs.filter(isFreshPair);
@@ -158,34 +181,41 @@ async function loadDexScreenerPairs(): Promise<DexPairBucket> {
 }
 
 async function loadCuratedSearchPairs() {
-  const searchResults = await Promise.all(
-    CURATED_BASE_QUERIES.map(async (query) => {
+  const searchResults = await mapWithConcurrency(
+    CURATED_BASE_QUERIES,
+    REQUEST_CONCURRENCY,
+    async (query) => {
       const response = await fetchDexJson(
         `/latest/dex/search?q=${encodeURIComponent(query)}`
       );
       return filterBasePairs(parseDexSearchResponse(response));
-    })
+    }
   );
 
   return dedupeDexPairs(searchResults.flat());
 }
 
 async function loadProfilePairs() {
-  const profiles = parseDexTokenProfiles(
-    await fetchDexJson("/token-profiles/latest/v1")
-  );
+  const profilePayloads = await Promise.all([
+    fetchDexJson("/token-profiles/latest/v1"),
+    fetchDexJson("/token-boosts/latest/v1"),
+    fetchDexJson("/token-boosts/top/v1")
+  ]);
+  const profiles = dedupeTokenProfiles(profilePayloads.flatMap(parseDexTokenProfiles));
   const baseProfiles = profiles
     .filter((profile) => profile.chainId === BASE_CHAIN_ID && profile.tokenAddress)
     .slice(0, MAX_PROFILE_TOKENS);
-  const pairResults = await Promise.all(
-    baseProfiles.map(async (profile) => {
+  const pairResults = await mapWithConcurrency(
+    baseProfiles,
+    REQUEST_CONCURRENCY,
+    async (profile) => {
       const pairs = parseDexPairList(
         await fetchDexJson(
           `/token-pairs/v1/${BASE_CHAIN_ID}/${profile.tokenAddress}`
         )
       );
       return selectProfilePairs(filterBasePairs(pairs));
-    })
+    }
   );
 
   return dedupeDexPairs(pairResults.flat());
@@ -492,6 +522,29 @@ function getUnverifiedRiskDetails(pair?: BasePair): PairRiskDetails {
   };
 }
 
+function dedupeTokenProfiles(profiles: DexTokenProfile[]) {
+  const unique = new Map<string, DexTokenProfile>();
+  for (const profile of profiles) {
+    if (!profile.chainId || !profile.tokenAddress) continue;
+    unique.set(`${profile.chainId}:${profile.tokenAddress}`.toLowerCase(), profile);
+  }
+  return [...unique.values()];
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], concurrency: number, operation: (item: T) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 function buildActivityFeed(pair: DexPair, symbol: string): PairActivity[] {
   return [
     getActivityRow("24h", pair.txns?.h24, pair.volume?.h24, symbol),
@@ -615,18 +668,7 @@ function dedupeDexPairs(pairs: DexPair[]) {
     }
   }
 
-  const pairsByTokenRoute = new Map<string, DexPair>();
-
-  for (const pair of pairsByAddress.values()) {
-    const key = getDexTokenPairKey(pair);
-    const current = pairsByTokenRoute.get(key);
-
-    if (!current || getDexPairQualityScore(pair) > getDexPairQualityScore(current)) {
-      pairsByTokenRoute.set(key, pair);
-    }
-  }
-
-  return [...pairsByTokenRoute.values()];
+  return [...pairsByAddress.values()];
 }
 
 function dedupePairs(pairs: BasePair[]) {
@@ -640,18 +682,7 @@ function dedupePairs(pairs: BasePair[]) {
     }
   }
 
-  const pairsByTokenRoute = new Map<string, BasePair>();
-
-  for (const pair of pairsById.values()) {
-    const key = `${pair.baseToken.toLowerCase()}-${pair.quoteToken.toLowerCase()}`;
-    const current = pairsByTokenRoute.get(key);
-
-    if (!current || getBasePairQualityScore(pair) > getBasePairQualityScore(current)) {
-      pairsByTokenRoute.set(key, pair);
-    }
-  }
-
-  return [...pairsByTokenRoute.values()];
+  return [...pairsById.values()];
 }
 
 function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
@@ -684,19 +715,6 @@ function getDexPairQualityScore(pair: DexPair) {
 
 function getBasePairQualityScore(pair: BasePair) {
   return pair.volume24h * 2 + pair.liquidity + Math.abs(pair.change24h) * 1_000;
-}
-
-function getDexTokenPairKey(pair: DexPair) {
-  const base =
-    pair.baseToken?.address?.toLowerCase() ??
-    pair.baseToken?.symbol?.toLowerCase() ??
-    "unknown-base";
-  const quote =
-    pair.quoteToken?.address?.toLowerCase() ??
-    pair.quoteToken?.symbol?.toLowerCase() ??
-    "unknown-quote";
-
-  return `${base}-${quote}`;
 }
 
 function getAgeMinutes(pairCreatedAt: number | null | undefined) {

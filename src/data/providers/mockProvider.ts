@@ -34,6 +34,7 @@ export const mockMarketDataProvider: MarketDataProvider = {
   mode: "mock",
   name: "Mock Base pair data",
   readOnly: true,
+  getAllPairs: () => [...mockBasePairs],
   getNewPairs: () => [...mockBasePairs].sort(byNewPoolAge),
   getVolumeInflows: () => [...mockBasePairs].sort(byVolumeInflow),
   getMomentumPairs: () => [...mockBasePairs].sort(byMomentum),

@@ -17,6 +17,8 @@ export function getNormalizedMarketModel(pair: BasePair) {
     change1h: readFinite(pair.priceChanges?.h1),
     change6h: readFinite(pair.priceChanges?.h6),
     change24h: getChange24h(pair),
+    volume5mUsd: readNonNegative(pair.volumes?.m5),
+    volume1hUsd: readNonNegative(pair.volumes?.h1),
     volume24hUsd: getVolume24h(pair),
     liquidityUsd: getLiquidityUsd(pair),
     ageMinutes: getPairAgeMinutes(pair),
@@ -43,6 +45,10 @@ export function getMarketInvariantAttributes(pair: BasePair) {
 
 function readFinite(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readNonNegative(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function toAttribute(value: number | undefined) {

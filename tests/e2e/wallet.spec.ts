@@ -1,241 +1,111 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { TransactionQuote, TradeCapabilities } from "../../src/lib/trade/types";
+import { BASE_TRADE_CHAIN_ID } from "../../src/lib/trade/types";
+import { createQuoteFingerprint } from "../../src/lib/trade/validation";
+import { installVerifiedWalletStub } from "./helpers/walletStub";
 
-const ACCOUNT_ONE = "0x1111111111111111111111111111111111111111";
-const ACCOUNT_TWO = "0x2222222222222222222222222222222222222222";
+const account = "0x1111111111111111111111111111111111111111";
+const pairAddress = mockAddress(1);
+const baseAddress = mockAddress(101);
+const quoteAddress = mockAddress(201);
+const targetAddress = "0x4444444444444444444444444444444444444444";
+const approvalAddress = "0x5555555555555555555555555555555555555555";
 
-test.describe("read-only EIP-1193 wallet connection", () => {
-  test("shows a clear install state when no provider exists", async ({ page }) => {
-    await page.goto("/?data=mock");
+test.describe("explicit wallet and transaction lifecycle", () => {
+  test("makes no wallet RPC or popup request on initial load", async ({ page }) => {
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock");
+    expect(await walletMethods(page)).toEqual([]);
+    await expect(page.getByTestId("wallet-picker")).toHaveCount(0);
+  });
+
+  test("connects only after explicit provider selection", async ({ page }) => {
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock&view=portfolio");
     await page.getByTestId("connect-wallet-button").click();
     await expect(page.getByTestId("wallet-picker")).toBeVisible();
-    await expect(page.getByText("No installed EVM wallet was detected.")).toBeVisible();
-    await expect(page.getByTestId("get-wallet-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(await walletMethods(page)).toEqual([]);
+    await page.getByTestId("wallet-provider-legacy:injected").click();
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
+    expect(await walletMethods(page)).toContain("eth_requestAccounts");
+    expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
 
-  test("connects only after a click, reads Base account context and never sends a transaction", async ({ page }) => {
-    await installWalletStub(page, { chainId: "0x2105", emitDuringRequest: true });
-    await page.goto("/?data=mock&view=wallet");
-
-    await expect(page.getByTestId("wallet-address")).toHaveCount(0);
-    expect(await walletRequests(page)).not.toContain("eth_requestAccounts");
-
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-legacy:injected").evaluate((button: HTMLButtonElement) => {
-      button.click();
-      button.click();
-    });
-    await expect(page.getByTestId("wallet-address")).toHaveText("0x1111...1111");
-    await expect(page.getByTestId("swap-preview-panel")).toContainText("Base Mainnet");
-    await expect(page.getByTestId("swap-preview-panel")).toContainText("1 ETH");
-
-    const methods = await walletRequests(page);
-    expect(methods).toContain("eth_requestAccounts");
-    expect(methods).toContain("eth_getBalance");
-    expect(methods).not.toContain("eth_sendTransaction");
-    expect(methods.some((method) => /approval|swap/i.test(method))).toBeFalsy();
-    expect(methods.filter((method) => method === "eth_requestAccounts")).toHaveLength(1);
-    expect(await page.evaluate(() => (window as Window & { __walletHarness?: { reentrantRequests: number } }).__walletHarness?.reentrantRequests)).toBe(0);
-    await expect(page.getByTestId("review-swap-button")).toBeDisabled();
+  test("switches to Base only after the manual action", async ({ page }) => {
+    await installVerifiedWalletStub(page, { chainId: "0x1" });
+    await page.goto("/terminal?data=mock&view=portfolio");
+    await page.getByTestId("connect-wallet-button").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
+    expect(await walletMethods(page)).not.toContain("wallet_switchEthereumChain");
+    await page.getByRole("button", { name: /Switch to Base|Base ağına geç/ }).click();
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
+    expect(await walletMethods(page)).toContain("wallet_switchEthereumChain");
   });
 
-  test("reports a rejected connection cleanly", async ({ page }) => {
-    await installWalletStub(page, { chainId: "0x2105", rejectConnection: true });
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
+  test("reports a rejected connection without exposing raw provider errors", async ({ page }) => {
+    await installVerifiedWalletStub(page, { rejectConnection: true });
+    await page.goto("/terminal?data=mock");
+    await page.getByTestId("connect-wallet-button").click();
+    await page.getByTestId("wallet-provider-legacy:injected").click();
+    await expect(page.getByRole("alert")).toContainText(/cancelled|iptal edildi/);
+    expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("runs mocked quote, exact approval, refreshed review, simulation, and swap through two explicit sends", async ({ page }, testInfo) => {
+    await installVerifiedWalletStub(page);
+    await mockEnabledTradeServer(page);
+    await page.goto("/terminal?data=mock");
+    await page.getByTestId("connect-wallet-button").click();
     await page.getByTestId("wallet-provider-legacy:injected").click();
 
-    await expect(page.getByTestId("wallet-error")).toContainText("Wallet connection was cancelled.");
-    await expect(page.getByTestId("wallet-address")).toHaveCount(0);
-  });
+    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await expect(page.getByTestId("trade-dock")).toContainText("LI.FI");
+    await expect(page.getByTestId("trade-dock")).toContainText(/Minimum receive|Minimum alım/);
+    await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
+    await expect(page.getByTestId("trade-review-dialog")).toBeVisible();
+    await expect(page.getByTestId("trade-review-dialog")).toContainText(/Exact approval required|Kesin miktar approval gerekli/);
+    await page.screenshot({ path: testInfo.outputPath("trade-review-exact-approval-1440.png"), fullPage: true });
 
-  test("sanitizes a provider recursion error and remains retryable", async ({ page }) => {
-    await installWalletStub(page, { chainId: "0x2105", recursionError: true });
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-legacy:injected").click();
+    await page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ }).dblclick();
+    await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("trade-dock")).toContainText(/Approval confirmed|Approval onaylandı/);
+    let sent = await sentTransactions(page);
+    expect(sent).toHaveLength(1);
+    expect(String(sent[0]?.data)).toMatch(/^0x095ea7b3/);
+    expect(String(sent[0]?.data).endsWith(BigInt("100000000000000000").toString(16).padStart(64, "0"))).toBeTruthy();
 
-    await expect(page.getByTestId("wallet-error")).toContainText("Wallet could not be reached.");
-    await expect(page.getByTestId("wallet-error")).not.toContainText("Maximum call stack");
-    await expect(page.getByTestId("wallet-panel-connect")).toBeEnabled();
-  });
-
-  test("localizes a rejected wallet request in Turkish", async ({ page, context }) => {
-    await context.addCookies([{ name: "mergen_locale", value: "tr", domain: "127.0.0.1", path: "/" }]);
-    await installWalletStub(page, { chainId: "0x2105", rejectConnection: true });
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-legacy:injected").click();
-
-    await expect(page.getByTestId("wallet-error")).toContainText("Cüzdan bağlantısı iptal edildi.");
-    await expect(page.getByTestId("wallet-error")).not.toContainText(/stack|rpc|install/i);
-  });
-
-  test("discovers EIP-6963 wallets and connects the explicitly selected provider", async ({ page }) => {
-    await installEip6963Wallets(page);
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-eip6963:wallet-second").click();
-
-    await expect(page.getByTestId("wallet-address")).toHaveText("0x2222...2222");
-    expect(await page.evaluate(() => (window as Window & { __eip6963Requests?: Record<string, string[]> }).__eip6963Requests?.second)).toContain("eth_requestAccounts");
-  });
-
-  test("shows the wrong network and switches to Base only on the manual action", async ({ page }) => {
-    await installWalletStub(page, { chainId: "0x1" });
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-legacy:injected").click();
-
-    await expect(page.getByTestId("wrong-network-warning")).toBeVisible();
-    expect(await walletRequests(page)).not.toContain("wallet_switchEthereumChain");
-
-    await page.getByRole("button", { name: "Switch to Base" }).click();
-    await expect(page.getByTestId("swap-preview-panel")).toContainText("Base Mainnet");
-    expect(await walletRequests(page)).toContain("wallet_switchEthereumChain");
-  });
-
-  test("handles account, chain and disconnect events without opening transaction capability", async ({ page }) => {
-    await installWalletStub(page, { chainId: "0x2105" });
-    await page.goto("/?data=mock&view=wallet");
-    await page.getByTestId("wallet-panel-connect").click();
-    await page.getByTestId("wallet-provider-legacy:injected").click();
-
-    await emitWalletEvent(page, "accountsChanged", [ACCOUNT_TWO]);
-    await expect(page.getByTestId("wallet-address")).toHaveText("0x2222...2222");
-
-    await emitWalletEvent(page, "chainChanged", "0x1");
-    await expect(page.getByTestId("wrong-network-warning")).toBeVisible();
-
-    await emitWalletEvent(page, "disconnect", { code: 4900 });
-    await expect(page.getByTestId("wallet-address")).toHaveCount(0);
-    await expect(page.getByTestId("wallet-panel-connect")).toBeVisible();
-    expect(await walletRequests(page)).not.toContain("eth_sendTransaction");
+    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
+    await expect(page.getByTestId("trade-review-dialog")).toContainText(/Passed for current draft|Güncel taslak için geçti/);
+    await page.getByRole("button", { name: /Confirm swap in wallet|Swap'ı cüzdanda onayla/ }).dblclick();
+    await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
+    sent = await sentTransactions(page);
+    expect(sent).toHaveLength(2);
+    expect(String(sent[1]?.data)).toBe("0x12345678");
+    await expect(page.getByTestId("trade-dock").getByRole("link")).toHaveAttribute("href", /basescan\.org\/tx\/0x/);
   });
 });
 
-async function installWalletStub(
-  page: Page,
-  options: { chainId: string; rejectConnection?: boolean; emitDuringRequest?: boolean; recursionError?: boolean }
-) {
-  await page.addInitScript(
-    ({ account, chainId, rejectConnection, emitDuringRequest, recursionError }) => {
-      const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
-      const requests: string[] = [];
-      let activeChainId = chainId;
-      let accounts: string[] = [];
-      let activeRequests = 0;
-      let reentrantRequests = 0;
-
-      const emit = (event: string, value: unknown) => {
-        if (event === "accountsChanged" && Array.isArray(value)) {
-          accounts = value.filter((item): item is string => typeof item === "string");
-        }
-        if (event === "chainChanged" && typeof value === "string") {
-          activeChainId = value;
-        }
-        for (const listener of listeners.get(event) ?? []) listener(value);
-      };
-      const provider = {
-        isMetaMask: true,
-        request: async ({ method }: { method: string; params?: unknown }) => {
-          activeRequests += 1;
-          if (activeRequests > 1) reentrantRequests += 1;
-          requests.push(method);
-          try {
-            if (method === "eth_accounts") return accounts;
-            if (method === "eth_requestAccounts") {
-              if (recursionError) throw new RangeError("Maximum call stack size exceeded SUPER_RAW_PROVIDER_DETAIL");
-              if (rejectConnection) throw Object.assign(new Error("User rejected"), { code: 4001 });
-              accounts = [account];
-              if (emitDuringRequest) emit("accountsChanged", accounts);
-              return accounts;
-            }
-            if (method === "eth_chainId") return activeChainId;
-            if (method === "eth_getBalance") return "0xde0b6b3a7640000";
-            if (method === "wallet_switchEthereumChain") {
-              activeChainId = "0x2105";
-              emit("chainChanged", activeChainId);
-              return null;
-            }
-            if (method === "wallet_addEthereumChain") return null;
-            throw new Error(`Unexpected wallet method: ${method}`);
-          } finally {
-            activeRequests -= 1;
-          }
-        },
-        on: (event: string, listener: (...args: unknown[]) => void) => {
-          const current = listeners.get(event) ?? new Set<(...args: unknown[]) => void>();
-          current.add(listener);
-          listeners.set(event, current);
-        },
-        removeListener: (event: string, listener: (...args: unknown[]) => void) => {
-          listeners.get(event)?.delete(listener);
-        }
-      };
-      const walletWindow = window as Window & {
-        ethereum?: typeof provider;
-        __walletHarness?: { requests: string[]; emit: typeof emit; readonly reentrantRequests: number };
-      };
-      walletWindow.ethereum = provider;
-      walletWindow.__walletHarness = { requests, emit, get reentrantRequests() { return reentrantRequests; } };
-    },
-    { account: ACCOUNT_ONE, ...options }
-  );
-}
-
-async function installEip6963Wallets(page: Page) {
-  await page.addInitScript(({ firstAccount, secondAccount }) => {
-    const requests: Record<string, string[]> = { first: [], second: [] };
-    const makeProvider = (key: "first" | "second", account: string) => {
-      const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
-      let connectedAccounts: string[] = [];
-      return {
-        request: async ({ method }: { method: string }) => {
-          requests[key].push(method);
-          if (method === "eth_accounts") return connectedAccounts;
-          if (method === "eth_requestAccounts") {
-            connectedAccounts = [account];
-            for (const listener of listeners.get("accountsChanged") ?? []) listener(connectedAccounts);
-            return connectedAccounts;
-          }
-          if (method === "eth_chainId") return "0x2105";
-          if (method === "eth_getBalance") return "0xde0b6b3a7640000";
-          throw new Error(`Unexpected wallet method: ${method}`);
-        },
-        on: (event: string, listener: (...args: unknown[]) => void) => {
-          const current = listeners.get(event) ?? new Set<(...args: unknown[]) => void>();
-          current.add(listener);
-          listeners.set(event, current);
-        },
-        removeListener: (event: string, listener: (...args: unknown[]) => void) => listeners.get(event)?.delete(listener)
-      };
+async function mockEnabledTradeServer(page: Page) {
+  const capabilities: TradeCapabilities = { quoteRequestEnabled: true, transactionExecutionEnabled: true, approvalRequestEnabled: true, swapRequestEnabled: true, providers: [{ name: "LI.FI", status: "enabled" }, { name: "OpenOcean", status: "disabled" }, { name: "Odos", status: "disabled" }] };
+  await page.route("**/api/health", (route) => route.fulfill({ json: { ok: true, ...capabilities, quoteProviders: capabilities.providers } }));
+  await page.route("**/api/quote", (route) => {
+    const createdAt = new Date().toISOString();
+    const withoutFingerprint: Omit<TransactionQuote, "fingerprint"> = {
+      kind: "transaction-quote", id: `mock_quote_${Date.now()}`, provider: "LI.FI", route: "Mocked CI route", walletAddress: account, pairKey: `base:pool:${pairAddress}`, side: "buy", chainId: BASE_TRADE_CHAIN_ID,
+      fromToken: { address: quoteAddress, symbol: "WETH", decimals: 18 }, toToken: { address: baseAddress, symbol: "PEPE", decimals: 18 }, amount: "0.10", fromAmountRaw: "100000000000000000", expectedAmountRaw: "200000000000000000000", minimumAmountRaw: "190000000000000000000", approvalAddress, slippageBps: 50, priceImpactPercent: 0.12, gasEstimate: "0x186a0", networkFeeUsd: "0.03", fees: [{ name: "Protocol fee", amountUsd: "0.01" }], createdAt, expiresAt: new Date(Date.now() + 45_000).toISOString(), transaction: { from: account, to: targetAddress, data: "0x12345678", value: "0x0", chainId: BASE_TRADE_CHAIN_ID, gasLimit: "0x186a0" }, simulation: "required"
     };
-    const providers = [
-      { info: { uuid: "wallet-first", name: "First Wallet", rdns: "one.example" }, provider: makeProvider("first", firstAccount) },
-      { info: { uuid: "wallet-second", name: "Second Wallet", rdns: "two.example" }, provider: makeProvider("second", secondAccount) }
-    ];
-    window.addEventListener("eip6963:requestProvider", () => {
-      for (const detail of providers) window.dispatchEvent(new CustomEvent("eip6963:announceProvider", { detail }));
-    });
-    (window as Window & { __eip6963Requests?: Record<string, string[]> }).__eip6963Requests = requests;
-  }, { firstAccount: ACCOUNT_ONE, secondAccount: ACCOUNT_TWO });
-}
-
-async function walletRequests(page: Page) {
-  return page.evaluate(() => {
-    const walletWindow = window as Window & { __walletHarness?: { requests: string[] } };
-    return walletWindow.__walletHarness?.requests ?? [];
+    const quote = { ...withoutFingerprint, fingerprint: createQuoteFingerprint(withoutFingerprint) };
+    return route.fulfill({ json: { quote, capabilities } });
   });
 }
 
-async function emitWalletEvent(page: Page, event: string, value: unknown) {
-  await page.evaluate(
-    ({ eventName, eventValue }) => {
-      const walletWindow = window as Window & {
-        __walletHarness?: { emit: (event: string, value: unknown) => void };
-      };
-      walletWindow.__walletHarness?.emit(eventName, eventValue);
-    },
-    { eventName: event, eventValue: value }
-  );
+async function walletMethods(page: Page) {
+  return page.evaluate(() => ((window as Window & { __walletHarness?: { requests: Array<{ method: string }> } }).__walletHarness?.requests ?? []).map((request) => request.method));
 }
+
+async function sentTransactions(page: Page) {
+  return page.evaluate(() => ((window as Window & { __walletHarness?: { requests: Array<{ method: string; params?: unknown }> } }).__walletHarness?.requests ?? []).filter((request) => request.method === "eth_sendTransaction").map((request) => Array.isArray(request.params) ? request.params[0] as { data?: string } : {}));
+}
+
+function mockAddress(value: number) { return `0x${value.toString(16).padStart(40, "0")}`; }

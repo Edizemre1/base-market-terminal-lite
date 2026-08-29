@@ -148,7 +148,7 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
         return current.filter((_, index) => index !== existingIndex);
       }
 
-      return [toPinnedPair(pair), ...current].slice(0, 24);
+      return [toPinnedPair(pair), ...current].slice(0, 4);
     });
   }, []);
 
@@ -217,7 +217,7 @@ function readPinnedPairs() {
       return [];
     }
 
-    return parsedValue.slice(0, 24).map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
+    return parsedValue.slice(0, 4).map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
   } catch {
     return [];
   }
@@ -318,12 +318,9 @@ function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {
     pair.pairAddress?.toLowerCase() === pinnedPair.pairAddress?.toLowerCase();
   const idMatches = Boolean(pinnedPair.id) && pair.id === pinnedPair.id;
 
-  return (
-    pairKey === pinnedKey ||
-    idMatches ||
-    pairAddressMatches ||
-    normalizePairIdentity(pair.pair) === pinnedPair.pairIdentity
-  );
+  if (pairAddressMatches || pairKey === pinnedKey) return true;
+  if (pair.pairAddress && pinnedPair.pairAddress) return false;
+  return idMatches || normalizePairIdentity(pair.pair) === pinnedPair.pairIdentity;
 }
 
 function getPinnedPairKey(pair: BasePair) {

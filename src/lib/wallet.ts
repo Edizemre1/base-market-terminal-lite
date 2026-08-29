@@ -1,4 +1,6 @@
 import { parseStrictFiniteNumber } from "@/lib/marketMath";
+import type { TransactionDraft } from "@/lib/trade/types";
+import { isEvmAddress, normalizeHexQuantity, validateTransactionDraft } from "@/lib/trade/validation";
 
 export const BASE_CHAIN_ID = 8453;
 export const BASE_CHAIN_ID_HEX = "0x2105";
@@ -54,6 +56,8 @@ export type WalletControllerState = ReadOnlyWalletSnapshot & {
   providers: WalletProviderOption[];
   selectedProviderId?: string;
 };
+
+export type WalletSimulationResult = { ok: true; gasLimit: string };
 
 type WalletDiscoveryTarget = EventTarget & { ethereum?: Eip1193Provider };
 type ControllerListener = (state: WalletControllerState) => void;
@@ -313,6 +317,50 @@ export class ReadOnlyWalletController {
     });
   }
 
+  async readContract(to: string, data: string) {
+    const provider = this.getProviderForExplicitAction();
+    if (!isEvmAddress(to) || !/^0x(?:[0-9a-f]{2})+$/i.test(data)) throw new Error("Invalid contract read request");
+    const result = await provider.request({ method: "eth_call", params: [{ from: this.state.address, to, data }, "latest"] });
+    if (typeof result !== "string" || !/^0x[0-9a-f]*$/i.test(result)) throw new Error("Wallet returned an invalid contract result");
+    return result;
+  }
+
+  async simulateTransaction(draft: TransactionDraft): Promise<WalletSimulationResult> {
+    const provider = this.getProviderForExplicitAction();
+    this.assertDraftMatchesWallet(draft);
+    await provider.request({ method: "eth_call", params: [toWalletTransaction(draft), "latest"] });
+    const estimate = normalizeHexQuantity(await provider.request({ method: "eth_estimateGas", params: [toWalletTransaction(draft)] }));
+    if (!estimate) throw new Error("Wallet could not estimate gas for this transaction");
+    return { ok: true, gasLimit: estimate };
+  }
+
+  async sendTransaction(draft: TransactionDraft) {
+    const provider = this.getProviderForExplicitAction();
+    this.assertDraftMatchesWallet(draft);
+    const result = await provider.request({ method: "eth_sendTransaction", params: [toWalletTransaction(draft)] });
+    if (typeof result !== "string" || !/^0x[0-9a-f]{64}$/i.test(result)) throw new Error("Wallet returned an invalid transaction hash");
+    return result;
+  }
+
+  async readTransactionReceipt(hash: string) {
+    const provider = this.getProviderForExplicitAction();
+    if (!/^0x[0-9a-f]{64}$/i.test(hash)) throw new Error("Invalid transaction hash");
+    const result = await provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
+    return result && typeof result === "object" ? result as Record<string, unknown> : undefined;
+  }
+
+  private getProviderForExplicitAction() {
+    const selectedOption = this.state.providers.find((option) => option.id === this.selectedProviderId);
+    if (!this.selectedProvider || this.state.status !== "connected" || !this.state.address) throw new Error("Connect a wallet before continuing");
+    if (this.state.chainId !== BASE_CHAIN_ID) throw new Error("Switch the wallet to Base before continuing");
+    if (selectedOption?.compatibility !== "verified") throw new Error("Select a verified Base wallet before continuing");
+    return this.selectedProvider;
+  }
+
+  private assertDraftMatchesWallet(draft: TransactionDraft) {
+    if (!validateTransactionDraft(draft, this.state.address)) throw new Error("Transaction draft no longer matches the connected wallet");
+  }
+
   private addProvider(option: WalletProviderOption) {
     const duplicate = this.state.providers.find(
       (existing) => existing.id === option.id || existing.provider === option.provider
@@ -425,6 +473,16 @@ export class ReadOnlyWalletController {
     };
     for (const listener of this.subscribers) listener(this.state);
   }
+}
+
+function toWalletTransaction(draft: TransactionDraft) {
+  return {
+    from: draft.from,
+    to: draft.to,
+    data: draft.data,
+    value: draft.value,
+    ...(draft.gasLimit ? { gas: draft.gasLimit } : {})
+  };
 }
 
 export function getInjectedWalletProvider(): Eip1193Provider | undefined {
