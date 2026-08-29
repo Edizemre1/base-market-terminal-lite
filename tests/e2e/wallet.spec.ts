@@ -47,7 +47,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await page.getByTestId("connect-wallet-button").click();
     await page.getByTestId("wallet-provider-legacy:injected").click();
-    await expect(page.getByRole("alert")).toContainText(/cancelled|iptal edildi/);
+    await expect(page.getByTestId("wallet-picker-error")).toContainText(/cancelled|iptal edildi/);
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
 
@@ -66,7 +66,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-review-dialog")).toContainText(/Exact approval required|Kesin miktar approval gerekli/);
     await page.screenshot({ path: testInfo.outputPath("trade-review-exact-approval-1440.png"), fullPage: true });
 
-    await page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ }).dblclick();
+    await page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
     await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
     await expect(page.getByTestId("trade-dock")).toContainText(/Approval confirmed|Approval onaylandı/);
     let sent = await sentTransactions(page);
@@ -77,7 +77,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
     await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
     await expect(page.getByTestId("trade-review-dialog")).toContainText(/Passed for current draft|Güncel taslak için geçti/);
-    await page.getByRole("button", { name: /Confirm swap in wallet|Swap'ı cüzdanda onayla/ }).dblclick();
+    await page.getByRole("button", { name: /Confirm swap in wallet|Swap'ı cüzdanda onayla/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
     await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
     sent = await sentTransactions(page);
     expect(sent).toHaveLength(2);

@@ -26,7 +26,7 @@ test.describe("wallet picker and terminal localization", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByTestId("opportunity-lane-new")).toContainText("New on Base");
     await expect(page.getByTestId("trade-dock")).toContainText("Trade Dock");
-    await page.getByRole("button", { name: "tr" }).click();
+    await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(page.getByTestId("opportunity-lane-new")).toContainText("Base'te Yeni");
     await expect(page.getByTestId("trade-dock")).toContainText("İşlem Alanı");

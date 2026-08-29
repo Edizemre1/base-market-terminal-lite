@@ -34,7 +34,7 @@ test.describe("living Base terminal", () => {
   });
 
   test("global search resolves token, pool, and address context", async ({ page }) => {
-    await page.getByLabel(/Search token|Token, pair/).fill("toshi");
+    await page.getByRole("combobox", { name: /Search token|Token, pair/ }).fill("toshi");
     await expect(page.getByTestId("search-result-toshi-weth")).toContainText("TOSHI / WETH");
     await page.getByTestId("search-result-toshi-weth").click();
     await expect(page.getByTestId("selected-pair-title")).toHaveText("TOSHI / WETH");

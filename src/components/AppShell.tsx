@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
               </Suspense>
-              <HeaderAlertLink />
+              <Suspense><HeaderAlertLink /></Suspense>
             </div>
             <LocaleSwitcher />
             <WalletButton compact />
@@ -399,7 +399,8 @@ function HeaderProductLabel() {
 
 function HeaderAlertLink() {
   const { t } = useI18n();
-  return <Link href="/terminal?view=alerts" className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={13} /></Link>;
+  const searchParams = useSearchParams();
+  return <Link href={withTerminalContext("/terminal?view=alerts", searchParams)} className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted hover:text-base-mint" aria-label={t("header.alerts")}><Bell size={13} /></Link>;
 }
 
 function LocaleSwitcher() {
@@ -415,8 +416,19 @@ function TerminalNavigation({ mobile = false }: { mobile?: boolean }) {
   const activeView = requestedView === "markets" || requestedView === "watchlist" || requestedView === "alerts" || requestedView === "portfolio" ? requestedView : "terminal";
   const isTerminalRoute = pathname === "/terminal" || pathname === "/" || pathname === "/dashboard" || pathname === "/swap";
   const items = navItems.filter((item) => mobile ? !("desktopOnly" in item && item.desktopOnly) && !("mobileHidden" in item && item.mobileHidden) : !("mobileOnly" in item && item.mobileOnly));
-  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid min-h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.labelKey}`} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
-  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={item.href} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold", active ? "bg-base-mint/10 text-base-mint" : "text-base-muted hover:bg-base-elevated hover:text-base-text")}><span className="grid h-5 w-5 shrink-0 place-items-center text-current"><Icon size={13} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
+  if (mobile) return <nav className="fixed bottom-0 left-0 right-0 z-50 grid min-h-14 grid-cols-4 border-t border-base-line/60 bg-base-panel/95 px-1 backdrop-blur-xl md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.labelKey}`} href={withTerminalContext(item.href, searchParams)} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-semibold", active ? "text-base-mint" : "text-base-muted")}><Icon size={15} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
+  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={withTerminalContext(item.href, searchParams)} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold", active ? "bg-base-mint/10 text-base-mint" : "text-base-muted hover:bg-base-elevated hover:text-base-text")}><span className="grid h-5 w-5 shrink-0 place-items-center text-current"><Icon size={13} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
+}
+
+function withTerminalContext(href: string, current: { get: (name: string) => string | null }) {
+  const [pathname, rawQuery = ""] = href.split("?", 2);
+  const next = new URLSearchParams(rawQuery);
+  for (const key of ["data", "pair"] as const) {
+    const value = current.get(key);
+    if (value && !next.has(key)) next.set(key, value);
+  }
+  const query = next.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function TopChip({
