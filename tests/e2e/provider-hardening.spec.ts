@@ -16,6 +16,8 @@ import {
   calculateActivityScore
 } from "../../src/lib/base-terminal/discovery";
 import {
+  ReadOnlyWalletController,
+  getWalletErrorMessage,
   requestWalletConnection,
   switchWalletToBase,
   type Eip1193Provider
@@ -233,6 +235,12 @@ test.describe("market discovery definitions", () => {
 });
 
 test.describe("read-only wallet request boundary", () => {
+  test("never exposes a raw provider recursion message", () => {
+    const message = getWalletErrorMessage(new RangeError("Maximum call stack size exceeded SUPER_RAW_PROVIDER_DETAIL"));
+    expect(message).toBe("The wallet could not complete this request. Try again or choose another wallet.");
+    expect(message).not.toMatch(/stack|SUPER_RAW/i);
+  });
+
   test("connects, reads chain and balance without requesting a transaction", async () => {
     const methods: string[] = [];
     const provider: Eip1193Provider = {
@@ -267,4 +275,163 @@ test.describe("read-only wallet request boundary", () => {
     expect(methods).toEqual(["wallet_switchEthereumChain"]);
     expect(methods.some((method) => /sendtransaction|approval|swap/i.test(method))).toBeFalsy();
   });
+
+  test("serializes MetaMask-like re-entrant events and rapid double clicks", async () => {
+    const harness = createWalletProviderHarness();
+    const target = createLegacyDiscoveryTarget(harness.provider);
+    const controller = new ReadOnlyWalletController();
+
+    controller.start(target);
+    await settleController();
+    harness.resetMetrics();
+
+    await Promise.all([controller.connect(), controller.connect()]);
+    await settleController();
+
+    expect(harness.methods.filter((method) => method === "eth_requestAccounts")).toHaveLength(1);
+    expect(harness.reentrantRequests()).toBe(0);
+    expect(controller.getState()).toMatchObject({
+      status: "connected",
+      address: "0x1111111111111111111111111111111111111111",
+      chainId: 8453,
+      balanceEth: "1"
+    });
+    expect(harness.methods).not.toContain("eth_sendTransaction");
+    expect(harness.methods.some((method) => /approval|swap/i.test(method))).toBeFalsy();
+    controller.stop();
+    expect(harness.listenerCount()).toBe(0);
+  });
+
+  test("supports rejection retry, idempotent Strict Mode lifecycle and EIP-6963 selection", async () => {
+    const first = createWalletProviderHarness({ rejectOnce: true });
+    const second = createWalletProviderHarness({
+      account: "0x2222222222222222222222222222222222222222"
+    });
+    const target = createEip6963DiscoveryTarget([
+      { uuid: "first", name: "MetaMask", provider: first.provider },
+      { uuid: "second", name: "Rabby", provider: second.provider }
+    ]);
+    const controller = new ReadOnlyWalletController();
+
+    controller.start(target);
+    controller.start(target);
+    await settleController();
+    expect(controller.getState().providers).toHaveLength(2);
+    expect(first.listenerCount()).toBe(4);
+
+    await controller.connect();
+    expect(controller.getState().error).toContain("rejected");
+    expect(controller.getState().error).not.toContain("stack");
+    await controller.connect();
+    await settleController();
+    expect(controller.getState().status).toBe("connected");
+
+    controller.selectProvider("eip6963:second");
+    await settleController();
+    await controller.connect();
+    await settleController();
+    expect(controller.getState()).toMatchObject({
+      address: "0x2222222222222222222222222222222222222222",
+      selectedProviderId: "eip6963:second"
+    });
+    expect(second.methods.filter((method) => method === "eth_requestAccounts")).toHaveLength(1);
+    expect(first.listenerCount()).toBe(0);
+    expect(second.listenerCount()).toBe(4);
+
+    controller.stop();
+    controller.start(target);
+    await settleController();
+    expect(first.listenerCount()).toBe(4);
+    controller.stop();
+    expect(first.listenerCount()).toBe(0);
+  });
 });
+
+function createWalletProviderHarness({
+  account = "0x1111111111111111111111111111111111111111",
+  rejectOnce = false
+}: {
+  account?: string;
+  rejectOnce?: boolean;
+} = {}) {
+  const methods: string[] = [];
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  let accounts: string[] = [];
+  let activeRequests = 0;
+  let reentrantRequestCount = 0;
+  let shouldReject = rejectOnce;
+
+  const emit = (event: string, ...args: unknown[]) => {
+    for (const listener of listeners.get(event) ?? []) listener(...args);
+  };
+  const provider: Eip1193Provider = {
+    request: async ({ method }) => {
+      methods.push(method);
+      if (activeRequests > 0 && method !== "eth_requestAccounts") reentrantRequestCount += 1;
+      activeRequests += 1;
+      try {
+        if (method === "eth_accounts") return accounts;
+        if (method === "eth_chainId") return "0x2105";
+        if (method === "eth_getBalance") return "0xde0b6b3a7640000";
+        if (method === "wallet_switchEthereumChain") {
+          emit("chainChanged", "0x2105");
+          return null;
+        }
+        if (method === "eth_requestAccounts") {
+          if (shouldReject) {
+            shouldReject = false;
+            throw Object.assign(new Error("Internal provider details"), { code: 4001 });
+          }
+          accounts = [account];
+          emit("accountsChanged", accounts);
+          emit("connect", { chainId: "0x2105" });
+          await Promise.resolve();
+          return accounts;
+        }
+        throw new Error(`Unexpected wallet method: ${method}`);
+      } finally {
+        activeRequests -= 1;
+      }
+    },
+    on: (event, listener) => {
+      const eventListeners = listeners.get(event) ?? new Set();
+      eventListeners.add(listener);
+      listeners.set(event, eventListeners);
+    },
+    removeListener: (event, listener) => listeners.get(event)?.delete(listener)
+  };
+
+  return {
+    provider,
+    methods,
+    listenerCount: () => [...listeners.values()].reduce((total, values) => total + values.size, 0),
+    reentrantRequests: () => reentrantRequestCount,
+    resetMetrics: () => {
+      methods.length = 0;
+      reentrantRequestCount = 0;
+    }
+  };
+}
+
+function createLegacyDiscoveryTarget(provider: Eip1193Provider) {
+  return Object.assign(new EventTarget(), { ethereum: provider });
+}
+
+function createEip6963DiscoveryTarget(
+  announcements: Array<{ uuid: string; name: string; provider: Eip1193Provider }>
+) {
+  const target = new EventTarget();
+  target.addEventListener("eip6963:requestProvider", () => {
+    for (const announcement of announcements) {
+      const event = new Event("eip6963:announceProvider") as Event & { detail?: unknown };
+      event.detail = { info: { uuid: announcement.uuid, name: announcement.name }, provider: announcement.provider };
+      target.dispatchEvent(event);
+    }
+  });
+  return target;
+}
+
+async function settleController() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
