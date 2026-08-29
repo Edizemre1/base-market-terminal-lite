@@ -112,6 +112,7 @@ test.describe("TR/EN and progressive disclosure", () => {
     expect(errors).toEqual([]);
 
     await page.context().clearCookies();
+    await page.evaluate(() => localStorage.removeItem("mergen-pulse:locale:v1"));
     await page.setExtraHTTPHeaders({ "Accept-Language": "tr-TR,tr;q=0.9" });
     await page.goto("/?data=mock");
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");

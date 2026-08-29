@@ -33,7 +33,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
     await expect(page.getByTestId("terminal-topbar")).toContainText("Mergen Finance");
     await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible();
     await expect(page.locator("body")).toContainText(
-      /Live Pulse|Live market data is temporarily unavailable/
+      /Live Pulse|Live market data is temporarily unavailable/i
     );
     await expect(page.locator("body")).not.toContainText("Demo fallback selected");
     expect(consoleErrors).toEqual([]);
@@ -102,6 +102,7 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
   test("recent markets persist locally", async ({ page }) => {
     await page.getByTestId("discovery-row-blob-usdc").getByRole("button").first().click();
+    await expect(page).toHaveURL(/pair=blob-usdc/);
     await page.reload();
     await expectPairWorkspace(page);
     await page.goto("/?data=mock&view=markets");
