@@ -311,12 +311,18 @@ test.describe("Base Terminal Lite smoke coverage", () => {
 
       await page.setViewportSize({ width: 1440, height: 900 });
       const snapshot = await (await page.request.get("/api/market-snapshot?data=mock")).json();
-      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: { ...snapshot, generatedAt: new Date().toISOString(), freshness: "delayed", fallbackReason: "Provider unavailable" } }));
+      let refreshRequests = 0;
+      await page.route("**/api/market-snapshot**", (route) => {
+        if (new URL(route.request().url()).searchParams.get("data") !== "mock") return route.continue();
+        refreshRequests += 1;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...snapshot, generatedAt: `mock-delayed-${locale}`, freshness: "delayed", fallbackReason: "Provider unavailable" }) });
+      });
       await page.goto("/?data=mock");
       await page.getByTestId("refresh-market-board").click();
+      await expect.poll(() => refreshRequests).toBe(1);
       await expect(page.getByText(locale === "tr" ? /Yerine örnek fiyat konmadı/ : /No sample prices were substituted/)).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`delayed-desktop-${locale}-1440x900.png`), fullPage: true });
-      await page.unroute("**/api/market-snapshot?data=mock");
+      await page.unroute("**/api/market-snapshot**");
     }
   });
 

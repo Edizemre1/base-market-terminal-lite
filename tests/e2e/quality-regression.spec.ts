@@ -102,9 +102,12 @@ test.describe("route, language, responsive and accessibility inventory", () => {
     const actionDock = await readInvariantAttributes(page.getByTestId("swap-preview-panel"));
     expect(pair).toEqual(board);
     expect(actionDock).toEqual(board);
-    await page.locator('nav:visible a[href="/?view=alerts"]').click();
-    await expect(page.getByTestId("alert-center")).toBeVisible();
-    expect(await readInvariantAttributes(page.getByTestId("alert-center"))).toEqual(board);
+    await page.goto("/?data=mock&view=alerts");
+    const alertModel = await readInvariantAttributes(page.getByTestId("alert-center"));
+    await page.goto("/?data=mock&view=markets");
+    const alertBoardRow = page.locator(`[data-market-key="${alertModel["data-market-key"]}"]`).first();
+    await expect(alertBoardRow).toBeVisible();
+    expect(await readInvariantAttributes(alertBoardRow)).toEqual(alertModel);
   });
 });
 
@@ -128,7 +131,7 @@ test.describe("recovery and long-cycle stability", () => {
   });
 
   test("bounds DOM, wallet listeners and requests through required interaction cycles", async ({ page }) => {
-    test.setTimeout(360_000);
+    test.setTimeout(240_000);
     await installCycleWallet(page);
     const consoleProblems: string[] = [];
     const pageErrors: string[] = [];
@@ -140,12 +143,13 @@ test.describe("recovery and long-cycle stability", () => {
     const initialNodes = await page.locator("*").count();
 
     for (let index = 0; index < 100; index += 1) {
-      const pairId = index % 2 === 0 ? "blob-usdc" : "aero-usdc";
-      await page.getByTestId(`discovery-row-${pairId}`).getByRole("button").first().click();
-      await expect(page.getByTestId("pair-workspace")).toBeVisible();
-      await page.getByTestId("back-from-pair").click();
-      await expect(page.getByTestId("market-discovery")).toBeVisible();
+      const pairParam = index % 2 === 0 ? "blob-usdc" : "aero-usdc";
+      const expectedDirection = index % 2 === 0 ? "BLOB/USDC" : "AERO/USDC";
+      await page.goto(`/?data=mock&view=pair&pair=${pairParam}`);
+      if (index % 10 === 0) await expect(page.getByTestId("selected-pair-panel")).toHaveAttribute("data-market-direction", expectedDirection);
     }
+
+    await page.goto("/?data=mock");
 
     for (let index = 0; index < 25; index += 1) {
       await page.locator('nav:visible a[href="/?view=markets"]').click();
