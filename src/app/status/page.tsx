@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Status",
-  description: `Public read-only demo status for ${APP_NAME}.`
+  description: `Public read-only terminal status for ${APP_NAME}.`
 };
 
 type StatusPageProps = {
@@ -29,13 +29,13 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
       <section className="grid gap-2 xl:grid-cols-[320px_minmax(0,1fr)]">
         <TerminalPanel
           label="STATUS"
-          title="Public demo status"
+          title="Public terminal status"
           meta={<StatusPill label="Read-only" />}
         >
           <div className="space-y-2">
             <StatusRow label="App" value={APP_NAME} />
             <StatusRow label="Version" value={`v${APP_VERSION}`} />
-            <StatusRow label="State" value="Operational demo" tone="mint" />
+            <StatusRow label="State" value="Operational" tone="mint" />
             <StatusRow label="Boundary" value="No transaction execution" tone="amber" />
           </div>
           <p className="mt-3 text-[11px] leading-4 text-base-muted">{APP_DESCRIPTION}</p>
@@ -65,11 +65,12 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
             </div>
           </TerminalPanel>
 
-          <TerminalPanel label="BOUNDARY" title="Public demo boundary">
+          <TerminalPanel label="BOUNDARY" title="Public terminal boundary">
             <div className="grid gap-1 md:grid-cols-2">
               {[
                 "Swap UI is disabled",
-                "No wallet connection is required",
+                "Optional read-only wallet connection",
+                "No wallet signing or transaction execution",
                 "No signing or approvals are enabled",
                 "No transaction construction exists",
                 "No API keys or secrets are exposed",

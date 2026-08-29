@@ -19,6 +19,7 @@ const MIN_LIQUIDITY_USD = 10_000;
 const MIN_VOLUME_24H_USD = 5_000;
 const MIN_VOLUME_INFLOW_24H_USD = 10_000;
 const MAX_NEW_PAIR_AGE_MINUTES = 7 * 24 * 60;
+const UNKNOWN_AGE_MINUTES = Number.MAX_SAFE_INTEGER;
 const CURATED_BASE_QUERIES = [
   "WETH USDC",
   "AERO USDC",
@@ -142,7 +143,7 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
     getPairChart: (id) => pairsById.get(id)?.chart ?? [],
     getRiskDetails: (id) => {
       const pair = pairsById.get(id);
-      return pair ? getDerivedRiskDetails(pair) : undefined;
+      return pair ? getUnverifiedRiskDetails(pair) : undefined;
     },
     getLiquidityDetails: (id) => pairsById.get(id)?.liquidityDetail,
     getActivityFeed: (id) => pairsById.get(id)?.activity ?? []
@@ -400,9 +401,6 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const buys = toNumber(h24Txns?.buys);
   const sells = toNumber(h24Txns?.sells);
   const totalTxns = buys + sells;
-  const buyPressure = totalTxns > 0 ? Math.round((buys / totalTxns) * 100) : 50;
-  const sellPressure = 100 - buyPressure;
-  const riskScore = getDerivedRiskScore({ ageMinutes, liquidity, sells, totalTxns });
   const momentumScore = getMomentumScore({ change24h, liquidity, volume24h, totalTxns });
   const priceNative = pair.priceNative ?? pair.priceUsd ?? "0";
   const priceUsd = toNumber(pair.priceUsd);
@@ -449,54 +447,38 @@ function normalizePair(pair: DexPair): BasePair | undefined {
     inflow24h: Math.max(0, volume24h - volume6h),
     momentumScore,
     volumeMultiple: liquidity > 0 ? Number((volume24h / liquidity).toFixed(2)) : 0,
-    riskScore,
-    riskLabel: "Derived/demo risk UI",
     chart: [],
-    pressure: { buy: buyPressure, sell: sellPressure },
     holders: {
-      top10: "N/A",
-      top50: "N/A",
-      top100: "N/A",
+      top10: "Not provided",
+      top50: "Not provided",
+      top100: "Not provided",
       total: "Not provided",
-      active24h: totalTxns > 0 ? totalTxns.toString() : "N/A"
+      active24h: "Not provided"
     },
     poolAge: formatAgeLabel(ageMinutes),
-    flags: ["Derived/demo risk UI", "Not a safety guarantee"],
+    flags: ["Contract checks not performed", "Unknown does not mean safe"],
     taxes: { buy: "Unknown", sell: "Unknown" },
     lpLock: { status: "Unknown", provider: "Not provided", expires: "N/A" },
-    riskChecks: getDerivedRiskDetailsFromValues(riskScore).riskChecks,
+    riskChecks: getUnverifiedRiskDetails().riskChecks,
     liquidityDetail: {
       poolLiquidity: formatUsd(liquidity),
-      lpChange: change24h === 0 ? "Not provided" : `${formatSigned(change24h)} price change`,
-      depth: liquidity > 0 ? `${formatUsd(liquidity * 0.02)} within 2% est.` : "Not provided",
+      lpChange: "Not provided",
+      depth: "Not provided",
       routeSource: pair.dexId ?? "DexScreener"
     },
     activity: buildActivityFeed(pair, baseToken.symbol)
   };
 }
 
-function getDerivedRiskDetails(pair: BasePair): PairRiskDetails {
+function getUnverifiedRiskDetails(pair?: BasePair): PairRiskDetails {
   return {
-    ...getDerivedRiskDetailsFromValues(pair.riskScore),
-    riskLabel: pair.riskLabel,
-    flags: pair.flags,
-    holders: pair.holders,
-    taxes: pair.taxes,
-    lpLock: pair.lpLock
-  };
-}
-
-function getDerivedRiskDetailsFromValues(riskScore: number): PairRiskDetails {
-  return {
-    riskScore,
-    riskLabel: "Derived/demo risk UI",
-    flags: ["Derived/demo risk UI", "Not a safety guarantee"],
+    flags: pair?.flags ?? ["Contract checks not performed", "Unknown does not mean safe"],
     holders: {
-      top10: "N/A",
-      top50: "N/A",
-      top100: "N/A",
+      top10: "Not provided",
+      top50: "Not provided",
+      top100: "Not provided",
       total: "Not provided",
-      active24h: "Dex aggregate"
+      active24h: "Not provided"
     },
     taxes: { buy: "Unknown", sell: "Unknown" },
     lpLock: { status: "Unknown", provider: "Not provided", expires: "N/A" },
@@ -507,8 +489,7 @@ function getDerivedRiskDetailsFromValues(riskScore: number): PairRiskDetails {
       { label: "Honeypot", value: "Not checked", ok: false },
       { label: "LP lock", value: "Unknown", ok: false },
       { label: "Holder concentration", value: "Not provided", ok: false },
-      { label: "Deployer activity", value: "Not provided", ok: false },
-      { label: "Demo score", value: `${riskScore} / 100 derived UI`, ok: false }
+      { label: "Deployer activity", value: "Not provided", ok: false }
     ]
   };
 }
@@ -595,25 +576,6 @@ function getFiniteWindowValue(value: number | undefined) {
 
   const parsed = toNumber(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function getDerivedRiskScore({
-  ageMinutes,
-  liquidity,
-  sells,
-  totalTxns
-}: {
-  ageMinutes: number;
-  liquidity: number;
-  sells: number;
-  totalTxns: number;
-}) {
-  const agePenalty = ageMinutes < 60 ? 24 : ageMinutes < 360 ? 14 : 6;
-  const liquidityPenalty = liquidity < 50_000 ? 26 : liquidity < 150_000 ? 16 : 8;
-  const sellPressure = totalTxns > 0 ? sells / totalTxns : 0.5;
-  const pressurePenalty = sellPressure > 0.6 ? 18 : sellPressure > 0.5 ? 10 : 4;
-
-  return clamp(Math.round(agePenalty + liquidityPenalty + pressurePenalty), 18, 78);
 }
 
 function getMomentumScore({
@@ -746,14 +708,14 @@ function getAgeMinutes(pairCreatedAt: number | null | undefined) {
   const createdAt = toNumber(pairCreatedAt);
 
   if (createdAt <= 0) {
-    return 999_999;
+    return UNKNOWN_AGE_MINUTES;
   }
 
   return Math.max(1, Math.floor((Date.now() - createdAt) / 60_000));
 }
 
 function formatAgeLabel(minutes: number) {
-  if (minutes >= 999_999) {
+  if (minutes === UNKNOWN_AGE_MINUTES) {
     return "N/A";
   }
 
@@ -795,10 +757,6 @@ function formatUsd(value: number, maximumFractionDigits = 1) {
     notation: value >= 100_000 ? "compact" : "standard",
     maximumFractionDigits
   }).format(value);
-}
-
-function formatSigned(value: number) {
-  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 function formatDexName(dexId: string | undefined) {

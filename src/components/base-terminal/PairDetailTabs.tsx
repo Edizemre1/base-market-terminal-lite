@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, ExternalLink, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Copy, ExternalLink } from "lucide-react";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 import type { DetailTab } from "@/components/base-terminal/types";
@@ -24,11 +24,13 @@ export function PairDetailTabs({
 }) {
   return (
     <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
-      <div className="grid h-8 shrink-0 grid-cols-4 border-b border-base-line bg-base-raised">
+      <div className="grid h-10 shrink-0 grid-cols-4 border-b border-base-line bg-base-raised" role="tablist" aria-label="Selected market details">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
             onClick={() => onTabChange(tab.id)}
             className={cx(
               "h-full min-w-0 border-r border-base-line px-2 text-[11px] font-semibold uppercase tracking-[0.14em] last:border-r-0",
@@ -146,25 +148,16 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
         <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
           <thead>
             <tr className="border-b border-base-line bg-base-elevated text-[10px] uppercase tracking-[0.12em] text-base-muted">
-              <th className="px-2 py-1.5">Time</th>
-              <th className="px-2 py-1.5">Side</th>
-              <th className="px-2 py-1.5">Amount</th>
-              <th className="px-2 py-1.5">Value</th>
-              <th className="px-2 py-1.5">Wallet</th>
+              <th className="px-2 py-1.5">Window</th>
+              <th className="px-2 py-1.5">Transactions</th>
+              <th className="px-2 py-1.5">Volume</th>
+              <th className="px-2 py-1.5">Source</th>
             </tr>
           </thead>
           <tbody>
             {pair.activity.map((event) => (
               <tr key={`${event.time}-${event.wallet}`} className="h-8 border-b border-base-line last:border-b-0">
                 <td className="px-2 py-1.5 font-mono text-base-muted">{event.time}</td>
-                <td
-                  className={cx(
-                    "px-2 py-1.5 font-mono uppercase",
-                    event.side === "buy" ? "text-base-mint" : "text-base-rose"
-                  )}
-                >
-                  {event.side}
-                </td>
                 <td className="px-2 py-1.5 font-mono text-base-text">{event.amount}</td>
                 <td className="px-2 py-1.5 font-mono text-base-text">{event.value}</td>
                 <td className="px-2 py-1.5 font-mono text-base-muted">{event.wallet}</td>
@@ -179,60 +172,21 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
   return (
     <div className="space-y-2">
       <PublicSignalsPanel pair={pair} providerStale={providerStale} />
+      <div className="rounded-sm border border-base-amber/35 bg-base-amber/10 p-3 text-[11px] leading-5 text-base-amber">
+        <p className="font-semibold text-base-text">
+          {pair.dataSource === "mock" ? "Demo-only safety fields" : "Safety verification not available"}
+        </p>
+        <p>
+          {pair.dataSource === "mock"
+            ? "These fields belong to the explicitly selected sample dataset and are not real checks."
+            : "Contract, holder and LP-lock checks were not performed. Unknown does not mean safe."}
+        </p>
+      </div>
 
-      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr]">
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Contract Risk
-          </h3>
-          <div className="space-y-1">
-            {pair.riskChecks.slice(0, 4).map((check) => (
-              <RiskRow key={check.label} label={check.label} value={check.value} ok={check.ok} />
-            ))}
-          </div>
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Holder Concentration
-          </h3>
-          <RiskRow label="Top 10 Holders" value={pair.holders.top10} ok />
-          <RiskRow label="Top 50 Holders" value={pair.holders.top50} ok />
-          <RiskRow label="Top 100 Holders" value={pair.holders.top100} ok={pair.riskScore < 50} />
-          <RiskRow label="Active Holders (24h)" value={pair.holders.active24h} ok />
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            LP & Security
-          </h3>
-          <RiskRow label="LP Provider" value={pair.dex} ok />
-          <RiskRow label="LP Lock" value={pair.lpLock.status} ok={pair.riskScore < 50} />
-          <RiskRow label="Lock Provider" value={pair.lpLock.provider} ok />
-          <RiskRow label="Lock Expires" value={pair.lpLock.expires} ok />
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Demo Risk UI
-          </h3>
-          <div className="flex items-center gap-4">
-            <div
-              className="grid h-20 w-20 place-items-center rounded-full border border-base-line"
-              style={{
-                background: `conic-gradient(rgb(var(--color-mint)) ${(100 - pair.riskScore) * 3.6}deg, rgb(var(--color-raised)) 0deg)`
-              }}
-            >
-              <div className="grid h-12 w-12 place-items-center rounded-full border border-base-line bg-base-panel">
-                <span className="font-mono text-lg font-semibold text-base-mint">
-                  {pair.riskScore}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-1 text-[11px] text-base-muted">
-              <p><span className="text-base-mint">0-30</span> Lower</p>
-              <p><span className="text-base-amber">31-60</span> Medium</p>
-              <p><span className="text-base-rose">61-100</span> Higher</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <RiskGroup title="Contract checks" rows={pair.riskChecks.slice(0, 4).map((check) => [check.label, check.value])} />
+        <RiskGroup title="Holder data" rows={[["Top 10 holders", pair.holders.top10], ["Top 50 holders", pair.holders.top50], ["Top 100 holders", pair.holders.top100], ["Active holders (24h)", pair.holders.active24h]]} />
+        <RiskGroup title="LP & token settings" rows={[["DEX", pair.dexName ?? pair.dex], ["LP lock", pair.lpLock.status], ["Lock provider", pair.lpLock.provider], ["Buy / sell tax", `${pair.taxes.buy} / ${pair.taxes.sell}`]]} />
       </div>
     </div>
   );
@@ -399,7 +353,7 @@ function getPublicMarketSignals(pair: BasePair, providerStale: boolean) {
     signals.push("Very new pair");
   }
 
-  if (!pair.pairCreatedAt && pair.ageMinutes >= 999_999) {
+  if (!pair.pairCreatedAt) {
     signals.push("Missing age data");
   }
 
@@ -442,14 +396,23 @@ function formatTxnWindow(window: { buys: number; sells: number } | undefined) {
   return window ? `${window.buys} / ${window.sells}` : "N/A";
 }
 
-function RiskRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+function RiskGroup({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  return (
+    <div className="rounded-sm bg-base-elevated p-3">
+      <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-base-muted">{title}</h3>
+      {rows.map(([label, value]) => <RiskRow key={label} label={label} value={value} />)}
+    </div>
+  );
+}
+
+function RiskRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[1fr_auto_18px] items-center gap-2 border-b border-base-line py-1 text-[11px] last:border-b-0">
       <span className="text-base-text">{label}</span>
       <span className="font-mono text-base-text">{value}</span>
-      <ShieldCheck
+      <AlertTriangle
         size={13}
-        className={ok ? "text-base-mint" : "text-base-amber"}
+        className="text-base-amber"
         aria-hidden="true"
       />
     </div>

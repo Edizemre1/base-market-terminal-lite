@@ -8,8 +8,8 @@ export type FeedStatusLabel =
 export type MaybePromise<T> = T | Promise<T>;
 
 export type PairRiskDetails = {
-  riskScore: number;
-  riskLabel: string;
+  riskScore?: number;
+  riskLabel?: string;
   riskChecks: PairRiskCheck[];
   flags: string[];
   holders: BasePair["holders"];

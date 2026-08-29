@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { ExternalLink, LockKeyhole, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ExternalLink, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import type { ChartTimeframe } from "@/data/providers/chart/types";
 import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
@@ -10,13 +10,11 @@ import type { ChartRefreshStatus } from "@/components/base-terminal/types";
 export function SelectedPairPanel({
   pair,
   marketDataMode,
-  outsideCurrentFilter,
   chartRefreshStatus,
   onRefreshChart
 }: {
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
-  outsideCurrentFilter: boolean;
   chartRefreshStatus: ChartRefreshStatus;
   onRefreshChart: (pair: BasePair, timeframe?: ChartTimeframe) => void;
 }) {
@@ -31,7 +29,8 @@ export function SelectedPairPanel({
 
   return (
     <section
-      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      id="selected-market"
+      className="flex min-h-0 flex-col overflow-hidden rounded-sm border border-base-line bg-base-panel shadow-panel"
       data-testid="selected-pair-panel"
     >
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
@@ -73,11 +72,6 @@ export function SelectedPairPanel({
                   {pair.staleReason ?? "Stale selected pair"}
                 </span>
               ) : null}
-              {outsideCurrentFilter ? (
-                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
-                  Outside current filter
-                </span>
-              ) : null}
               {pair.sourceUrl ? (
                 <a
                   href={pair.sourceUrl}
@@ -105,7 +99,7 @@ export function SelectedPairPanel({
         </div>
       </div>
 
-      <div className="grid shrink-0 gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid shrink-0 gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-6">
         <Metric label={`Price (${pair.quoteToken})`} value={pair.price} detail={pair.priceUsd} />
         <Metric
           label="24h change"
@@ -125,50 +119,18 @@ export function SelectedPairPanel({
         />
         <Metric label="Age" value={pair.age} detail={formatPairCreatedAt(pair)} />
         <Metric
-          label="Risk score"
-          value={`${pair.riskScore} / 100`}
-          detail={pair.riskLabel}
-          tone={pair.riskScore <= 30 ? "mint" : pair.riskScore >= 61 ? "rose" : "default"}
+          label="Data status"
+          value={pair.dataSource === "mock" ? "Demo" : pair.stale ? "Stale" : "Public feed"}
+          detail={pair.dataSource === "mock" ? "Explicit sample mode" : "No safety score inferred"}
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
+      <div className="flex min-h-0 flex-1 flex-col p-2">
         <ChartPanel
           pair={pair}
           refreshStatus={chartRefreshStatus}
           onRefreshChart={onRefreshChart}
         />
-        <div className="grid shrink-0 gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-          <MiniModule
-            label="Buy / Sell Pressure"
-            value={`${pair.pressure.buy}% / ${pair.pressure.sell}%`}
-            detail={pair.pressure.buy >= pair.pressure.sell ? "Bullish" : "Defensive"}
-            bar={pair.pressure.buy}
-          />
-          <MiniModule
-            label="Holder Concentration"
-            value={`Top 10: ${pair.holders.top10}`}
-            detail="Provider-reported concentration"
-            bar={Number.parseFloat(pair.holders.top10)}
-          />
-          <MiniModule label="Pool Age" value={pair.poolAge} detail="Public pair metadata" />
-          <MiniModule
-            label="Contract Flags"
-            value={pair.flags[0] ?? "No flags"}
-            detail={pair.flags[1] ?? "Additional flag unavailable"}
-          />
-          <MiniModule
-            label="Taxes"
-            value={`Buy: ${pair.taxes.buy}`}
-            detail={`Sell: ${pair.taxes.sell}`}
-          />
-          <MiniModule
-            label="LP Lock"
-            value={pair.lpLock.status}
-            detail={pair.lpLock.provider}
-            icon={<LockKeyhole size={12} aria-hidden="true" />}
-          />
-        </div>
       </div>
     </section>
   );
@@ -217,6 +179,8 @@ function ChartPanel({
   onRefreshChart: (pair: BasePair, timeframe?: ChartTimeframe) => void;
 }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("1h");
+  const [expanded, setExpanded] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number>();
   const width = 820;
   const height = 270;
   const priceHeight = 198;
@@ -225,8 +189,6 @@ function ChartPanel({
   const plotLeft = 10;
   const plotRight = 66;
   const plotWidth = width - plotLeft - plotRight;
-  const hasReadOnlyOhlcv =
-    pair.chartSource === "geckoterminal" && (pair.chartCandles?.length ?? 0) > 0;
   const candles = useMemo(() => getDisplayCandles(pair), [pair]);
   const visibleCandles = useMemo(
     () => candles.slice(-getVisibleCandleCount(timeframe)),
@@ -238,8 +200,12 @@ function ChartPanel({
     candle.low,
     candle.close
   ]);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const hasReadOnlyOhlcv = pair.chartSource === "geckoterminal" && candles.length >= 2;
+  const rawMin = values.length > 0 ? Math.min(...values) : 0;
+  const rawMax = values.length > 0 ? Math.max(...values) : 1;
+  const pricePadding = Math.max((rawMax - rawMin) * 0.06, Math.abs(rawMax) * 0.002);
+  const min = Math.max(0, rawMin - pricePadding);
+  const max = rawMax + pricePadding;
   const spread = max - min || 1;
   const step = plotWidth / Math.max(visibleCandles.length - 1, 1);
   const candleWidth = Math.max(3, Math.min(8, step * 0.56));
@@ -252,11 +218,15 @@ function ChartPanel({
     })
     .join(" ");
   const areaPath = `${closePath} L ${plotLeft + plotWidth} ${priceHeight} L ${plotLeft} ${priceHeight} Z`;
-  const latest = candles[candles.length - 1];
-  const previous = candles[candles.length - 2] ?? latest;
-  const lastMove = latest.close - previous.close;
-  const currentPriceY = getChartY(latest.close, min, spread, priceHeight);
-  const axisTicks = [max, min + spread / 2, min];
+  const latest = visibleCandles[visibleCandles.length - 1];
+  const previous = visibleCandles[visibleCandles.length - 2] ?? latest;
+  const lastMove = latest && previous ? latest.close - previous.close : 0;
+  const currentPriceY = latest ? getChartY(latest.close, min, spread, priceHeight) : 0;
+  const axisTicks = [max, min + spread / 2, min].filter(
+    (value) => Math.abs(getChartY(value, min, spread, priceHeight) - currentPriceY) > 18
+  );
+  const timeTickIndexes = [...new Set([0, Math.floor((visibleCandles.length - 1) / 3), Math.floor(((visibleCandles.length - 1) * 2) / 3), visibleCandles.length - 1])].filter((index) => index >= 0);
+  const hoveredCandle = hoveredIndex === undefined ? undefined : visibleCandles[hoveredIndex];
   const chartLabel = hasReadOnlyOhlcv
     ? (pair.chartLabel ?? "OHLCV read-only \u00b7 cached chart")
     : pair.dataSource === "mock"
@@ -266,14 +236,23 @@ function ChartPanel({
     refreshStatus === "refreshing"
       ? "Updating chart..."
       : refreshStatus === "using-last"
-      ? "Using last available chart"
+      ? hasReadOnlyOhlcv
+        ? "Using last available chart"
+        : "Chart request failed; no verified candles received"
+      : pair.stale
+        ? "Selected pair market data is stale"
       : !hasReadOnlyOhlcv
         ? "No synthetic chart rendered"
         : undefined;
 
   return (
     <div
-      className="market-scanline flex min-h-[280px] flex-1 flex-col overflow-hidden border border-base-line bg-base-panel xl:min-h-0"
+      className={cx(
+        "market-scanline flex flex-col overflow-hidden rounded-sm border border-base-line bg-base-panel",
+        expanded
+          ? "fixed inset-3 z-[80] h-auto bg-base-panel shadow-2xl sm:inset-6"
+          : "h-[320px] sm:h-[340px] lg:h-[360px] 2xl:h-[380px]"
+      )}
       data-testid="chart-panel"
     >
       <div className="relative z-20 shrink-0 border-b border-base-line bg-base-raised px-2 py-1.5 md:pr-[188px]">
@@ -284,7 +263,7 @@ function ChartPanel({
               {chartLabel}
             </span>
           </p>
-          {hasReadOnlyOhlcv ? (
+          {hasReadOnlyOhlcv && latest ? (
             <p className="mt-1 font-mono text-[10px] text-base-mint">
               O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
               {formatChartValue(latest.low)} C {formatChartValue(latest.close)} V{" "}
@@ -340,6 +319,14 @@ function ChartPanel({
             />
             {refreshStatus === "refreshing" ? "Refreshing" : "Refresh chart"}
           </button>
+          <button
+            type="button"
+            onClick={() => setExpanded((current) => !current)}
+            className="relative z-40 grid h-6 w-6 place-items-center rounded-sm border border-base-line bg-base-elevated text-base-muted outline-none hover:border-base-mint hover:text-base-mint focus-visible:ring-2 focus-visible:ring-base-mint/40"
+            aria-label={expanded ? "Collapse chart" : "Expand chart"}
+          >
+            {expanded ? <Minimize2 size={12} aria-hidden="true" /> : <Maximize2 size={12} aria-hidden="true" />}
+          </button>
           <span
             className={cx(
               "border px-1.5 py-0.5 font-mono text-[10px]",
@@ -348,16 +335,26 @@ function ChartPanel({
                 : "border-base-amber/45 bg-base-amber/10 text-base-amber"
             )}
           >
-            {hasReadOnlyOhlcv ? `Last ${formatChartValue(latest.close)}` : "Preview only"}
+            {hasReadOnlyOhlcv && latest ? `Last ${formatChartValue(latest.close)}` : "No chart data"}
           </span>
         </div>
       </div>
-      {hasReadOnlyOhlcv ? (
+      {hasReadOnlyOhlcv && latest ? (
+        <div className="relative min-h-0 flex-1">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="pointer-events-none h-[250px] w-full max-w-full shrink-0 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1"
-          aria-hidden="true"
+          className="h-full min-h-0 w-full max-w-full touch-none p-2"
+          role="img"
+          aria-label={`${pair.pair} ${timeframe} candlestick and volume chart`}
+          onPointerMove={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const chartX = ((event.clientX - bounds.left) / Math.max(bounds.width, 1)) * width;
+            const nextIndex = Math.round((chartX - plotLeft) / Math.max(step, 1));
+            setHoveredIndex(Math.max(0, Math.min(visibleCandles.length - 1, nextIndex)));
+          }}
+          onPointerLeave={() => setHoveredIndex(undefined)}
         >
+        <title>{pair.pair} cached read-only OHLCV</title>
         <defs>
           <linearGradient id={`chart-fill-${pair.id}`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgb(var(--color-mint))" stopOpacity="0.18" />
@@ -449,6 +446,17 @@ function ChartPanel({
             </g>
           );
         })}
+        {timeTickIndexes.map((index) => {
+          const candle = visibleCandles[index];
+          return candle ? (
+            <text key={`time-${index}`} x={plotLeft + index * step} y={height - 3} textAnchor={index === 0 ? "start" : index === visibleCandles.length - 1 ? "end" : "middle"} className="fill-base-muted font-mono text-[9px]">
+              {formatCandleTime(candle.timestamp)}
+            </text>
+          ) : null;
+        })}
+        {hoveredCandle && hoveredIndex !== undefined ? (
+          <line x1={plotLeft + hoveredIndex * step} x2={plotLeft + hoveredIndex * step} y1="0" y2={volumeTop + volumeHeight} stroke="rgb(var(--color-text))" strokeDasharray="2 4" strokeOpacity="0.4" />
+        ) : null}
         <line
           x1={plotLeft}
           x2={plotLeft + plotWidth}
@@ -474,22 +482,16 @@ function ChartPanel({
         >
           {formatChartValue(latest.close)}
         </text>
-        <text x="0" y={height - 2} className="fill-base-muted font-mono text-[10px]">
-          {timeframe.toUpperCase()} cached OHLCV preview
-        </text>
-        <text
-          x={width}
-          y={height - 2}
-          textAnchor="end"
-          className={cx(
-            "font-mono text-[10px]",
-            lastMove >= 0 ? "fill-base-mint" : "fill-base-rose"
-          )}
-        >
-          {lastMove >= 0 ? "+" : ""}
-          {formatChartValue(lastMove)}
-        </text>
         </svg>
+        {hoveredCandle ? (
+          <div className="pointer-events-none absolute left-3 top-3 rounded-sm border border-base-line bg-base-panel/95 px-2.5 py-2 font-mono text-[10px] text-base-text shadow-panel">
+            <p className="text-base-muted">{formatCandleTimestamp(hoveredCandle.timestamp)}</p>
+            <p className="mt-1">O {formatChartValue(hoveredCandle.open)} · H {formatChartValue(hoveredCandle.high)} · L {formatChartValue(hoveredCandle.low)} · C {formatChartValue(hoveredCandle.close)}</p>
+            <p className="mt-1 text-base-muted">Volume {formatCompactCurrency(hoveredCandle.volume)}</p>
+          </div>
+        ) : null}
+        <span className={cx("pointer-events-none absolute bottom-2 right-3 font-mono text-[10px]", lastMove >= 0 ? "text-base-mint" : "text-base-rose")}>{lastMove >= 0 ? "+" : ""}{formatChartValue(lastMove)}</span>
+        </div>
       ) : (
         <ChartUnavailablePlaceholder
           pair={pair}
@@ -510,13 +512,18 @@ function ChartUnavailablePlaceholder({
   statusMessage?: string;
   timeframe: ChartTimeframe;
 }) {
-  const headline = "Chart unavailable";
+  const headline =
+    pair.chartSource === "geckoterminal" && (pair.chartCandles?.length ?? 0) < 2
+      ? "Insufficient chart data"
+      : "Chart unavailable";
   const reason =
-    pair.chartUnavailableReason ??
-    "Read-only OHLCV is not available for this selected pair yet.";
+    headline === "Insufficient chart data"
+      ? "The provider returned too few verified candles for a readable chart."
+      : pair.chartUnavailableReason ??
+        "Read-only OHLCV is not available for this selected pair yet.";
 
   return (
-    <div className="relative flex h-[250px] w-full max-w-full shrink-0 overflow-hidden border-t border-base-line bg-base-elevated/40 p-2 xl:h-auto xl:min-h-[205px] xl:flex-1">
+    <div className="relative flex min-h-0 w-full max-w-full flex-1 overflow-hidden border-t border-base-line bg-base-elevated/40 p-2">
       <div
         className="pointer-events-none absolute inset-2 border border-dashed border-base-line bg-base-panel/45"
         aria-hidden="true"
@@ -531,7 +538,7 @@ function ChartUnavailablePlaceholder({
         <p className="mt-2 text-[11px] leading-5 text-base-muted">{reason}</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
           <span className="border border-base-line bg-base-elevated px-1.5 py-0.5">
-            {timeframe.toUpperCase()} placeholder
+            {timeframe.toUpperCase()} requested interval
           </span>
           {statusMessage ? (
             <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 text-base-muted">
@@ -559,25 +566,7 @@ function getVisibleCandleCount(timeframe: ChartTimeframe) {
 }
 
 function getDisplayCandles(pair: BasePair) {
-  if (pair.chartCandles && pair.chartCandles.length > 0) {
-    return pair.chartCandles;
-  }
-
-  const points = pair.chart.length > 0 ? pair.chart : [1];
-
-  return points.map((close, index) => {
-    const open = points[index - 1] ?? close;
-    const wick = Math.max(Math.abs(close - open) * 0.45, Math.abs(close) * 0.006, 0.0001);
-
-    return {
-      timestamp: index,
-      open,
-      high: Math.max(open, close) + wick,
-      low: Math.max(0, Math.min(open, close) - wick),
-      close,
-      volume: pair.volume24h / Math.max(points.length, 1)
-    };
-  });
+  return pair.chartCandles ?? [];
 }
 
 function getChartY(value: number, min: number, spread: number, height: number) {
@@ -615,38 +604,18 @@ function formatChartTimestamp(value: string | undefined) {
   });
 }
 
-function MiniModule({
-  label,
-  value,
-  detail,
-  bar,
-  icon
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  bar?: number;
-  icon?: ReactNode;
-}) {
-  const clamped = Math.max(0, Math.min(100, bar ?? 0));
+function formatCandleTime(timestamp: number) {
+  const value = new Date(timestamp * 1000);
+  return Number.isNaN(value.getTime())
+    ? "N/A"
+    : value.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+}
 
-  return (
-    <div className="min-h-[78px] border border-base-line bg-base-panel p-2">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-          {label}
-        </p>
-        {icon ? <span className="text-base-mint">{icon}</span> : null}
-      </div>
-      <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">{value}</p>
-      {bar !== undefined ? (
-        <div className="mt-2 h-1.5 bg-base-elevated">
-          <div className="h-full bg-base-mint" style={{ width: `${clamped}%` }} />
-        </div>
-      ) : null}
-      <p className="mt-1.5 text-[10px] text-base-muted">{detail}</p>
-    </div>
-  );
+function formatCandleTimestamp(timestamp: number) {
+  const value = new Date(timestamp * 1000);
+  return Number.isNaN(value.getTime())
+    ? "Timestamp unavailable"
+    : value.toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC";
 }
 
 function formatOptionalPercent(value: number | undefined) {

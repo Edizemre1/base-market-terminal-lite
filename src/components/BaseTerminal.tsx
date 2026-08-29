@@ -8,11 +8,10 @@ import {
   useState
 } from "react";
 import { useChartData } from "@/components/base-terminal/hooks/useChartData";
-import { useRadarFilters } from "@/components/base-terminal/hooks/useRadarFilters";
+import { useRecentPairs } from "@/components/base-terminal/hooks/useRecentPairs";
 import { useSelectedPairState } from "@/components/base-terminal/hooks/useSelectedPairState";
+import { MarketDiscovery } from "@/components/base-terminal/MarketDiscovery";
 import { PairDetailTabs } from "@/components/base-terminal/PairDetailTabs";
-import { OpportunityFeed, PinnedPairsPanel } from "@/components/base-terminal/RadarFeedColumn";
-import { RadarFilterPanel } from "@/components/base-terminal/RadarFilters";
 import { SelectedPairPanel } from "@/components/base-terminal/SelectedPairPanel";
 import { SwapTicket } from "@/components/base-terminal/SwapPreviewPanel";
 import type { DetailTab } from "@/components/base-terminal/types";
@@ -21,13 +20,6 @@ import {
   type ProviderHealthState
 } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
-import {
-  DEFAULT_RADAR_STATE,
-  pairMatchesRadarState,
-  pinnedPairMatchesRadarState,
-  sortPinnedPairs,
-  sortRadarPairs
-} from "@/lib/base-terminal/radar";
 import { getChartCacheKey } from "@/lib/base-terminal/pairs";
 import {
   buildProviderHealth,
@@ -50,18 +42,15 @@ export function BaseTerminal({
     registerProviderHealth,
     registerSelectedPair,
     registerSelectPairHandler,
-    pinnedPairs,
     isPairPinned,
-    togglePinnedPair,
-    unpinPinnedPair
+    togglePinnedPair
   } = useTerminalSearch();
   const [snapshotData, setSnapshotData] = useState(data);
-  const [activeTab, setActiveTab] = useState<DetailTab>("risk");
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [amount, setAmount] = useState("0.10");
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() =>
     buildProviderHealth(data, "idle")
   );
-  const { radarState, setRadarState, radarFiltersActive } = useRadarFilters();
   const snapshotRef = useRef(snapshotData);
   const { selectedPair, handleSelectPairById } = useSelectedPairState({
     initialSnapshot: data,
@@ -93,45 +82,7 @@ export function BaseTerminal({
         : undefined,
     [chartOverrides, selectedPair]
   );
-  const filteredNewPairs = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.newPairs.filter((pair) => pairMatchesRadarState(pair, radarState, isPairPinned)),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.newPairs]
-  );
-  const filteredVolumeInflows = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.volumeInflows.filter((pair) =>
-          pairMatchesRadarState(pair, radarState, isPairPinned)
-        ),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.volumeInflows]
-  );
-  const filteredMomentumPairs = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.momentumPairs.filter((pair) =>
-          pairMatchesRadarState(pair, radarState, isPairPinned)
-        ),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.momentumPairs]
-  );
-  const filteredPinnedPairs = useMemo(
-    () =>
-      sortPinnedPairs(
-        pinnedPairs.filter((pair) => pinnedPairMatchesRadarState(pair, radarState)),
-        radarState.sort
-      ),
-    [pinnedPairs, radarState]
-  );
-  const selectedPairOutsideFilter = selectedPairWithChart
-    ? !pairMatchesRadarState(selectedPairWithChart, radarState, isPairPinned)
-    : false;
+  const recentPairIds = useRecentPairs(selectedPairWithChart?.id);
 
   const refreshProviderSnapshot = useCallback(async () => {
     if (snapshotRefreshInFlightRef.current) {
@@ -244,8 +195,8 @@ export function BaseTerminal({
 
   if (!selectedPairWithChart) {
     return (
-      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
-        <section className="border border-base-line bg-base-panel p-4">
+      <main className="min-h-[calc(100vh-48px)] w-full overflow-x-hidden bg-base-black p-3">
+        <section className="rounded-sm border border-base-line bg-base-panel p-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
             Mergen.finance
           </p>
@@ -262,67 +213,25 @@ export function BaseTerminal({
   }
 
   return (
-    <main className="flex min-h-[calc(100vh-40px)] w-full flex-col overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
+    <main className="min-h-[calc(100vh-48px)] w-full overflow-x-hidden bg-base-black p-2.5 sm:p-3">
       {snapshotData.fallbackReason ? (
         <div className="mb-2 shrink-0 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
           {snapshotData.fallbackReason}
         </div>
       ) : null}
-      <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
-        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[auto_minmax(76px,0.55fr)_repeat(3,minmax(0,1fr))] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
-          <RadarFilterPanel
-            state={radarState}
-            onChange={setRadarState}
-            onReset={() => setRadarState(DEFAULT_RADAR_STATE)}
-          />
-          <PinnedPairsPanel
-            pairs={filteredPinnedPairs}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            onUnpin={unpinPinnedPair}
-            filtersActive={radarFiltersActive}
-          />
-          <OpportunityFeed
-            id="new-pairs"
-            title="New Pairs"
-            marker="A"
-            kind="new"
-            pairs={filteredNewPairs}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
+      <section className="grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="min-w-0 space-y-3">
+          <MarketDiscovery
+            snapshot={snapshotData}
+            selectedPair={selectedPairWithChart}
+            recentPairIds={recentPairIds}
             onSelect={handleSelectPairById}
             isPairPinned={isPairPinned}
             onTogglePin={togglePinnedPair}
           />
-          <OpportunityFeed
-            title="Volume Inflow"
-            marker="B"
-            kind="inflow"
-            pairs={filteredVolumeInflows}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            isPairPinned={isPairPinned}
-            onTogglePin={togglePinnedPair}
-          />
-          <OpportunityFeed
-            title="Momentum"
-            marker="C"
-            kind="momentum"
-            pairs={filteredMomentumPairs}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            isPairPinned={isPairPinned}
-            onTogglePin={togglePinnedPair}
-          />
-        </aside>
-
-        <section className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(132px,0.28fr)] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
           <SelectedPairPanel
             pair={selectedPairWithChart}
             marketDataMode={snapshotData.mode}
-            outsideCurrentFilter={selectedPairOutsideFilter}
             chartRefreshStatus={
               chartRefreshStatus[getChartCacheKey(selectedPairWithChart)] ?? "idle"
             }
@@ -336,12 +245,14 @@ export function BaseTerminal({
           />
         </section>
 
-        <SwapTicket
-          pair={selectedPairWithChart}
-          marketDataMode={snapshotData.mode}
-          amount={amount}
-          onAmountChange={setAmount}
-        />
+        <div className="min-w-0 xl:sticky xl:top-[60px]">
+          <SwapTicket
+            pair={selectedPairWithChart}
+            marketDataMode={snapshotData.mode}
+            amount={amount}
+            onAmountChange={setAmount}
+          />
+        </div>
       </section>
     </main>
   );

@@ -10,6 +10,16 @@ import {
   getMarketTerminalSnapshot,
   resolveUrlMarketDataMode
 } from "../../src/data/providers";
+import {
+  DEFAULT_DISCOVERY_FILTERS,
+  buildDiscoveryRows,
+  calculateActivityScore
+} from "../../src/lib/base-terminal/discovery";
+import {
+  requestWalletConnection,
+  switchWalletToBase,
+  type Eip1193Provider
+} from "../../src/lib/wallet";
 
 const validDexPair = {
   chainId: "base",
@@ -93,6 +103,10 @@ test.describe("provider response fixture hardening", () => {
       marketCap: 890000
     });
     expect(normalized?.txns?.h24).toEqual({ buys: 510, sells: 433 });
+    expect(normalized?.riskLabel).toBeUndefined();
+    expect(normalized?.riskScore).toBeUndefined();
+    expect(normalized?.pressure).toBeUndefined();
+    expect(normalized?.flags).not.toContain("Derived/demo risk UI");
   });
 
   test("handles partial or missing DexScreener fields without throwing", () => {
@@ -166,5 +180,91 @@ test.describe("provider response fixture hardening", () => {
     ]);
     expect(parseGeckoTerminalOhlcvResponse({ data: {} })).toEqual([]);
     expect(parseGeckoTerminalOhlcvResponse("bad")).toEqual([]);
+  });
+});
+
+test.describe("market discovery definitions", () => {
+  test("sorts verified categories and excludes incomplete activity scores", () => {
+    const first = normalizeDexScreenerPair(validDexPair)!;
+    const second = normalizeDexScreenerPair({
+      ...validDexPair,
+      pairAddress: "0x6666666666666666666666666666666666666666",
+      baseToken: { ...validDexPair.baseToken, address: "0x7777777777777777777777777777777777777777", symbol: "FAST" },
+      priceChange: { ...validDexPair.priceChange, h24: 32 },
+      volume: { ...validDexPair.volume, h24: 450000 },
+      liquidity: { ...validDexPair.liquidity, usd: 500000 }
+    })!;
+    const incomplete = { ...first, id: "incomplete", priceChanges: { ...first.priceChanges, h24: undefined } };
+
+    const gainers = buildDiscoveryRows({
+      pairs: [first, second],
+      category: "gainers",
+      filters: DEFAULT_DISCOVERY_FILTERS,
+      isPairPinned: () => false,
+      recentPairIds: []
+    });
+
+    expect(gainers.map(({ pair }) => pair.baseToken)).toEqual(["FAST", "FIX"]);
+    expect(calculateActivityScore(second)).toBeGreaterThan(0);
+    expect(calculateActivityScore(incomplete)).toBeUndefined();
+  });
+
+  test("enforces explicit liquidity and volume filters without treating missing fields as zero", () => {
+    const pair = normalizeDexScreenerPair(validDexPair)!;
+    const rows = buildDiscoveryRows({
+      pairs: [pair],
+      category: "volume",
+      filters: { ...DEFAULT_DISCOVERY_FILTERS, minLiquidity: 300000 },
+      isPairPinned: () => false,
+      recentPairIds: []
+    });
+
+    expect(rows).toEqual([]);
+    expect(
+      buildDiscoveryRows({
+        pairs: [{ ...pair, id: "missing-volume", volumes: {} }],
+        category: "volume",
+        filters: DEFAULT_DISCOVERY_FILTERS,
+        isPairPinned: () => false,
+        recentPairIds: []
+      })
+    ).toEqual([]);
+  });
+});
+
+test.describe("read-only wallet request boundary", () => {
+  test("connects, reads chain and balance without requesting a transaction", async () => {
+    const methods: string[] = [];
+    const provider: Eip1193Provider = {
+      request: async ({ method }) => {
+        methods.push(method);
+        if (method === "eth_requestAccounts") return ["0x1111111111111111111111111111111111111111"];
+        if (method === "eth_chainId") return "0x2105";
+        if (method === "eth_getBalance") return "0xde0b6b3a7640000";
+        return null;
+      }
+    };
+
+    await expect(requestWalletConnection(provider)).resolves.toMatchObject({
+      address: "0x1111111111111111111111111111111111111111",
+      chainId: 8453,
+      balanceEth: "1"
+    });
+    expect(methods).toEqual(["eth_requestAccounts", "eth_chainId", "eth_getBalance"]);
+    expect(methods).not.toContain("eth_sendTransaction");
+  });
+
+  test("switches manually to Base without constructing an approval or swap", async () => {
+    const methods: string[] = [];
+    const provider: Eip1193Provider = {
+      request: async ({ method }) => {
+        methods.push(method);
+        return null;
+      }
+    };
+
+    await switchWalletToBase(provider);
+    expect(methods).toEqual(["wallet_switchEthereumChain"]);
+    expect(methods.some((method) => /sendtransaction|approval|swap/i.test(method))).toBeFalsy();
   });
 });

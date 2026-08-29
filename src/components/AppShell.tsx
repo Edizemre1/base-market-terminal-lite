@@ -15,15 +15,17 @@ import { Suspense, useMemo, useState, type KeyboardEvent, type ReactNode } from 
 import type { MarketDataMode } from "@/data/providers";
 import { formatCompactCurrency, cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
+import { WalletButton } from "@/components/WalletButton";
+import { WalletProvider } from "@/components/WalletContext";
 import { BaseNetworkIcon, MergenMark, PairAvatarStack } from "@/components/TokenIdentity";
 import type { BasePair } from "@/types/baseTerminal";
 import { APP_VERSION } from "@/lib/appInfo";
 
 const navItems = [
-  { href: "/", label: "Radar", icon: Radar, active: "/" },
-  { href: "/#new-pairs", label: "New Pools", icon: Droplets, active: "/new-pools" },
-  { href: "/#risk", label: "Risk Flags", icon: AlertTriangle, active: "/risk" },
-  { href: "/swap", label: "Swap Preview", icon: Shuffle, active: "/swap" },
+  { href: "/", label: "Discovery", icon: Radar, active: "/" },
+  { href: "/#selected-market", label: "Market Data", icon: Droplets, active: "/market-data" },
+  { href: "/#risk", label: "Data Checks", icon: AlertTriangle, active: "/risk" },
+  { href: "/swap", label: "Wallet & Quote", icon: Shuffle, active: "/swap" },
   { href: "/docs", label: "Docs", icon: BookOpenText, active: "/docs" }
 ] as const;
 
@@ -31,13 +33,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <TerminalSearchProvider>
-      <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text xl:h-screen xl:overflow-hidden">
+    <WalletProvider>
+      <TerminalSearchProvider>
+      <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
         <header
-          className="fixed left-0 right-0 top-0 z-50 h-10 border-b border-base-line bg-base-panel"
+          className="fixed left-0 right-0 top-0 z-50 h-12 border-b border-base-line bg-base-panel"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(120px,0.9fr)_minmax(150px,1.5fr)] items-center gap-2 px-2 lg:grid-cols-[minmax(206px,242px)_minmax(220px,520px)_minmax(0,1fr)]">
+          <div className="grid h-full grid-cols-[minmax(112px,180px)_minmax(90px,1fr)_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(206px,238px)_minmax(260px,1fr)_auto_auto]">
             <Link href="/" className="flex min-w-0 items-center gap-2.5">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
@@ -55,22 +58,21 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <TerminalSearchBox />
 
-            <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.12em] lg:flex">
+            <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.08em] lg:flex">
               <TopChip
-                label="Base Mainnet"
+                label="Base · Read-only"
                 tone="mint"
                 icon={<BaseNetworkIcon className="h-4 w-4" />}
               />
               <Suspense fallback={<DataSourceFallback />}>
                 <DataSourceSwitcher />
               </Suspense>
-              <ProviderHealthChip />
-              <TopChip label="Read-only" tone="mint" />
             </div>
+            <WalletButton compact />
           </div>
         </header>
 
-        <aside className="fixed bottom-0 left-0 top-10 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
+        <aside className="fixed bottom-0 left-0 top-12 z-40 hidden w-[160px] border-r border-base-line bg-base-panel md:flex md:flex-col">
           <nav className="space-y-1 p-1.5" aria-label="Base terminal">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -105,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <BaseNetworkIcon className="h-5 w-5" />
               </div>
               <p className="text-[11px] leading-4 text-base-muted">
-                Public read-only demo powered by Base ecosystem market data.
+                Public read-only terminal powered by Base ecosystem market data.
               </p>
               <div className="mt-2 grid grid-cols-1 gap-1 font-mono text-[10px]">
                 <span className="border border-base-line bg-base-panel px-1.5 py-1 text-base-muted">
@@ -125,11 +127,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <SidebarNetworkCard />
               </Suspense>
               <p className="mt-2 border-t border-base-line pt-2 text-[10px] leading-4 text-base-muted">
-                No wallet connection. No transactions can be executed.
+                Wallet connection is available for account and balance display. Transactions stay disabled.
               </p>
             </div>
             <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-base-muted">
-              <span>Public demo.</span>
+              <span>Public access.</span>
               <Link
                 href="/status"
                 className="font-mono uppercase tracking-[0.1em] hover:text-base-mint"
@@ -141,9 +143,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </aside>
 
-        <div className="min-w-0 pt-10 md:pl-[160px] xl:h-screen xl:overflow-hidden">{children}</div>
+        <div className="min-w-0 pt-12 md:pl-[160px]">{children}</div>
       </div>
-    </TerminalSearchProvider>
+      </TerminalSearchProvider>
+    </WalletProvider>
   );
 }
 
@@ -192,7 +195,7 @@ function TerminalSearchBox() {
         onBlur={() => setOpen(false)}
         onKeyDown={handleKeyDown}
         placeholder="Search token / pair / contract"
-        className="h-7 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint"
+        className="h-9 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint lg:h-8"
       />
       {shouldShowResults ? (
         <div className="absolute left-0 right-0 top-[32px] z-[60] max-h-[300px] overflow-y-auto border border-base-line bg-base-panel shadow-none">
@@ -310,77 +313,6 @@ function normalizeSearch(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function ProviderHealthChip() {
-  const { providerHealth } = useTerminalSearch();
-
-  if (!providerHealth) {
-    return <TopChip label="Provider - idle - static" />;
-  }
-
-  const statusLabel = getProviderHealthStatusLabel(providerHealth);
-  const sourceLabel = providerHealth.mode === "dexscreener" ? "Market data" : "Mock feed";
-  const updateLabel = formatProviderHealthTime(providerHealth.lastSuccessAt);
-  const tone =
-    providerHealth.status === "failed" || providerHealth.stale
-      ? "amber"
-      : providerHealth.status === "refreshing"
-        ? "blue"
-        : "mint";
-
-  return (
-    <TopChip
-      dataTestId="provider-health-status"
-      label={`${sourceLabel} - ${statusLabel} - ${updateLabel}`}
-      tone={tone}
-      title={[
-        providerHealth.providerName,
-        providerHealth.feedStatusLabel,
-        providerHealth.failureReason,
-        providerHealth.fallbackReason
-      ]
-        .filter(Boolean)
-        .join(" - ")}
-    />
-  );
-}
-
-function getProviderHealthStatusLabel({
-  status,
-  stale
-}: {
-  status: "idle" | "refreshing" | "failed";
-  stale: boolean;
-}) {
-  if (status === "refreshing") {
-    return "refreshing";
-  }
-
-  if (status === "failed") {
-    return "failed";
-  }
-
-  return stale ? "stale" : "idle";
-}
-
-function formatProviderHealthTime(value: string | undefined) {
-  if (!value) {
-    return "static";
-  }
-
-  const timestamp = new Date(value);
-
-  if (Number.isNaN(timestamp.getTime())) {
-    return "cached";
-  }
-
-  return timestamp.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC"
-  });
-}
-
 function DataSourceSwitcher() {
   const pathname = usePathname();
   const router = useRouter();
@@ -411,7 +343,7 @@ function DataSourceSwitcher() {
         onClick={() => selectMode("mock")}
       />
       <DataSourceButton
-        label="Read-Only Data"
+        label="Read-only"
         active={activeMode === "dexscreener"}
         onClick={() => selectMode("dexscreener")}
       />
@@ -463,7 +395,7 @@ function SidebarNetworkCard() {
 function SidebarNetworkCopy({ mode }: { mode: MarketDataMode }) {
   const copy =
     mode === "dexscreener"
-      ? "Read-only provider mode. No wallet, signing, or execution paths are enabled."
+      ? "Read-only provider mode. Wallet account display is separate from signing and execution."
       : "Mock provider mode. Demo rows only; no transactions are sent.";
 
   return <p className="mt-2 text-[10px] leading-4 text-base-muted">{copy}</p>;

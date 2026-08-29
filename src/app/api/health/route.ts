@@ -14,8 +14,13 @@ export function GET() {
     marketDataReady: true,
     tokenSearchReady: true,
     advancedChartsAssetsAvailable: false,
+    walletConnectionEnabled: true,
+    walletAccountReadEnabled: true,
+    walletBalanceReadEnabled: true,
+    walletTargetChainId: 8453,
     approvalRequestEnabled: false,
     swapRequestEnabled: false,
+    transactionExecutionEnabled: false,
     authenticationRequiredForPrivateData: true
   });
 }

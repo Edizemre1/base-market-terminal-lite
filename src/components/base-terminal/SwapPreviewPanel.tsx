@@ -1,7 +1,11 @@
-import { LockKeyhole, Settings } from "lucide-react";
+"use client";
+
+import { AlertTriangle, LockKeyhole, LogOut, WalletCards } from "lucide-react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { TokenAvatar } from "@/components/TokenIdentity";
+import { useWallet } from "@/components/WalletContext";
 import { cx } from "@/lib/format";
+import { BASE_CHAIN_ID, shortenWalletAddress } from "@/lib/wallet";
 import type { BasePair } from "@/types/baseTerminal";
 
 export function SwapTicket({
@@ -15,118 +19,153 @@ export function SwapTicket({
   amount: string;
   onAmountChange: (value: string) => void;
 }) {
+  const wallet = useWallet();
+  const walletAddress = wallet.address;
+  const connected = wallet.status === "connected" && Boolean(walletAddress);
   const amountNumber = Number.parseFloat(amount);
   const amountValid = Number.isFinite(amountNumber) && amountNumber > 0;
-  const modeWarning =
-    marketDataMode === "dexscreener"
-      ? "Read-only market data. No real funds will be used."
-      : "This is demo data. No real funds will be used.";
-  const modeLabel =
-    marketDataMode === "dexscreener"
-      ? "Read-only mode - no transaction will be sent"
-      : "Demo mode - no transaction will be sent";
 
   return (
     <aside
-      className="min-w-0 border border-base-line bg-base-panel xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:self-stretch xl:overflow-hidden"
+      className="min-w-0 overflow-hidden rounded-sm border border-base-line bg-base-panel shadow-panel"
       data-testid="swap-preview-panel"
     >
-      <div className="flex min-h-10 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-3">
+      <div className="flex min-h-12 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3 py-2">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Read-only preview
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+            Wallet & quote
           </p>
-          <h2 className="text-[12px] font-semibold text-base-text">Swap {pair.pair}</h2>
+          <h2 className="mt-0.5 text-[13px] font-semibold text-base-text">{pair.pair}</h2>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
-            Disabled
-          </span>
-          <Settings size={14} className="text-base-muted" aria-hidden="true" />
-        </div>
+        <span className="rounded-full border border-base-mint/35 bg-base-mint/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-base-mint">
+          Read-only
+        </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
-        <TokenBox
-          label="From"
-          token={pair.quoteToken}
-          logoUrl={pair.quoteTokenLogoUrl}
-          sublabel="Sell asset"
-          rightLabel="Wallet not connected by design"
-          value={amount}
-          onValueChange={onAmountChange}
-        />
-
-        <div className="flex shrink-0 justify-center">
-          <span className="grid h-7 w-7 place-items-center border border-base-line bg-base-panel font-mono text-base-muted">
-            v
-          </span>
-        </div>
-
-        <TokenBox
-          label="To (Estimated)"
-          token={pair.baseToken}
-          logoUrl={pair.tokenLogoUrl}
-          sublabel="Selected pair"
-          value="Unavailable"
-          readOnly
-        />
-
-        <div className="border border-base-line bg-base-elevated p-2.5">
-          <div className="mb-1 flex items-center justify-between">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-              Quote status
+      <div className="space-y-3 p-3">
+        <section className="rounded-sm bg-base-elevated p-3" aria-label="Wallet status">
+          {connected && walletAddress ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-medium text-base-muted">Connected wallet</p>
+                  <p className="mt-1 truncate font-mono text-[14px] font-semibold text-base-text" data-testid="wallet-address">
+                    {shortenWalletAddress(walletAddress)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={wallet.disconnect}
+                  className="inline-flex min-h-8 items-center gap-1 rounded-sm px-2 text-[10px] text-base-muted outline-none hover:bg-base-panel hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
+                  aria-label="Disconnect wallet from this interface"
+                >
+                  <LogOut size={12} aria-hidden="true" />
+                  Disconnect
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <WalletMetric
+                  label="Network"
+                  value={wallet.chainId === BASE_CHAIN_ID ? "Base Mainnet" : `Chain ${wallet.chainId ?? "unknown"}`}
+                  tone={wallet.wrongNetwork ? "amber" : "mint"}
+                />
+                <WalletMetric label="Balance" value={wallet.balanceEth ? `${wallet.balanceEth} ETH` : "Unavailable"} />
+              </div>
+              {wallet.wrongNetwork ? (
+                <div className="mt-3 rounded-sm border border-base-amber/35 bg-base-amber/10 p-2.5 text-[11px] text-base-amber" data-testid="wrong-network-warning">
+                  <p className="font-semibold">This wallet is not on Base Mainnet (chain 8453).</p>
+                  <button
+                    type="button"
+                    onClick={() => void wallet.switchToBase()}
+                    className="mt-2 min-h-9 rounded-sm border border-base-amber/45 bg-base-panel px-3 font-semibold outline-none hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-amber/40"
+                  >
+                    Switch to Base
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="text-center">
+              <span className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-base-panel text-base-mint">
+                <WalletCards size={19} aria-hidden="true" />
+              </span>
+              <p className="mt-2 text-[14px] font-semibold text-base-text">Connect for account context</p>
+              <p className="mt-1 text-[11px] leading-5 text-base-muted">
+                View your public address, Base network and native balance. Connecting does not enable approvals or swaps.
+              </p>
+              <button
+                type="button"
+                data-testid="wallet-panel-connect"
+                onClick={() => void wallet.connect()}
+                disabled={wallet.status === "connecting"}
+                className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-sm border border-base-mint bg-base-mint px-3 text-[12px] font-semibold text-white outline-none hover:bg-base-mint/90 focus-visible:ring-2 focus-visible:ring-base-mint/50 disabled:cursor-wait disabled:opacity-70"
+              >
+                <WalletCards size={14} aria-hidden="true" />
+                {wallet.status === "connecting" ? "Waiting for wallet..." : "Connect wallet"}
+              </button>
+              {wallet.status === "unavailable" ? (
+                <p className="mt-2 text-[11px] text-base-amber">Install a compatible wallet to connect.</p>
+              ) : null}
+            </div>
+          )}
+          {wallet.error ? (
+            <p className="mt-3 rounded-sm border border-base-amber/35 bg-base-amber/10 px-2.5 py-2 text-[11px] text-base-amber" role="alert" data-testid="wallet-error">
+              {wallet.error}
             </p>
-            <span className="border border-base-amber/40 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber">
-              Not requested
-            </span>
-          </div>
-          <RouteRow label="Pair context" value={pair.pair} />
-          <RouteRow
-            label="Market source"
-            value={marketDataMode === "dexscreener" ? "Read-only public data" : "Labeled sample data"}
-          />
-          <RouteRow label="Executable route" value="Unavailable" />
-          <RouteRow label="Price impact" value="Unavailable" />
-          <RouteRow label="Network fee" value="Unavailable" />
-        </div>
+          ) : null}
+        </section>
 
-        <div className="border border-base-line bg-base-panel p-2 text-[11px]">
-          <RouteRow label="Wallet" value="Not connected" />
-          <RouteRow label="Approval" value="Not available" />
-          <RouteRow label="Transaction" value="Not constructed" />
-        </div>
+        <section aria-label="Pair quote context" className="space-y-2">
+          <TokenBox
+            label="From"
+            token={pair.quoteToken}
+            logoUrl={pair.quoteTokenLogoUrl}
+            sublabel="Local input only"
+            value={amount}
+            onValueChange={onAmountChange}
+          />
+          <TokenBox
+            label="To (indicative)"
+            token={pair.baseToken}
+            logoUrl={pair.tokenLogoUrl}
+            sublabel="No verified quote provider"
+            value="Unavailable"
+            readOnly
+          />
+        </section>
 
         {!amountValid ? (
-          <p className="border border-base-amber/40 bg-base-amber/10 px-2 py-1.5 text-[11px] text-base-amber">
-            Enter an amount greater than zero to inspect the local preview context.
+          <p className="rounded-sm border border-base-amber/35 bg-base-amber/10 px-2.5 py-2 text-[11px] text-base-amber">
+            Enter an amount greater than zero to inspect the pair context.
           </p>
         ) : null}
 
-        <div className="mt-auto space-y-2 pt-1">
-          <div className="border border-base-line border-l-base-amber bg-base-elevated p-2.5 text-[11px] leading-4 text-base-muted">
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-base-text">
-              Read-only boundary
-            </p>
-            <p className="mt-1">
-              Low liquidity can increase price impact and slippage. {modeWarning}
-            </p>
+        <section className="rounded-sm border border-base-line p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-base-amber" aria-hidden="true" />
+            <div>
+              <p className="text-[12px] font-semibold text-base-text">Indicative quote unavailable</p>
+              <p className="mt-1 text-[11px] leading-5 text-base-muted">
+                No verified quote provider is configured for this public terminal. Market values come from {marketDataMode === "dexscreener" ? "read-only public data" : "the labeled sample dataset"}; no executable route is constructed.
+              </p>
+            </div>
           </div>
+        </section>
 
-          <button
-            type="button"
-            disabled
-            data-testid="review-swap-button"
-            className="flex h-9 w-full items-center justify-center gap-2 border border-base-line bg-base-raised text-[12px] font-semibold text-base-muted"
-          >
-            <LockKeyhole size={14} aria-hidden="true" />
-            Quote unavailable — preview only
-          </button>
-
-          <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
-            {modeLabel}
-          </p>
+        <div className="rounded-sm border border-base-mint/30 bg-base-mint/5 px-3 py-2.5 text-[11px] leading-5 text-base-muted">
+          <p className="font-semibold text-base-text">Wallet connection is read-only</p>
+          <p>Approval, swap and transaction creation remain disabled, even while a wallet is connected.</p>
         </div>
+
+        <button
+          type="button"
+          disabled
+          data-testid="review-swap-button"
+          className="flex min-h-10 w-full items-center justify-center gap-2 rounded-sm border border-base-line bg-base-raised px-3 text-[12px] font-semibold text-base-muted"
+        >
+          <LockKeyhole size={14} aria-hidden="true" />
+          Transactions disabled — read-only
+        </button>
       </div>
     </aside>
   );
@@ -137,7 +176,6 @@ function TokenBox({
   token,
   logoUrl,
   sublabel,
-  rightLabel,
   value,
   onValueChange,
   readOnly = false
@@ -146,57 +184,39 @@ function TokenBox({
   token: string;
   logoUrl?: string;
   sublabel: string;
-  rightLabel?: string;
   value: string;
   onValueChange?: (value: string) => void;
   readOnly?: boolean;
 }) {
   return (
     <label className="block">
-      <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
-        <span>{label}</span>
-        {rightLabel ? <span className="font-mono text-base-mint">{rightLabel}</span> : null}
-      </div>
-      <div className="grid min-w-0 grid-cols-[104px_minmax(0,1fr)] border border-base-line bg-base-panel 2xl:grid-cols-[116px_minmax(0,1fr)]">
-        <div className="flex min-w-0 items-center gap-2 border-r border-base-line bg-base-elevated px-2 py-1.5">
+      <span className="mb-1 block text-[10px] font-medium text-base-muted">{label}</span>
+      <span className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] overflow-hidden rounded-sm border border-base-line bg-base-panel">
+        <span className="flex min-w-0 items-center gap-2 bg-base-elevated px-2 py-2">
           <TokenAvatar symbol={token} logoUrl={logoUrl} size="md" />
-          <div className="min-w-0">
-            <p className="truncate font-mono text-[13px] font-semibold text-base-text">{token}</p>
-            <p className="text-[10px] text-base-muted">{sublabel}</p>
-          </div>
-        </div>
+          <span className="min-w-0">
+            <span className="block truncate font-mono text-[13px] font-semibold text-base-text">{token}</span>
+            <span className="block truncate text-[9px] text-base-muted">{sublabel}</span>
+          </span>
+        </span>
         <input
+          aria-label={`${label} amount`}
           value={value}
           readOnly={readOnly}
           inputMode="decimal"
           onChange={(event) => onValueChange?.(event.target.value)}
-          className="h-12 min-w-0 bg-base-panel px-3 text-right font-mono text-[17px] text-base-text outline-none 2xl:text-[19px]"
+          className="h-14 min-w-0 bg-base-panel px-3 text-right font-mono text-[16px] text-base-text outline-none focus:bg-base-elevated"
         />
-      </div>
+      </span>
     </label>
   );
 }
 
-function RouteRow({
-  label,
-  value,
-  tone = "default"
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "mint";
-}) {
+function WalletMetric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "mint" | "amber" }) {
   return (
-    <div className="flex min-w-0 items-start justify-between gap-2 border-b border-base-line py-1 last:border-b-0">
-      <span className="min-w-0 text-[11px] text-base-muted">{label}</span>
-      <span
-        className={cx(
-          "max-w-[62%] break-words text-right font-mono text-[11px] font-semibold leading-4",
-          tone === "mint" ? "text-base-mint" : "text-base-text"
-        )}
-      >
-        {value}
-      </span>
+    <div className="rounded-sm bg-base-panel p-2">
+      <p className="text-[9px] uppercase tracking-[0.08em] text-base-muted">{label}</p>
+      <p className={cx("mt-1 truncate font-mono text-[11px] font-semibold", tone === "mint" ? "text-base-mint" : tone === "amber" ? "text-base-amber" : "text-base-text")}>{value}</p>
     </div>
   );
 }

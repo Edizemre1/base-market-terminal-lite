@@ -29,9 +29,9 @@ export function MergenMark({ className }: { className?: string }) {
       <Image
         src="/brand/mergen-mark.svg"
         alt=""
-        width={20}
-        height={27}
-        className="object-contain"
+        width={409}
+        height={538}
+        className="h-7 w-auto object-contain"
         priority
       />
     </span>

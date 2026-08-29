@@ -60,15 +60,15 @@ export type BasePair = {
   inflow24h: number;
   momentumScore: number;
   volumeMultiple: number;
-  riskScore: number;
-  riskLabel: string;
+  riskScore?: number;
+  riskLabel?: string;
   chart: number[];
   chartCandles?: PairChartCandle[];
   chartSource?: PairChartSource;
   chartLabel?: string;
   chartUpdatedAt?: string;
   chartUnavailableReason?: string;
-  pressure: {
+  pressure?: {
     buy: number;
     sell: number;
   };
