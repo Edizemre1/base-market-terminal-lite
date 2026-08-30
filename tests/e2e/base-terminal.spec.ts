@@ -414,7 +414,7 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("refresh-terminal").click();
       await expect(page.getByTestId("pending-market-updates")).toBeVisible();
       await page.getByTestId("pending-market-updates").click();
-      await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıkarılan/ }).click();
+      await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıktı/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
       await page.screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), fullPage: false });
       await page.unroute("**/api/market-snapshot?data=mock");
