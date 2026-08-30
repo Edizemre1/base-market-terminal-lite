@@ -126,7 +126,10 @@ function diffHistory(previous: HistorySnapshot, current: HistorySnapshot) {
       headline: "New Base pool",
       detail: `${pair.pair} entered the verified Base pool reservoir.`,
       timeframe: "snapshot",
-      direction: "neutral"
+      direction: "neutral",
+      metric: "liquidity_usd",
+      currentValue: pair.liquidityUsd,
+      freshness: current.freshness
     });
   }
 
@@ -142,7 +145,10 @@ function diffHistory(previous: HistorySnapshot, current: HistorySnapshot) {
         headline: "New token opportunity",
         detail: `${opportunity.symbol} appeared as a distinct contract-backed opportunity.`,
         timeframe: "snapshot",
-        direction: "neutral"
+        direction: "neutral",
+        metric: "liquidity_usd",
+        currentValue: currentPairs.get(opportunity.primaryMarketId)?.liquidityUsd,
+        freshness: current.freshness
       });
       continue;
     }
@@ -156,7 +162,11 @@ function diffHistory(previous: HistorySnapshot, current: HistorySnapshot) {
         headline: "Primary execution pool changed",
         detail: `${opportunity.symbol} moved to a materially stronger or healthier primary pool.`,
         timeframe: "snapshot",
-        direction: "neutral"
+        direction: "neutral",
+        metric: "liquidity_usd",
+        previousValue: beforePairs.get(before.primaryMarketId)?.liquidityUsd,
+        currentValue: currentPairs.get(opportunity.primaryMarketId)?.liquidityUsd,
+        freshness: current.freshness
       });
     }
 
@@ -165,15 +175,30 @@ function diffHistory(previous: HistorySnapshot, current: HistorySnapshot) {
     if (!beforePair || !pair) continue;
     const priceMove = percentChange(beforePair.priceUsd, pair.priceUsd);
     if (priceMove !== undefined && Math.abs(priceMove) >= PRICE_THRESHOLD_PERCENT) {
-      signals.push(marketEvent(common, pair, "price_move", `Price moved ${formatPercent(priceMove)} between verified snapshots.`, priceMove));
+      signals.push(marketEvent(common, pair, current.freshness, "price_move", `Price moved ${formatPercent(priceMove)} between verified snapshots.`, {
+        value: priceMove,
+        metric: "price_usd",
+        previousValue: beforePair.priceUsd,
+        currentValue: pair.priceUsd
+      }));
     }
     if (beforePair.volume5m && pair.volume5m && pair.volume5m / beforePair.volume5m >= VOLUME_ACCELERATION_MULTIPLE) {
       const multiple = pair.volume5m / beforePair.volume5m;
-      signals.push(marketEvent(common, pair, "volume_burst", `5m volume accelerated to ${multiple.toFixed(1)}× the prior snapshot.`, multiple));
+      signals.push(marketEvent(common, pair, current.freshness, "volume_burst", `5m volume accelerated to ${multiple.toFixed(1)}× the prior snapshot.`, {
+        value: multiple,
+        metric: "volume_usd",
+        previousValue: beforePair.volume5m,
+        currentValue: pair.volume5m
+      }));
     }
     const liquidityMove = percentChange(beforePair.liquidityUsd, pair.liquidityUsd);
     if (liquidityMove !== undefined && Math.abs(liquidityMove) >= LIQUIDITY_THRESHOLD_PERCENT) {
-      signals.push(marketEvent(common, pair, "liquidity_change", `Liquidity moved ${formatPercent(liquidityMove)} between comparable snapshots.`, liquidityMove));
+      signals.push(marketEvent(common, pair, current.freshness, "liquidity_change", `Liquidity moved ${formatPercent(liquidityMove)} between comparable snapshots.`, {
+        value: liquidityMove,
+        metric: "liquidity_usd",
+        previousValue: beforePair.liquidityUsd,
+        currentValue: pair.liquidityUsd
+      }));
     }
   }
   return signals;
@@ -182,9 +207,10 @@ function diffHistory(previous: HistorySnapshot, current: HistorySnapshot) {
 function marketEvent(
   common: Pick<PulseSignal, "createdAt" | "source" | "sourceUpdatedAt">,
   pair: HistoryPair,
+  freshness: MarketTerminalSnapshot["freshness"],
   type: "price_move" | "volume_burst" | "liquidity_change",
   detail: string,
-  value: number
+  evidence: Pick<PulseSignal, "value" | "metric" | "previousValue" | "currentValue">
 ): PulseSignal {
   return {
     ...common,
@@ -195,8 +221,9 @@ function marketEvent(
     headline: type === "price_move" ? "Price moved" : type === "volume_burst" ? "Volume accelerated" : "Liquidity moved",
     detail,
     timeframe: type === "volume_burst" ? "5m" : "snapshot",
-    direction: value > 0 ? "up" : "down",
-    value
+    direction: (evidence.value ?? 0) > 0 ? "up" : "down",
+    ...evidence,
+    freshness
   };
 }
 
@@ -210,7 +237,9 @@ function dataStateEvent(previous: HistorySnapshot, current: HistorySnapshot): Pu
     createdAt: current.generatedAt,
     source: current.providerName,
     sourceUpdatedAt: current.sourceUpdatedAt,
-    direction: "neutral"
+    direction: "neutral",
+    metric: "freshness",
+    freshness: current.freshness
   };
 }
 

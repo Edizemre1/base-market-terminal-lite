@@ -73,14 +73,36 @@ test.describe("pool market to token opportunity contracts", () => {
     const first = { ...(await snapshotFrom(template, [firstPool], now)), mode: "dexscreener" as const, freshness: "fresh" as const };
     expect(recordDiscoveryHistory(first, now).status).toBe("warming");
 
-    const fasterFirstPool = { ...firstPool, volumes: { ...firstPool.volumes, m5: 3_000 } };
+    const fasterFirstPool = { ...firstPool, priceUsdValue: 55_000, liquidityUsd: 300_000, liquidity: 300_000, volumes: { ...firstPool.volumes, m5: 3_000 } };
     const secondPool = fixturePool(template, { poolAddress: address(353), tokenAddress: address(352), tokenSymbol: "GROW", quoteAddress: USDC, quoteSymbol: "USDC" });
     const second = { ...(await snapshotFrom(template, [fasterFirstPool, secondPool], now + 12_000)), mode: "dexscreener" as const, freshness: "fresh" as const };
     const history = recordDiscoveryHistory(second, now + 12_000);
     expect(second.opportunities).toHaveLength(1);
     expect(second.opportunities[0].poolCount).toBe(2);
     expect(history.status).toBe("ready");
-    expect(history.signals.some((signal) => signal.type === "new_pool" && signal.pairId === secondPool.id)).toBeTruthy();
+    expect(history.signals.find((signal) => signal.type === "new_pool" && signal.pairId === secondPool.id)).toMatchObject({
+      metric: "liquidity_usd",
+      currentValue: 250_000,
+      freshness: "fresh"
+    });
+    expect(history.signals.find((signal) => signal.type === "price_move")).toMatchObject({
+      metric: "price_usd",
+      previousValue: 50_000,
+      currentValue: 55_000,
+      freshness: "fresh"
+    });
+    expect(history.signals.find((signal) => signal.type === "volume_burst")).toMatchObject({
+      metric: "volume_usd",
+      previousValue: 1_000,
+      currentValue: 3_000,
+      freshness: "fresh"
+    });
+    expect(history.signals.find((signal) => signal.type === "liquidity_change")).toMatchObject({
+      metric: "liquidity_usd",
+      previousValue: 250_000,
+      currentValue: 300_000,
+      freshness: "fresh"
+    });
     expect(getDiscoveryHistoryStats(now + 12_000)).toMatchObject({ snapshotCount: 2, bounded: true, ttlMinutes: 30 });
 
     expect(getDiscoveryHistoryStats(now + 31 * 60_000).snapshotCount).toBe(0);
