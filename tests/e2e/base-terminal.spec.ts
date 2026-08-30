@@ -489,12 +489,19 @@ test.describe("living Base terminal", () => {
 
 async function captureVisualEvidence(page: Page, path: string, fullPage: boolean) {
   const expectedWidth = page.viewportSize()?.width;
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(async () => {
+    window.scrollTo(0, 0);
+    for (const element of document.querySelectorAll<HTMLElement>("*")) {
+      if (element.scrollLeft !== 0) element.scrollLeft = 0;
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
   await expect.poll(() => page.evaluate(() => ({
     horizontalOffset: window.scrollX,
     hasPageOverflow: document.documentElement.scrollWidth > window.innerWidth,
+    hasShiftedScroller: [...document.querySelectorAll<HTMLElement>("*")].some((element) => element.scrollLeft !== 0),
     viewportWidth: window.innerWidth
-  }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false, viewportWidth: expectedWidth });
+  }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false, hasShiftedScroller: false, viewportWidth: expectedWidth });
   await page.screenshot({ path, fullPage });
 }
 
