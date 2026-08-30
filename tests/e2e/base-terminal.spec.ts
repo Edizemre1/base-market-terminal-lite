@@ -61,7 +61,9 @@ test.describe("living Base terminal", () => {
   });
 
   test("global search resolves token, pool, and address context", async ({ page }) => {
-    await page.getByRole("combobox", { name: /Search token|Token, pair/ }).fill("blob");
+    const search = page.getByRole("combobox", { name: /Search token|Token, pair/ });
+    await expect(search).toHaveAttribute("data-search-ready", "true");
+    await search.fill("blob");
     await expect(page.getByTestId("search-result-blob-usdc")).toContainText("BLOB / USDC");
     await page.getByTestId("search-result-blob-usdc").click();
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");

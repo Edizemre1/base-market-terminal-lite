@@ -159,6 +159,7 @@ function TerminalSearchBox() {
         aria-expanded={shouldShowResults}
         aria-controls="terminal-search-results"
         aria-activedescendant={shouldShowResults && results[activeResultIndex] ? `terminal-search-option-${results[activeResultIndex].id}` : undefined}
+        data-search-ready={pairs.length > 0 ? "true" : "false"}
         placeholder={t("header.searchPlaceholder")}
         className="h-9 w-full border border-base-line bg-base-black pl-7 pr-2 font-mono text-[12px] text-base-text outline-none placeholder:text-base-muted focus:border-base-mint lg:h-8"
       />
