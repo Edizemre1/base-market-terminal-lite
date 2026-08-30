@@ -110,13 +110,20 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
   className?: string;
 }) {
   const { t } = useI18n();
-  const identity = useMemo(() => resolveAssetIdentity({
-    chainId: pair.chainId,
-    tokenAddress: opportunity?.focusTokenAddress ?? pair.focusTokenAddress ?? pair.baseTokenAddress,
-    displayName: opportunity?.focusTokenName ?? pair.focusTokenName ?? pair.project,
-    displaySymbol: opportunity?.focusTokenSymbol ?? pair.focusTokenSymbol ?? pair.baseToken,
-    observedAt: pair.sourceUpdatedAt
-  }), [opportunity, pair]);
+  const identity = useMemo(() => {
+    const display = getIdentityDisplay(pair, {
+      address: opportunity?.focusTokenAddress,
+      name: opportunity?.focusTokenName,
+      symbol: opportunity?.focusTokenSymbol
+    });
+    return resolveAssetIdentity({
+      chainId: pair.chainId,
+      tokenAddress: display.address,
+      displayName: display.name,
+      displaySymbol: display.symbol,
+      observedAt: pair.sourceUpdatedAt
+    });
+  }, [opportunity, pair]);
   const tradeability = useTradeabilityForPair(pair);
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);

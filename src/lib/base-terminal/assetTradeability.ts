@@ -261,11 +261,25 @@ export function getFocusTokenAddress(pair: BasePair) {
   return pair.focusTokenAddress ?? pair.baseTokenAddress;
 }
 
-export function getIdentityDisplay(pair: BasePair) {
+export function getIdentityDisplay(pair: BasePair, preferred: { address?: string; name?: string; symbol?: string } = {}) {
+  const address = preferred.address ?? getFocusTokenAddress(pair);
+  const normalized = normalizedAddress(address);
+  const baseAddress = normalizedAddress(pair.baseTokenAddress);
+  const quoteAddress = normalizedAddress(pair.quoteTokenAddress);
+
+  // Discovery labels describe an opportunity and can occasionally contain a
+  // pair label. Bind the presented token label back to the exact contract side
+  // before identity assessment so an official address is not misclassified.
+  if (normalized && normalized === baseAddress) {
+    return { address, name: pair.baseToken, symbol: pair.baseToken };
+  }
+  if (normalized && normalized === quoteAddress) {
+    return { address, name: pair.quoteToken, symbol: pair.quoteToken };
+  }
   return {
-    address: getFocusTokenAddress(pair),
-    name: pair.focusTokenName ?? pair.project ?? pair.baseToken,
-    symbol: pair.focusTokenSymbol ?? pair.baseToken
+    address,
+    name: preferred.name ?? pair.focusTokenName ?? pair.project ?? pair.baseToken,
+    symbol: preferred.symbol ?? pair.focusTokenSymbol ?? pair.baseToken
   };
 }
 

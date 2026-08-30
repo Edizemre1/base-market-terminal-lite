@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { getTokenAvatarPresentation } from "../../src/components/TokenIdentity";
 import { getMarketTerminalSnapshot } from "../../src/data/providers";
+import { assetIdentityForPair } from "../../src/components/base-terminal/AssetTradeabilityBadges";
 import { deriveTradeabilityAssessment, resolveAssetIdentity, type TradeabilityStatus } from "../../src/lib/base-terminal/assetTradeability";
 import { getNormalizedMarketModel } from "../../src/lib/base-terminal/marketModel";
 import { en, tr } from "../../src/i18n/dictionaries";
@@ -39,6 +40,23 @@ test.describe("asset identity", () => {
     expect(getBaseScanAddressUrl("0x9999999999999999999999999999999999999999")).toBe("https://basescan.org/address/0x9999999999999999999999999999999999999999");
     expect(sanitizeTokenLogoUrl("javascript:alert(1)")).toBeUndefined();
     expect(resolveAssetIdentity({ chainId: 8453 }).status).toBe("unavailable");
+  });
+
+  test("rebinds malformed opportunity labels to the exact token side", async () => {
+    const pair = await pairAt(0);
+    const officialPair = {
+      ...pair,
+      chainId: "base",
+      baseToken: "WETH",
+      baseTokenAddress: "0x4200000000000000000000000000000000000006",
+      quoteToken: "USDC",
+      quoteTokenAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      focusTokenAddress: "0x4200000000000000000000000000000000000006",
+      focusTokenName: "WETH / USDC",
+      focusTokenSymbol: "WETH/USDC"
+    } satisfies BasePair;
+    expect(assetIdentityForPair(officialPair)).toMatchObject({ status: "verified", displaySymbol: "WETH", canonicalSymbol: "WETH" });
+    expect(assetIdentityForPair({ ...officialPair, focusTokenAddress: officialPair.quoteTokenAddress })).toMatchObject({ status: "verified", displaySymbol: "USDC", canonicalSymbol: "USDC" });
   });
 });
 
