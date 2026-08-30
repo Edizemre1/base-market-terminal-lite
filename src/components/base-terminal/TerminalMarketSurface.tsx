@@ -26,7 +26,7 @@ type BoardPreferences = { filters: MarketFilters; columns: AdvancedColumn[]; sig
 type ScannerTab = "new" | "moving" | "volume" | "liquidity" | "volatile" | "watchlist";
 type OpportunityRow = { opportunity: TokenOpportunity; pair: BasePair };
 
-export function LiveMarketTape({ snapshot, onSelect, onRefresh, refreshing = false, pendingUpdateCount = 0, onApplyUpdates }: { snapshot: MarketTerminalSnapshot; onSelect: (id: string) => void; onRefresh?: () => void; refreshing?: boolean; pendingUpdateCount?: number; onApplyUpdates?: () => void }) {
+export function LiveMarketTape({ snapshot, onSelect, onRefresh, refreshing = false, delayed = false, pendingUpdateCount = 0, onApplyUpdates }: { snapshot: MarketTerminalSnapshot; onSelect: (id: string) => void; onRefresh?: () => void; refreshing?: boolean; delayed?: boolean; pendingUpdateCount?: number; onApplyUpdates?: () => void }) {
   const { t, formatPercent } = useI18n();
   const rows = useMemo(() => snapshot.opportunities
     .filter((opportunity) => opportunity.quality === "active")
@@ -52,6 +52,7 @@ export function LiveMarketTape({ snapshot, onSelect, onRefresh, refreshing = fal
   return <section className="pulse-surface overflow-hidden rounded-lg" data-testid="live-market-tape" aria-label={t("terminalV3.tape")}>
     <div className="flex h-10 items-center gap-1.5 overflow-x-auto px-2">
       <span className="sticky left-0 z-10 shrink-0 bg-base-panel pr-2 text-[8px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.live")}</span>
+      {delayed ? <span className="shrink-0 rounded-full bg-base-amber/10 px-2 py-1 text-[8px] font-semibold text-base-amber" data-testid="market-feed-delayed">{t("common.delayed")}</span> : null}
       {pendingUpdateCount > 0 ? <button type="button" onClick={onApplyUpdates} className="sticky left-20 z-10 inline-flex h-8 shrink-0 items-center gap-2 rounded-full border border-base-mint/25 bg-base-panel px-2 text-[8px] text-base-mint" data-testid="pending-market-updates"><span>{t("terminalV3.updatesWaiting", { count: pendingUpdateCount })}</span><b>{t("terminalV3.apply")}</b></button> : null}
       {rows.map(({ opportunity, pair }) => {
         const change = pair.priceChanges?.m5;

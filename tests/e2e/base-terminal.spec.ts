@@ -129,7 +129,7 @@ test.describe("living Base terminal", () => {
   test("keeps the last good board visible and captures a delayed-source state", async ({ page }, testInfo) => {
     await page.route("**/api/market-snapshot?data=mock", (route) => route.abort("failed"));
     await page.getByTestId("refresh-terminal").click();
-    await expect(page.getByText(/Delayed|Gecikmeli/).first()).toBeVisible();
+    await expect(page.getByTestId("market-feed-delayed")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await page.screenshot({ path: testInfo.outputPath("terminal-delayed-source-1440.png"), fullPage: true });
   });
@@ -226,7 +226,7 @@ test.describe("living Base terminal", () => {
     const next = buildSignalSnapshot(initial, target.id, new Date(Date.parse(initial.receivedAt) + 1_000).toISOString(), 3);
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").getByRole("button").click();
+    await page.getByTestId("pending-market-updates").click();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     const desktopButton = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group").getByRole("button");
@@ -293,14 +293,14 @@ test.describe("living Base terminal", () => {
 
     const selectedSignals = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").getByRole("button").click();
+    await page.getByTestId("pending-market-updates").click();
     await selectedSignals.getByRole("button").click();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toBeVisible();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/confirming|doğrulanıyor/i);
     await page.keyboard.press("Escape");
 
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").getByRole("button").click();
+    await page.getByTestId("pending-market-updates").click();
     await selectedSignals.getByRole("button").click();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/cooldown|bekleme/i);
     await page.keyboard.press("Escape");
@@ -315,12 +315,14 @@ test.describe("living Base terminal", () => {
     const next = buildWallChangeSnapshot(initial, target.id);
     const gainers = page.getByTestId("live-wall-lane-gainers").locator("[data-opportunity-id]");
     const before = await gainers.first().getAttribute("data-opportunity-id");
-    await page.getByTestId("live-market-wall").getByRole("checkbox").focus();
+    await page.getByTestId("live-market-wall").hover();
+    await page.waitForTimeout(100);
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
     await page.getByTestId("refresh-terminal").evaluate((button: HTMLButtonElement) => button.click());
     await expect(page.getByTestId("pending-market-updates")).toBeVisible();
     await expect(gainers.first()).toHaveAttribute("data-opportunity-id", before!);
 
+    await page.getByTestId("refresh-terminal").hover();
     await page.getByTestId("refresh-terminal").focus();
     await expect(page.getByTestId("pending-market-updates")).toHaveCount(0, { timeout: 5_000 });
     await expect(page.getByTestId("live-wall-lane-gainers").locator(`[data-opportunity-id="${target.id}"]`)).toBeVisible();
@@ -341,7 +343,7 @@ test.describe("living Base terminal", () => {
       if (viewport.width === 2048) {
         const laneBounds = await page.locator('[data-testid^="live-wall-lane-"]').evaluateAll((lanes) => lanes.map((lane) => lane.getBoundingClientRect()));
         expect(laneBounds).toHaveLength(6);
-        expect(laneBounds.every((bounds) => bounds.left >= 0 && bounds.right <= window.innerWidth)).toBeTruthy();
+        expect(laneBounds.every((bounds) => bounds.left >= 0 && bounds.right <= viewport.width)).toBeTruthy();
       }
       if (viewport.width === 1440) {
         const visibleBadgeCounts = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("[data-signal-type], [data-testid='asset-identity-badge'], [data-testid='tradeability-badge']").length));
@@ -387,23 +389,31 @@ test.describe("living Base terminal", () => {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/terminal?data=mock");
-      await page.getByTestId("live-wall-lane-gainers").screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`) });
-      await page.getByTestId("live-wall-lane-losers").screenshot({ path: testInfo.outputPath(`lane-losers-${locale}-1440.png`) });
+      const visualInitial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+      const visualWall = buildVisualWallSnapshot(visualInitial);
+      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: visualWall }));
+      await page.getByTestId("refresh-terminal").click();
+      await page.getByTestId("pending-market-updates").click();
+      await expect(page.getByTestId("live-wall-lane-new")).toHaveAttribute("data-lane-count", "4");
+      await expect(page.getByTestId("live-wall-lane-losers")).toHaveAttribute("data-lane-count", "4");
+      await page.screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`), fullPage: false });
+      await page.screenshot({ path: testInfo.outputPath(`lane-losers-${locale}-1440.png`), fullPage: false });
       await expect(page.getByTestId("live-wall-lane-volume")).toHaveAttribute("data-lane-fallback", "true");
-      await page.getByTestId("live-wall-lane-volume").screenshot({ path: testInfo.outputPath(`lane-volume-fallback-${locale}-1440.png`) });
+      await page.screenshot({ path: testInfo.outputPath(`lane-volume-fallback-${locale}-1440.png`), fullPage: false });
       const signalTrigger = page.getByTestId("market-matrix").getByTestId("market-signal-group").getByRole("button").first();
       await signalTrigger.click();
       await expect(page.getByTestId("market-signal-popover")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`signal-popover-${locale}-1440.png`), fullPage: false });
       await page.keyboard.press("Escape");
 
-      const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
-      const removed = buildLiquidityRemovedSnapshot(initial);
+      await page.unroute("**/api/market-snapshot?data=mock");
+      const removed = buildLiquidityRemovedSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: removed }));
-      await page.goto("/terminal?data=mock");
+      await page.getByTestId("refresh-terminal").click();
+      await page.getByTestId("pending-market-updates").click();
       await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıkarılan/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
-      await page.getByTestId("live-wall-lane-liquidity").screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`) });
+      await page.screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), fullPage: false });
       await page.unroute("**/api/market-snapshot?data=mock");
 
       await page.goto("/terminal?data=mock&pair=blob-usdc");
@@ -524,6 +534,40 @@ function buildLiquidityRemovedSnapshot(snapshot: MarketTerminalSnapshot): Market
       ...item,
       newestPoolCreatedAt: new Date(baseTime - 8 * 24 * 60 * 60 * 1_000).toISOString(),
       aggregate: { ...item.aggregate, liquidityUsd: currentLiquidity, volumes: emptyVolumes, transactions: emptyTransactions },
+      freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
+    } : item)
+  };
+}
+
+function buildVisualWallSnapshot(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
+  const targets = snapshot.opportunities.filter((item) => item.quality === "active" && (item.aggregate.liquidityUsd ?? 0) >= 10_000);
+  const recentIds = new Set(targets.slice(0, 4).map((item) => item.id));
+  const loserIds = new Set(targets.slice(4, 8).map((item) => item.id));
+  const targetByPrimary = new Map(targets.map((item) => [item.primaryMarketId, item.id]));
+  const baseTime = Number.isFinite(Date.parse(snapshot.generatedAt)) ? Date.parse(snapshot.generatedAt) : Date.now();
+  const generatedAt = new Date(baseTime + 1_000).toISOString();
+  const recentAt = new Date(baseTime - 60 * 60 * 1_000).toISOString();
+  return {
+    ...snapshot,
+    version: `visual-wall-${generatedAt}`,
+    generatedAt,
+    receivedAt: generatedAt,
+    sourceUpdatedAt: generatedAt,
+    allPairs: snapshot.allPairs.map((pair) => {
+      const opportunityId = targetByPrimary.get(pair.id);
+      if (!opportunityId) return pair;
+      return {
+        ...pair,
+        stale: false,
+        sourceUpdatedAt: generatedAt,
+        pairCreatedAt: recentIds.has(opportunityId) ? recentAt : pair.pairCreatedAt,
+        pairCreatedAtMs: recentIds.has(opportunityId) ? Date.parse(recentAt) : pair.pairCreatedAtMs,
+        priceChanges: loserIds.has(opportunityId) ? { ...pair.priceChanges, h1: -10 - targets.findIndex((item) => item.id === opportunityId) } : pair.priceChanges
+      };
+    }),
+    opportunities: snapshot.opportunities.map((item) => recentIds.has(item.id) ? {
+      ...item,
+      newestPoolCreatedAt: recentAt,
       freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
     } : item)
   };
