@@ -253,7 +253,9 @@ test.describe("living Base terminal", () => {
   });
 
   test("filters by signal with a translated empty state and persists the safe preference", async ({ page }) => {
-    await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
+    const marketsLink = page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first();
+    await marketsLink.click();
+    await expect(marketsLink).toHaveAttribute("aria-current", "page");
     await page.getByTestId("open-market-filters").click();
     await page.getByTestId("market-filters-sheet").locator('[data-signal-filter="security_unknown"]').click();
     await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
