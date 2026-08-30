@@ -120,7 +120,11 @@ export const ASSET_IDENTITY_REGISTRY: Readonly<Record<string, AssetIdentityRegis
   })
 });
 
-const KNOWN_BRAND_TERMS = ["apple", "tesla", "microsoft", "amazon", "google", "nvidia", "meta", "netflix", "openai", "spacex"];
+const KNOWN_BRAND_TERMS = [
+  "apple", "aapl", "tesla", "tsla", "microsoft", "msft", "amazon", "amzn",
+  "google", "alphabet", "googl", "nvidia", "nvda", "meta", "netflix", "nflx",
+  "openai", "spacex"
+];
 
 export function resolveAssetIdentity(input: {
   chainId?: string | number;

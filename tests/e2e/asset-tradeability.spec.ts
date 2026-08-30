@@ -35,6 +35,13 @@ test.describe("asset identity", () => {
     expect(presentation.safeLogoUrl).toBeUndefined();
   });
 
+  test("recognizes company-name and ticker aliases without granting identity", () => {
+    for (const displaySymbol of ["AAPL", "TSLAc", "MSFT", "AMZN", "GOOGLc", "NVDAc", "NFLX"]) {
+      const identity = resolveAssetIdentity({ chainId: 8453, tokenAddress: "0x9999999999999999999999999999999999999999", displaySymbol });
+      expect(identity).toMatchObject({ status: "unverified", resemblesKnownBrand: true, usesGenericAvatar: true });
+    }
+  });
+
   test("sanitizes identity links and never treats missing as verified", () => {
     expect(getBaseScanAddressUrl("javascript:alert(1)")).toBeUndefined();
     expect(getBaseScanAddressUrl("0x9999999999999999999999999999999999999999")).toBe("https://basescan.org/address/0x9999999999999999999999999999999999999999");
