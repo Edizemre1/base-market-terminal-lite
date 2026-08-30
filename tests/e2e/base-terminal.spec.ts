@@ -175,11 +175,12 @@ test.describe("living Base terminal", () => {
 
     const matrix = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
     await expect(matrix.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
-    await expect(matrix.locator('[data-signal-type="delayed"]')).toHaveCount(1);
+    await expect(matrix.locator('[data-signal-type="delayed"]')).toHaveCount(0);
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
     await page.getByTestId("context-inspector").getByRole("tab", { name: /Signals|Sinyaller/ }).click();
     const inspectorSignals = page.getByTestId("context-inspector").getByTestId("market-signal-group");
     await expect(inspectorSignals.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
+    await expect(inspectorSignals.locator('[data-signal-type="delayed"]')).toHaveCount(1);
 
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Pin|izle/ }).click();
     await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
@@ -299,8 +300,7 @@ test.describe("living Base terminal", () => {
     await page.keyboard.press("Escape");
 
     await page.getByTestId("refresh-terminal").click();
-    await selectedSignals.getByRole("button").click();
-    await expect(page.locator('[data-signal-detail="gaining_fast"]')).toHaveCount(0);
+    await expect(selectedSignals.locator('[data-signal-type="gaining_fast"]')).toHaveCount(0);
   });
 
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {
@@ -347,20 +347,23 @@ test.describe("living Base terminal", () => {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
-        await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: true });
+        await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: false });
         if (viewport.width === 390) {
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Overview|Genel Bakış/ }).click();
-          await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: true });
+          await expect(page.getByTestId("context-inspector")).toBeVisible();
+          await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: false });
           await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-          await page.screenshot({ path: testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), fullPage: true });
+          await expect(page.getByTestId("trade-dock")).toBeVisible();
+          await page.screenshot({ path: testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), fullPage: false });
         }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/terminal?data=mock&pair=blob-usdc");
       await expect(page.getByTestId("context-inspector")).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: false });
       await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-      await page.screenshot({ path: testInfo.outputPath(`trade-drawer-${locale}-1440.png`), fullPage: true });
+      await expect(page.getByTestId("trade-dock")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`trade-drawer-${locale}-1440.png`), fullPage: false });
       await page.keyboard.press("Escape");
       await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
       await page.screenshot({ path: testInfo.outputPath(`pair-workspace-${locale}-1440.png`), fullPage: true });
@@ -373,7 +376,7 @@ test.describe("living Base terminal", () => {
       await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
       await page.screenshot({ path: testInfo.outputPath(`multichart-${locale}-1440.png`), fullPage: true });
       await page.getByTestId("connect-wallet-button").click();
-      await page.screenshot({ path: testInfo.outputPath(`wallet-picker-${locale}-1440.png`), fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath(`wallet-picker-${locale}-1440.png`), fullPage: false });
       await page.keyboard.press("Escape");
     }
   });

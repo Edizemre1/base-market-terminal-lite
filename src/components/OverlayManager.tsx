@@ -54,6 +54,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const routeScope = `${pathname}?view=${searchParams.get("view") ?? "terminal"}`;
+  const pairScope = searchParams.get("pair") ?? "";
   const [active, setActive] = useState<OverlayEntry>(NONE);
   const [suspended, setSuspended] = useState<OverlayEntry>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -142,7 +143,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener("keydown", trap);
     return () => document.removeEventListener("keydown", trap);
-  }, [active.type]);
+  }, [active.type, pairScope]);
 
   useEffect(() => {
     if (active.type === "none") return;

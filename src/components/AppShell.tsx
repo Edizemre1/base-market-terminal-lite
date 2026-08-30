@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <TerminalSearchBox />
 
-            <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.08em] lg:flex">
+            <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-[0.08em] xl:flex">
               <HeaderHeartbeat />
               <TopChip
                 label={<HeaderBaseNetworkLabel />}

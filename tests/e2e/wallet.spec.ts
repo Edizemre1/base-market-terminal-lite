@@ -78,6 +78,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await mockEnabledTradeServer(page);
     await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
+    await page.keyboard.press("Escape");
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
     await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_required");
@@ -92,7 +93,6 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
-    await openTradeDrawer(page);
     await expect(page.getByTestId("wallet-picker-error")).toContainText(/cancelled|iptal edildi/);
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
@@ -103,6 +103,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
+    await openTradeDrawer(page);
 
     await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toContainText("LI.FI");

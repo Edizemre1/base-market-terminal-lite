@@ -94,8 +94,8 @@ export function presentMarketSignals(badges: readonly MarketSignalBadge[], prese
   if (presentation === "hiddenNeutral") return [];
   if (presentation === "inspectorDetails") return [...badges];
   const excluded = presentation === "rowCritical"
-    ? new Set<MarketSignalType>(["contract_verified", "security_unknown", "multi_pool", "deep_liquidity", "high_volume", "most_traded"])
-    : new Set<MarketSignalType>(["contract_verified", "security_unknown"]);
+    ? new Set<MarketSignalType>(["contract_verified", "security_unknown", "delayed", "multi_pool", "deep_liquidity", "high_volume", "most_traded"])
+    : new Set<MarketSignalType>(["contract_verified", "security_unknown", "delayed"]);
   return badges.filter((badge) => !excluded.has(badge.type));
 }
 
