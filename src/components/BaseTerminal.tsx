@@ -86,6 +86,8 @@ export function BaseTerminal({
   const [view, setView] = useState<TerminalView>(() => normalizeTerminalView(initialViewParam));
   const snapshotRef = useRef(snapshotData);
   const selectedPairRef = useRef<BasePair | undefined>(undefined);
+  const activeOverlayTypeRef = useRef(overlay.active.type);
+  activeOverlayTypeRef.current = overlay.active.type;
   const interactionLockedRef = useRef(false);
   const watchedPairIdsRef = useRef<string[]>([]);
   const snapshotRefreshInFlightRef = useRef(false);
@@ -164,8 +166,9 @@ export function BaseTerminal({
 
   useEffect(() => {
     if (!initialPairParam || view === "workspace" || normalizeTerminalView(initialViewParam) === "workspace") return;
-    openOverlay("market_inspector", { pairId: selectedPairWithLiveChart?.id });
-  }, [initialPairParam, initialViewParam, openOverlay, selectedPairWithLiveChart?.id, view]);
+    if (activeOverlayTypeRef.current !== "none" && activeOverlayTypeRef.current !== "market_inspector") return;
+    openOverlay("market_inspector");
+  }, [initialPairParam, initialViewParam, openOverlay, view]);
 
   useEffect(() => {
     watchedPairIdsRef.current = pinnedPairs
