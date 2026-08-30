@@ -18,9 +18,9 @@ type TokenAvatarProps = {
 };
 
 const sizeClassNames = {
-  sm: "h-5 w-5 text-[8px]",
-  md: "h-7 w-7 text-[10px]",
-  lg: "h-9 w-9 text-[12px]"
+  sm: "h-5 w-5 text-meta",
+  md: "h-7 w-7 text-meta",
+  lg: "h-9 w-9 text-label"
 };
 
 export function MergenMark({ className }: { className?: string }) {
@@ -77,7 +77,7 @@ export function TokenAvatar({
   return (
     <span
       className={cx(
-        "relative grid shrink-0 place-items-center overflow-hidden rounded-full border border-base-line bg-base-mint/10 font-mono font-semibold text-base-mint",
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-pill border border-border-subtle bg-surface-interactive font-mono font-semibold text-content-primary",
         sizeClassNames[size],
         className
       )}
@@ -146,7 +146,7 @@ export function PairAvatarStack({
         chainId={chainId}
         observedAt={observedAt}
         size={size}
-        className="-ml-2 border-base-panel"
+        className="-ml-2 border-surface-panel"
       />
     </span>
   );

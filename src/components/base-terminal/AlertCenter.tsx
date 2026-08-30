@@ -131,53 +131,53 @@ export function AlertCenter({
       {!embedded ? <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={cx("inline-flex h-9 items-center gap-2 rounded-full bg-base-elevated px-3 text-[11px] font-semibold text-base-muted outline-none hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40", open && "bg-base-mint/10 text-base-mint")}
+        className={cx("inline-flex h-9 items-center gap-2 rounded-pill bg-surface-interactive px-3 text-meta font-semibold text-content-secondary outline-none hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus", open && "bg-surface-selected text-content-primary")}
         aria-expanded={open}
         aria-controls="alert-center-panel"
       >
-        {triggers.length > 0 ? <BellRing size={14} className="text-base-amber" aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
+        {triggers.length > 0 ? <BellRing size={14} className="text-freshness-delayed" aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
         {t("alerts.title")}
-        <span className="rounded-full bg-base-panel px-1.5 font-mono text-[9px]">{activeRules.length}</span>
+        <span className="rounded-pill bg-surface-panel px-2 font-mono text-meta">{activeRules.length}</span>
       </button> : null}
 
       {open ? (
-        <div id="alert-center-panel" data-testid="alert-center-panel" className={cx("mt-2 w-full rounded-xl bg-base-panel p-3 shadow-2xl ring-1 ring-base-line", !embedded && "lg:absolute lg:right-0 lg:z-50 lg:w-[430px]")} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={t("alerts.center")}>
+        <div id="alert-center-panel" data-testid="alert-center-panel" className={cx("mt-2 w-full rounded-panel bg-surface-panel p-3 shadow-popover ring-1 ring-border-subtle", !embedded && "lg:absolute lg:right-0 lg:z-layer-popover lg:w-popover")} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={t("alerts.center")}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("alerts.center")}</p>
-              <h3 className="mt-1 text-[15px] font-semibold text-base-text">{t("alerts.local")}</h3>
-              <p className="mt-1 text-[10px] text-base-muted">{t("alerts.description")}</p>
+              <p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("alerts.center")}</p>
+              <h3 className="mt-1 text-title-sm font-semibold text-content-primary">{t("alerts.local")}</h3>
+              <p className="mt-1 text-meta text-content-secondary">{t("alerts.description")}</p>
             </div>
-            {!embedded ? <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-full bg-base-elevated text-base-muted" aria-label={t("alerts.close")}><X size={13} /></button> : null}
+            {!embedded ? <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-pill bg-surface-interactive text-content-secondary" aria-label={t("alerts.close")}><X size={13} /></button> : null}
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_auto]">
-            <label className="block"><span className="sr-only">{t("alerts.condition")}</span><select value={metric} onChange={(event) => { setMetric(event.target.value as AlertMetric); setThresholdError(false); }} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 text-[11px] text-base-text outline-none">{METRICS.map((item) => <option key={item.id} value={item.id}>{t(item.labelKey)}</option>)}</select></label>
-            {selectedMetric.threshold ? <label><span className="sr-only">{t("alerts.threshold")}</span><input value={threshold} onChange={(event) => { setThreshold(event.target.value); setThresholdError(false); }} inputMode="decimal" placeholder={selectedMetric.placeholder} aria-invalid={thresholdError} aria-describedby={thresholdError ? "alert-threshold-error" : undefined} className="h-10 w-full rounded-lg border border-base-line bg-base-elevated px-2 font-mono text-[11px] text-base-text outline-none aria-[invalid=true]:border-base-rose" /></label> : <div className="hidden sm:block" />}
-            <button type="button" onClick={addRule} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-base-mint px-3 text-[11px] font-bold text-[#031411]"><Plus size={13} /> {t("alerts.add")}</button>
+            <label className="block"><span className="sr-only">{t("alerts.condition")}</span><select value={metric} onChange={(event) => { setMetric(event.target.value as AlertMetric); setThresholdError(false); }} className="h-10 w-full rounded-card border border-border-subtle bg-surface-interactive px-2 text-meta text-content-primary outline-none">{METRICS.map((item) => <option key={item.id} value={item.id}>{t(item.labelKey)}</option>)}</select></label>
+            {selectedMetric.threshold ? <label><span className="sr-only">{t("alerts.threshold")}</span><input value={threshold} onChange={(event) => { setThreshold(event.target.value); setThresholdError(false); }} inputMode="decimal" placeholder={selectedMetric.placeholder} aria-invalid={thresholdError} aria-describedby={thresholdError ? "alert-threshold-error" : undefined} className="h-10 w-full rounded-card border border-border-subtle bg-surface-interactive px-2 font-mono text-meta text-content-primary outline-none aria-[invalid=true]:border-market-negative" /></label> : <div className="hidden sm:block" />}
+            <button type="button" onClick={addRule} className="inline-flex h-10 items-center justify-center gap-2 rounded-card bg-brand-action px-3 text-meta font-bold text-content-on-accent"><Plus size={13} /> {t("alerts.add")}</button>
           </div>
-          {thresholdError ? <p id="alert-threshold-error" className="mt-2 text-[10px] text-base-rose" role="alert">{t("alerts.invalidThreshold")}</p> : null}
-          <p className="mt-2 text-[10px] text-base-muted">{t("alerts.target", { target: metric === "new_pair" ? t("alerts.anyPair") : selectedPair.pair, timeframe: alertTimeframe(metric, t) })}</p>
+          {thresholdError ? <p id="alert-threshold-error" className="mt-2 text-meta text-market-negative" role="alert">{t("alerts.invalidThreshold")}</p> : null}
+          <p className="mt-2 text-meta text-content-secondary">{t("alerts.target", { target: metric === "new_pair" ? t("alerts.anyPair") : selectedPair.pair, timeframe: alertTimeframe(metric, t) })}</p>
 
-          <div className="mt-3 max-h-[220px] space-y-1.5 overflow-y-auto">
+          <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto">
             {rules.length > 0 ? rules.map((rule) => (
-              <div key={rule.id} data-testid="alert-rule" className="flex items-center gap-2 rounded-lg bg-base-elevated/70 px-2.5 py-2">
-                <button type="button" onClick={() => setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item))} className={cx("h-5 w-9 rounded-full p-0.5 transition", rule.enabled ? "bg-base-mint" : "bg-base-line")} aria-label={t("alerts.toggle", { condition: metricLabel(rule.metric, t) })}><span className={cx("block h-4 w-4 rounded-full bg-white transition", rule.enabled && "translate-x-4")} /></button>
-                <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-base-text">{rule.pairLabel}</span><span className="block text-[10px] text-base-muted">{metricLabel(rule.metric, t)}{rule.threshold !== undefined ? ` ${rule.threshold}` : ""} · {alertTimeframe(rule.metric, t)}</span></span>
-                <button type="button" onClick={() => setRules((current) => current.filter((item) => item.id !== rule.id))} className="grid h-7 w-7 place-items-center text-base-muted hover:text-base-rose" aria-label={t("alerts.delete")}><Trash2 size={12} /></button>
+              <div key={rule.id} data-testid="alert-rule" className="flex items-center gap-2 rounded-card bg-surface-interactive/70 px-3 py-2">
+                <button type="button" onClick={() => setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item))} className={cx("h-5 w-9 rounded-pill p-1 transition", rule.enabled ? "bg-brand-action" : "bg-border-subtle")} aria-label={t("alerts.toggle", { condition: metricLabel(rule.metric, t) })}><span className={cx("block h-4 w-4 rounded-pill bg-surface-canvas transition", rule.enabled && "translate-x-4")} /></button>
+                <span className="min-w-0 flex-1"><span className="block truncate text-meta font-semibold text-content-primary">{rule.pairLabel}</span><span className="block text-meta text-content-secondary">{metricLabel(rule.metric, t)}{rule.threshold !== undefined ? ` ${rule.threshold}` : ""} · {alertTimeframe(rule.metric, t)}</span></span>
+                <button type="button" onClick={() => setRules((current) => current.filter((item) => item.id !== rule.id))} className="grid h-7 w-7 place-items-center text-content-secondary hover:text-market-negative" aria-label={t("alerts.delete")}><Trash2 size={12} /></button>
               </div>
-            )) : <p className="rounded-lg bg-base-elevated/55 p-3 text-[11px] text-base-muted">{t("alerts.noRules")}</p>}
+            )) : <p className="rounded-card bg-surface-interactive/55 p-3 text-meta text-content-secondary">{t("alerts.noRules")}</p>}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-base-line/60 pt-3">
-            <p className="text-[10px] text-base-muted">{t("alerts.inApp")}</p>
-            {notificationState !== "granted" ? <button type="button" onClick={() => void enableNotifications()} className="rounded-full bg-base-elevated px-3 py-1.5 text-[10px] font-semibold text-base-text">{t("alerts.enableNotifications")}</button> : <span className="text-[10px] font-semibold text-base-mint">{t("alerts.notificationsEnabled")}</span>}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle/60 pt-3">
+            <p className="text-meta text-content-secondary">{t("alerts.inApp")}</p>
+            {notificationState !== "granted" ? <button type="button" onClick={() => void enableNotifications()} className="rounded-pill bg-surface-interactive px-3 py-2 text-meta font-semibold text-content-primary">{t("alerts.enableNotifications")}</button> : <span className="text-meta font-semibold text-operation-success">{t("alerts.notificationsEnabled")}</span>}
           </div>
 
-          {triggers.length > 0 ? <div className="mt-3 space-y-1.5 border-t border-base-line/60 pt-3">{triggers.slice(0, 3).map((trigger) => {
+          {triggers.length > 0 ? <div className="mt-3 space-y-2 border-t border-border-subtle/60 pt-3">{triggers.slice(0, 3).map((trigger) => {
             const rule = rules.find((item) => item.id === trigger.ruleId);
             const copy = localizedTrigger(trigger, rule, t);
-            return <div key={trigger.key} className="rounded-lg bg-base-amber/10 p-2 text-[10px]"><p className="font-semibold text-base-text">{copy.title}</p><p className="mt-1 text-base-muted">{copy.detail} · {trigger.source} · {rule ? alertTimeframe(rule.metric, t) : trigger.timeframe}</p></div>;
+            return <div key={trigger.key} className="rounded-card bg-freshness-delayed/10 p-2 text-meta"><p className="font-semibold text-content-primary">{copy.title}</p><p className="mt-1 text-content-secondary">{copy.detail} · {trigger.source} · {rule ? alertTimeframe(rule.metric, t) : trigger.timeframe}</p></div>;
           })}</div> : null}
         </div>
       ) : null}

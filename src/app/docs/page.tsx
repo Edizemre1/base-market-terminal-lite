@@ -17,7 +17,7 @@ export default async function DocsPage() {
   const safetyItems = t(trade.transactionExecutionEnabled ? "docs.stagingSafetyItems" : "docs.safetyItems").split("|");
   const buildItems = t(trade.transactionExecutionEnabled ? "docs.stagingBuildItems" : "docs.buildItems").split("|");
   return (
-    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-base-black p-2 outline-none">
+    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-surface-canvas p-2 outline-none">
       <h1 className="sr-only">{t("docs.h1")}</h1>
       <section className="grid gap-2 xl:grid-cols-[320px_minmax(0,1fr)]">
         <TerminalPanel
@@ -29,9 +29,9 @@ export default async function DocsPage() {
             {safetyItems.map((item) => (
               <div
                 key={item}
-                className="flex items-start gap-2 border border-base-line bg-base-elevated px-2 py-1.5 text-[11px] leading-4 text-base-text"
+                className="flex items-start gap-2 border border-border-subtle bg-surface-interactive px-2 py-2 text-meta leading-4 text-content-primary"
               >
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 bg-base-mint" />
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 bg-brand-accent" />
                 <span>{item}</span>
               </div>
             ))}
@@ -42,18 +42,18 @@ export default async function DocsPage() {
           <TerminalPanel
             label={t("docs.builder")}
             title={t("docs.builderTitle")}
-            meta={<StatusPill label={t("docs.builderBadge")} />}
+            meta={<StatusPill label={t("docs.builderBadge")} tone="muted" />}
           >
             <div className="grid gap-1 md:grid-cols-2">
               {buildItems.map((item, index) => (
                 <article
                   key={item}
-                  className="border border-base-line bg-base-elevated p-2"
+                  className="border border-border-subtle bg-surface-interactive p-2"
                 >
-                  <p className="font-mono text-[10px] text-base-muted">
+                  <p className="font-mono text-meta text-content-secondary">
                     {(index + 1).toString().padStart(2, "0")}
                   </p>
-                  <p className="mt-1 text-[12px] font-semibold text-base-text">
+                  <p className="mt-1 text-label font-semibold text-content-primary">
                     {item}
                   </p>
                 </article>
@@ -62,12 +62,12 @@ export default async function DocsPage() {
           </TerminalPanel>
 
           <TerminalPanel label={t("docs.roadmap")} title={t("docs.roadmapTitle")}>
-            <p className="text-[11px] leading-4 text-base-muted">
+            <p className="text-meta leading-4 text-content-secondary">
               {t(trade.transactionExecutionEnabled ? "docs.stagingRoadmapBody" : "docs.roadmapBody")}
             </p>
           </TerminalPanel>
           <TerminalPanel label={t("docs.formula")} title={t("docs.formulaTitle")}>
-            <p className="text-[11px] leading-5 text-base-muted">{t("docs.formulaBody")}</p>
+            <p className="text-meta leading-5 text-content-secondary">{t("docs.formulaBody")}</p>
           </TerminalPanel>
         </div>
       </section>

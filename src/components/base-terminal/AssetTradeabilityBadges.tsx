@@ -190,7 +190,7 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
       aria-expanded={open}
       aria-label={t("assetTradeability.open", { asset: identity.displaySymbol })}
       onClick={() => setOpen((value) => !value)}
-      className={cx("inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full px-1 outline-none focus-visible:ring-2 focus-visible:ring-base-mint/50", className)}
+      className={cx("inline-flex min-h-9 shrink-0 items-center gap-1 rounded-pill px-1 outline-none focus-visible:ring-2 focus-visible:ring-focus", className)}
       data-testid="asset-tradeability-group"
       data-identity-status={identity.status}
       data-tradeability-status={tradeability.status}
@@ -206,7 +206,7 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
 export function AssetIdentityBadge({ assessment, compact = false }: { assessment: AssetIdentityAssessment; compact?: boolean }) {
   const { t } = useI18n();
   const Icon = IDENTITY_ICONS[assessment.status];
-  return <span className={cx("inline-flex items-center gap-1 rounded-full border px-1.5 py-1 font-mono text-[8px] font-semibold", identityTone(assessment.status))} data-testid="asset-identity-badge">
+  return <span className={cx("inline-flex items-center gap-1 rounded-pill border px-2 py-1 font-mono text-meta font-semibold", identityTone(assessment.status))} data-testid="asset-identity-badge">
     <Icon size={11} aria-hidden="true" />
     {!compact ? t(`identity.status.${assessment.status}` as TranslationKey) : null}
   </span>;
@@ -215,7 +215,7 @@ export function AssetIdentityBadge({ assessment, compact = false }: { assessment
 export function TradeabilityBadge({ assessment, compact = false }: { assessment: TradeabilityAssessment; compact?: boolean }) {
   const { t } = useI18n();
   const Icon = TRADEABILITY_ICONS[assessment.status];
-  return <span className={cx("inline-flex items-center gap-1 rounded-full border px-1.5 py-1 font-mono text-[8px] font-semibold", tradeTone(assessment.status))} data-testid="tradeability-badge">
+  return <span className={cx("inline-flex items-center gap-1 rounded-pill border px-2 py-1 font-mono text-meta font-semibold", tradeTone(assessment.status))} data-testid="tradeability-badge">
     <Icon size={11} className={assessment.status === "quote_loading" ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden="true" />
     {!compact ? t(`tradeability.status.${assessment.status}` as TranslationKey) : null}
   </span>;
@@ -234,12 +234,12 @@ const AssetTradeabilityPopover = function AssetTradeabilityPopover({ pair, ident
     ref={dialogRef}
     role="dialog"
     aria-label={t("assetTradeability.details", { asset: identity.displaySymbol })}
-    className="fixed z-[120] max-h-[min(620px,82vh)] w-[320px] overflow-y-auto rounded-xl border border-base-line bg-base-panel p-3 shadow-2xl"
+    className="fixed z-layer-popover max-h-[min(620px,82vh)] w-popover overflow-y-auto rounded-panel border border-border-subtle bg-surface-panel p-3 shadow-popover"
     style={{ top: position.top, left: position.left, transform: position.top > window.innerHeight / 2 ? "translateY(-100%)" : undefined }}
     data-testid="asset-tradeability-popover"
   >
-    <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("assetTradeability.title")}</p><h3 className="mt-1 text-[13px] font-semibold text-base-text">{identity.displayName} · {identity.displaySymbol}</h3></div><ChartNoAxesCombined size={16} className="text-base-muted" aria-hidden="true" /></div>
-    <dl className="mt-3 space-y-1.5 text-[9px]">
+    <div className="flex items-start justify-between gap-3"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("assetTradeability.title")}</p><h3 className="mt-1 text-data font-semibold text-content-primary">{identity.displayName} · {identity.displaySymbol}</h3></div><ChartNoAxesCombined size={16} className="text-content-secondary" aria-hidden="true" /></div>
+    <dl className="mt-3 space-y-2 text-meta">
       <Fact label={t("assetTradeability.identityStatus")} value={t(`identity.status.${identity.status}` as TranslationKey)} />
       <Fact label={t("assetTradeability.contract")} value={identity.tokenAddress ?? t("common.noData")} breakAll />
       <Fact label={t("assetTradeability.chain")} value="Base · 8453" />
@@ -253,28 +253,28 @@ const AssetTradeabilityPopover = function AssetTradeabilityPopover({ pair, ident
       <Fact label={t("assetTradeability.lastCheck")} value={formatUtc(tradeability.observedAt)} />
       <Fact label={t("assetTradeability.expires")} value={formatUtc(tradeability.expiresAt)} />
     </dl>
-    <p className="mt-3 rounded-sm bg-base-elevated p-2 text-[9px] leading-4 text-base-muted">{t(`tradeability.description.${tradeability.status}` as TranslationKey)}</p>
-    <p className="mt-2 rounded-sm border border-base-amber/25 bg-base-amber/5 p-2 text-[9px] leading-4 text-base-amber">{identity.resemblesKnownBrand ? t("identity.brandDisclaimer") : identity.status === "verified" ? t("identity.verifiedDisclaimer") : t("identity.unverifiedDisclaimer")}</p>
-    <div className="mt-3 flex flex-wrap gap-2">{baseScan ? <a href={baseScan} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center rounded-sm bg-base-elevated px-2 text-[9px] font-semibold text-base-mint">BaseScan</a> : null}{identity.status === "verified" && identity.officialSourceUrl ? <a href={identity.officialSourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center rounded-sm bg-base-elevated px-2 text-[9px] font-semibold text-base-mint">{t("assetTradeability.officialSource")}</a> : null}</div>
+    <p className="mt-3 rounded-control bg-surface-interactive p-2 text-meta leading-4 text-content-secondary">{t(`tradeability.description.${tradeability.status}` as TranslationKey)}</p>
+    <p className="mt-2 rounded-control border border-freshness-delayed/25 bg-freshness-delayed/5 p-2 text-meta leading-4 text-freshness-delayed">{identity.resemblesKnownBrand ? t("identity.brandDisclaimer") : identity.status === "verified" ? t("identity.verifiedDisclaimer") : t("identity.unverifiedDisclaimer")}</p>
+    <div className="mt-3 flex flex-wrap gap-2">{baseScan ? <a href={baseScan} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center rounded-control bg-surface-interactive px-2 text-meta font-semibold text-brand-accent">BaseScan</a> : null}{identity.status === "verified" && identity.officialSourceUrl ? <a href={identity.officialSourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center rounded-control bg-surface-interactive px-2 text-meta font-semibold text-brand-accent">{t("assetTradeability.officialSource")}</a> : null}</div>
   </div>;
 };
 
 function Fact({ label, value, breakAll = false }: { label: string; value: string; breakAll?: boolean }) {
-  return <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-2"><dt className="text-base-muted">{label}</dt><dd className={cx("text-right font-mono text-base-text", breakAll && "break-all")}>{value}</dd></div>;
+  return <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-2"><dt className="text-content-secondary">{label}</dt><dd className={cx("text-right font-mono text-content-primary", breakAll && "break-all")}>{value}</dd></div>;
 }
 
 function identityTone(status: AssetIdentityStatus) {
-  if (status === "verified") return "border-base-mint/35 bg-base-mint/10 text-base-mint";
-  if (status === "conflicting") return "border-base-rose/40 bg-base-rose/10 text-base-rose";
-  return "border-base-line bg-base-elevated text-base-muted";
+  if (status === "verified") return "border-trust-verified/35 bg-trust-verified/10 text-trust-verified";
+  if (status === "conflicting") return "border-trust-conflicting/40 bg-trust-conflicting/10 text-trust-conflicting";
+  return "border-border-subtle bg-surface-interactive text-content-secondary";
 }
 
 function tradeTone(status: TradeabilityStatus) {
-  if (status === "quote_available" || status === "transaction_ready") return "border-base-mint/35 bg-base-mint/10 text-base-mint";
-  if (status === "quote_loading") return "border-base-cyan/35 bg-base-cyan/10 text-base-cyan";
-  if (["wrong_network", "wallet_required", "review_ready", "approval_required", "simulation_required", "quote_expired"].includes(status)) return "border-base-amber/35 bg-base-amber/10 text-base-amber";
-  if (["no_route", "provider_unavailable", "token_metadata_invalid"].includes(status)) return "border-base-rose/35 bg-base-rose/10 text-base-rose";
-  return "border-base-line bg-base-elevated text-base-muted";
+  if (status === "quote_available" || status === "transaction_ready") return "border-operation-ready/35 bg-operation-ready/10 text-operation-ready";
+  if (status === "quote_loading") return "border-network-base/35 bg-network-base/10 text-network-base";
+  if (["wrong_network", "wallet_required", "review_ready", "approval_required", "simulation_required", "quote_expired"].includes(status)) return "border-freshness-delayed/35 bg-freshness-delayed/10 text-freshness-delayed";
+  if (["no_route", "provider_unavailable", "token_metadata_invalid"].includes(status)) return "border-operation-failed/35 bg-operation-failed/10 text-operation-failed";
+  return "border-border-subtle bg-surface-interactive text-content-secondary";
 }
 
 function sameAssessment(left: TradeabilityAssessment | undefined, right: TradeabilityAssessment) {

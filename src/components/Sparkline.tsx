@@ -31,12 +31,12 @@ export function Sparkline({
     >
       <path
         d={`${path} L ${width} ${height} L 0 ${height} Z`}
-        fill={positive ? "rgb(var(--color-mint) / 0.1)" : "rgb(var(--color-rose) / 0.08)"}
+        fill={positive ? "rgb(var(--market-positive) / 0.1)" : "rgb(var(--market-negative) / 0.08)"}
       />
       <path
         d={path}
         fill="none"
-        stroke={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
+        stroke={positive ? "rgb(var(--market-positive))" : "rgb(var(--market-negative))"}
         strokeLinecap="square"
         strokeLinejoin="miter"
         strokeWidth="1.5"

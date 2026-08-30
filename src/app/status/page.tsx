@@ -34,13 +34,13 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
     snapshot.generatedAt === "mock-static" ? t("status.staticSnapshot") : snapshot.generatedAt;
 
   return (
-    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-base-black p-2 outline-none">
+    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-surface-canvas p-2 outline-none">
       <h1 className="sr-only">{t("status.h1")}</h1>
       <section className="grid gap-2 xl:grid-cols-[320px_minmax(0,1fr)]">
         <TerminalPanel
           label={t("status.label")}
           title={t("status.title")}
-          meta={<StatusPill label={trade.transactionExecutionEnabled ? t("status.stagingExecution") : t("status.readOnly")} tone={trade.transactionExecutionEnabled ? "amber" : "mint"} />}
+          meta={<StatusPill label={trade.transactionExecutionEnabled ? t("status.stagingExecution") : t("status.readOnly")} tone={trade.transactionExecutionEnabled ? "amber" : "muted"} />}
         >
           <div className="space-y-2">
             <StatusRow label={t("status.app")} value={APP_NAME} />
@@ -50,7 +50,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
           </div>
           <Link
             href="/terminal"
-            className="mt-3 inline-flex border border-base-line bg-base-panel px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-base-mint hover:border-base-mint hover:text-base-text"
+            className="mt-3 inline-flex border border-border-subtle bg-surface-panel px-2 py-1 text-meta uppercase tracking-eyebrow text-brand-accent hover:border-border-strong hover:text-content-primary"
           >
             {t("status.openTerminal")}
           </Link>
@@ -79,7 +79,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
               {t(trade.transactionExecutionEnabled ? "status.executionItems" : "status.boundaryItems").split("|").map((item) => (
                 <div
                   key={item}
-                  className="border border-base-line bg-base-elevated px-2 py-1.5 text-[11px] text-base-text"
+                  className="border border-border-subtle bg-surface-interactive px-2 py-2 text-meta text-content-primary"
                 >
                   {item}
                 </div>
@@ -92,9 +92,9 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
             title={t("status.qualityTitle")}
             meta={<StatusPill label={t("status.qualityBadge")} tone="blue" />}
           >
-            <p className="text-[11px] leading-4 text-base-muted">
+            <p className="text-meta leading-4 text-content-secondary">
               {t("status.qualityBody")}{" "}
-              <Link href="/api/health" className="font-mono text-base-mint hover:text-base-text">
+              <Link href="/api/health" className="font-mono text-brand-accent hover:text-content-primary">
                 /api/health
               </Link>
               .
@@ -116,15 +116,15 @@ function StatusRow({
   tone?: "default" | "mint" | "amber";
 }) {
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
         className={
           tone === "mint"
-            ? "mt-1 break-words font-mono text-[12px] font-semibold text-base-mint"
+            ? "mt-1 break-words font-mono text-label font-semibold text-brand-accent"
             : tone === "amber"
-              ? "mt-1 break-words font-mono text-[12px] font-semibold text-base-amber"
-              : "mt-1 break-words font-mono text-[12px] font-semibold text-base-text"
+              ? "mt-1 break-words font-mono text-label font-semibold text-freshness-delayed"
+              : "mt-1 break-words font-mono text-label font-semibold text-content-primary"
         }
       >
         {value}

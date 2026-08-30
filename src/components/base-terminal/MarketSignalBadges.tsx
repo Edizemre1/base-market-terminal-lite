@@ -183,7 +183,7 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     id={popoverId}
     role="dialog"
     aria-label={t("marketSignal.details", { market: subject })}
-    className="fixed z-[110] rounded-xl border border-base-line bg-base-panel p-3 text-left shadow-2xl"
+    className="fixed z-layer-popover rounded-panel border border-border-subtle bg-surface-panel p-3 text-left shadow-popover"
     style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverPosition.width }}
     onPointerEnter={showTransient}
     onPointerLeave={scheduleTransientClose}
@@ -192,11 +192,11 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     onClick={(event) => event.stopPropagation()}
     data-testid="market-signal-popover"
   >
-    <span className="flex items-center justify-between gap-2"><strong className="text-[11px] text-base-text">{t("marketSignal.title")}</strong><span className="font-mono text-[8px] uppercase text-base-muted">{scope === "pool" ? t("marketSignal.poolScope") : t("marketSignal.opportunityScope")}</span></span>
+    <span className="flex items-center justify-between gap-2"><strong className="text-meta text-content-primary">{t("marketSignal.title")}</strong><span className="font-mono text-meta uppercase text-content-secondary">{scope === "pool" ? t("marketSignal.poolScope") : t("marketSignal.opportunityScope")}</span></span>
     <span className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
       {selection.all.map((badge) => <SignalDetail key={badge.id} badge={badge} locale={locale} onOpenPoolDetails={openPoolDetails} />)}
     </span>
-    <span className="mt-2 block border-t border-base-line pt-2 text-[9px] leading-4 text-base-muted">{t("marketSignal.disclaimer")}</span>
+    <span className="mt-2 block border-t border-border-subtle pt-2 text-meta leading-4 text-content-secondary">{t("marketSignal.disclaimer")}</span>
   </div> : null;
   return <span
     ref={rootRef}
@@ -210,7 +210,7 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
   >
     <button
       type="button"
-      className="inline-flex min-h-11 items-center gap-1 rounded-full px-1 outline-none focus-visible:ring-2 focus-visible:ring-base-mint/50"
+      className="inline-flex min-h-11 items-center gap-1 rounded-pill px-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
       aria-label={t("marketSignal.open", { market: subject, count: badges.length })}
       aria-expanded={visible}
       aria-controls={popoverId}
@@ -221,7 +221,7 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
       }}
     >
       {selection.visible.map((badge) => <SignalGlyph key={badge.id} badge={badge} />)}
-      {selection.hiddenCount > 0 ? <span className="grid h-6 min-w-6 place-items-center rounded-full border border-base-line bg-base-elevated px-1 font-mono text-[8px] text-base-muted">+{selection.hiddenCount}</span> : null}
+      {selection.hiddenCount > 0 ? <span className="grid h-6 min-w-6 place-items-center rounded-pill border border-border-subtle bg-surface-interactive px-1 font-mono text-meta text-content-secondary">+{selection.hiddenCount}</span> : null}
     </button>
     {typeof document !== "undefined" ? createPortal(popover, document.body) : null}
   </span>;
@@ -231,13 +231,13 @@ export function MarketSignalLegend({ selected, onChange }: { selected: readonly 
   const { t } = useI18n();
   const selectedSet = new Set(selected);
   return <details className="relative" data-testid="market-signal-legend">
-    <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-sm bg-base-elevated px-2 text-[10px] text-base-muted"><Activity size={12} aria-hidden="true" />{t("marketSignal.legend")}{selected.length ? <span className="rounded-full bg-base-mint/10 px-1.5 text-base-mint">{selected.length}</span> : null}</summary>
-    <div className="absolute right-0 top-10 z-40 w-[min(360px,calc(100vw-24px))] rounded-xl border border-base-line bg-base-panel p-3 shadow-2xl">
-      <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-semibold text-base-text">{t("marketSignal.filterTitle")}</p><p className="mt-1 text-[9px] leading-4 text-base-muted">{t("marketSignal.filterBody")}</p></div>{selected.length ? <button type="button" onClick={() => onChange([])} className="min-h-8 shrink-0 rounded-sm bg-base-elevated px-2 text-[9px] text-base-muted">{t("common.clear")}</button> : null}</div>
-      <div className="mt-3 grid grid-cols-2 gap-1.5">
+    <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-control bg-surface-interactive px-2 text-meta text-content-secondary"><Activity size={12} aria-hidden="true" />{t("marketSignal.legend")}{selected.length ? <span className="rounded-pill bg-brand-accent/10 px-2 text-brand-accent">{selected.length}</span> : null}</summary>
+    <div className="absolute right-0 top-10 z-layer-popover w-[min(360px,calc(100vw-24px))] rounded-panel border border-border-subtle bg-surface-panel p-3 shadow-popover">
+      <div className="flex items-start justify-between gap-3"><div><p className="text-meta font-semibold text-content-primary">{t("marketSignal.filterTitle")}</p><p className="mt-1 text-meta leading-4 text-content-secondary">{t("marketSignal.filterBody")}</p></div>{selected.length ? <button type="button" onClick={() => onChange([])} className="min-h-8 shrink-0 rounded-control bg-surface-interactive px-2 text-meta text-content-secondary">{t("common.clear")}</button> : null}</div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
         {SIGNAL_FILTER_TYPES.map((type) => {
           const active = selectedSet.has(type);
-          return <button key={type} type="button" aria-pressed={active} onClick={() => onChange(active ? selected.filter((item) => item !== type) : [...selected, type])} className={cx("flex min-h-10 items-center gap-2 rounded-sm border px-2 text-left text-[9px]", active ? "border-base-mint/50 bg-base-mint/10 text-base-mint" : "border-base-line bg-base-elevated text-base-muted")} data-signal-filter={type}><SignalGlyph badge={legendBadge(type)} />{t(`marketSignal.${type}`)}</button>;
+          return <button key={type} type="button" aria-pressed={active} onClick={() => onChange(active ? selected.filter((item) => item !== type) : [...selected, type])} className={cx("flex min-h-10 items-center gap-2 rounded-control border px-2 text-left text-meta", active ? "border-border-selected bg-surface-selected text-content-primary" : "border-border-subtle bg-surface-interactive text-content-secondary")} data-signal-filter={type}><SignalGlyph badge={legendBadge(type)} />{t(`marketSignal.${type}`)}</button>;
         })}
       </div>
     </div>
@@ -248,7 +248,7 @@ function SignalGlyph({ badge }: { badge: MarketSignalBadge }) {
   const Icon = MARKET_SIGNAL_ICONS[badge.iconKey];
   const { t } = useI18n();
   return <span
-    className={cx("grid h-6 w-6 place-items-center rounded-full border", toneClass(badge.tone), badge.state === "entering" && "animate-[pulse_1.8s_ease-in-out_1] motion-reduce:animate-none", badge.state === "cooldown" && "opacity-55")}
+    className={cx("grid h-6 w-6 place-items-center rounded-pill border", badgeToneClass(badge), badge.state === "entering" && "animate-[pulse_1.8s_ease-in-out_1] motion-reduce:animate-none", badge.state === "cooldown" && "opacity-55")}
     data-signal-type={badge.type}
     data-signal-state={badge.state}
     title={t(badge.shortLabelKey)}
@@ -259,16 +259,16 @@ function SignalGlyph({ badge }: { badge: MarketSignalBadge }) {
 function SignalDetail({ badge, locale, onOpenPoolDetails }: { badge: MarketSignalBadge; locale: "tr" | "en"; onOpenPoolDetails?: () => void }) {
   const { t } = useI18n();
   const Icon = MARKET_SIGNAL_ICONS[badge.iconKey];
-  return <span className="rounded-lg border border-base-line bg-base-elevated p-2" data-signal-detail={badge.type}>
-    <span className="flex items-center gap-2"><span className={cx("grid h-7 w-7 shrink-0 place-items-center rounded-full border", toneClass(badge.tone))}><Icon size={13} aria-hidden="true" /></span><span><strong className="block text-[10px] text-base-text">{t(badge.labelKey)}</strong><span className="block font-mono text-[8px] uppercase text-base-muted">{t(`marketSignal.state.${badge.state}`)}</span></span></span>
-    <span className="mt-2 block text-[9px] leading-4 text-base-muted">{t(`marketSignal.reason.${badge.type}`)}</span>
-    {badge.metric ? <span className="mt-1 block font-mono text-[8px] leading-4 text-base-text">{formatMetric(badge.metric, locale)} · {t("marketSignal.threshold", { value: formatMetricValue(badge.metric.threshold, badge.metric.unit, locale), window: badge.metric.window })}{badge.metric.comparisonValue !== undefined ? ` · ${t("marketSignal.comparison", { value: formatMetricValue(badge.metric.comparisonValue, badge.metric.unit === "ratio" ? "usd" : badge.metric.unit, locale) })}` : ""}</span> : null}
-    {badge.metric?.volumeUsd !== undefined ? <span className="mt-1 block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.volumeEvidence", { value: formatMetricValue(badge.metric.volumeUsd, "usd", locale), window: badge.metric.window })}</span> : null}
-    {badge.metric?.liquidityUsd !== undefined ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.liquidityEvidence", { value: formatMetricValue(badge.metric.liquidityUsd, "usd", locale) })}</span> : null}
-    {badge.metric?.primaryDex ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.primaryDex", { value: badge.metric.primaryDex })}</span> : null}
-    {badge.metric?.freshness ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.freshness", { value: t(`marketSignal.freshnessValue.${badge.metric.freshness}`) })}</span> : null}
-    {badge.type === "multi_pool" && onOpenPoolDetails ? <button type="button" onClick={onOpenPoolDetails} className="mt-2 min-h-9 rounded-sm bg-base-mint/10 px-2 text-[9px] font-semibold text-base-mint">{t("marketSignal.poolAction")}</button> : null}
-    <span className="mt-1 block break-words font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.source")}: {badge.source}<br />{t("marketSignal.observed")}: {formatUtc(badge.observedAt)}<br />{t("marketSignal.expires")}: {formatUtc(badge.expiresAt)}<br />{t("marketSignal.reasonCode")}: {badge.reasonCode}</span>
+  return <span className="rounded-card border border-border-subtle bg-surface-interactive p-2" data-signal-detail={badge.type}>
+    <span className="flex items-center gap-2"><span className={cx("grid h-7 w-7 shrink-0 place-items-center rounded-pill border", badgeToneClass(badge))}><Icon size={13} aria-hidden="true" /></span><span><strong className="block text-meta text-content-primary">{t(badge.labelKey)}</strong><span className="block font-mono text-meta uppercase text-content-secondary">{t(`marketSignal.state.${badge.state}`)}</span></span></span>
+    <span className="mt-2 block text-meta leading-4 text-content-secondary">{t(`marketSignal.reason.${badge.type}`)}</span>
+    {badge.metric ? <span className="mt-1 block font-mono text-meta leading-4 text-content-primary">{formatMetric(badge.metric, locale)} · {t("marketSignal.threshold", { value: formatMetricValue(badge.metric.threshold, badge.metric.unit, locale), window: badge.metric.window })}{badge.metric.comparisonValue !== undefined ? ` · ${t("marketSignal.comparison", { value: formatMetricValue(badge.metric.comparisonValue, badge.metric.unit === "ratio" ? "usd" : badge.metric.unit, locale) })}` : ""}</span> : null}
+    {badge.metric?.volumeUsd !== undefined ? <span className="mt-1 block font-mono text-meta leading-4 text-content-secondary">{t("marketSignal.volumeEvidence", { value: formatMetricValue(badge.metric.volumeUsd, "usd", locale), window: badge.metric.window })}</span> : null}
+    {badge.metric?.liquidityUsd !== undefined ? <span className="block font-mono text-meta leading-4 text-content-secondary">{t("marketSignal.liquidityEvidence", { value: formatMetricValue(badge.metric.liquidityUsd, "usd", locale) })}</span> : null}
+    {badge.metric?.primaryDex ? <span className="block font-mono text-meta leading-4 text-content-secondary">{t("marketSignal.primaryDex", { value: badge.metric.primaryDex })}</span> : null}
+    {badge.metric?.freshness ? <span className="block font-mono text-meta leading-4 text-content-secondary">{t("marketSignal.freshness", { value: t(`marketSignal.freshnessValue.${badge.metric.freshness}`) })}</span> : null}
+    {badge.type === "multi_pool" && onOpenPoolDetails ? <button type="button" onClick={onOpenPoolDetails} className="mt-2 min-h-9 rounded-control bg-brand-accent/10 px-2 text-meta font-semibold text-brand-accent">{t("marketSignal.poolAction")}</button> : null}
+    <span className="mt-1 block break-words font-mono text-meta leading-4 text-content-secondary">{t("marketSignal.source")}: {badge.source}<br />{t("marketSignal.observed")}: {formatUtc(badge.observedAt)}<br />{t("marketSignal.expires")}: {formatUtc(badge.expiresAt)}<br />{t("marketSignal.reasonCode")}: {badge.reasonCode}</span>
   </span>;
 }
 
@@ -280,12 +280,17 @@ function legendBadge(type: MarketSignalType): MarketSignalBadge {
   return { id: `legend:${type}`, type, tone, iconKey, labelKey: `marketSignal.${type}`, shortLabelKey: `marketSignal.${type}.short`, reasonCode: "legend", source: "legend", observedAt: new Date(0).toISOString(), expiresAt: new Date(0).toISOString(), priority: 0, state: "active", scope: "opportunity", subjectId: "legend" };
 }
 
-function toneClass(tone: MarketSignalTone) {
-  if (tone === "positive") return "border-base-mint/45 bg-base-mint/10 text-base-mint";
-  if (tone === "info") return "border-cyan-400/45 bg-cyan-400/10 text-cyan-300";
-  if (tone === "warning") return "border-base-amber/45 bg-base-amber/10 text-base-amber";
-  if (tone === "critical") return "border-base-rose/55 bg-base-rose/10 text-base-rose";
-  return "border-base-line bg-base-elevated text-base-muted";
+function badgeToneClass(badge: MarketSignalBadge) {
+  if (badge.type === "contract_verified") return "border-trust-verified/45 bg-trust-verified/10 text-trust-verified";
+  if (badge.type === "risk_flagged") return "border-trust-risk/55 bg-trust-risk/10 text-trust-risk";
+  if (badge.type === "volume_surge" || badge.type === "high_volume") return "border-market-volume/45 bg-market-volume/10 text-market-volume";
+  if (badge.type === "gaining_fast" || badge.type === "breakout" || badge.type === "moving_now") return "border-market-positive/45 bg-market-positive/10 text-market-positive";
+  if (badge.type === "just_launched" || badge.type === "new_market") return "border-network-base/45 bg-network-base/10 text-network-base";
+  if (badge.tone === "info") return "border-trust-verified/45 bg-trust-verified/10 text-trust-verified";
+  if (badge.tone === "warning") return "border-freshness-delayed/45 bg-freshness-delayed/10 text-freshness-delayed";
+  if (badge.tone === "critical") return "border-trust-risk/55 bg-trust-risk/10 text-trust-risk";
+  if (badge.tone === "positive") return "border-market-positive/45 bg-market-positive/10 text-market-positive";
+  return "border-border-subtle bg-surface-interactive text-content-secondary";
 }
 
 function formatMetric(metric: NonNullable<MarketSignalBadge["metric"]>, locale: "tr" | "en") {

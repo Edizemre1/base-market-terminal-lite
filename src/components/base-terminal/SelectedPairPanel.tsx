@@ -41,10 +41,10 @@ export function SelectedPairPanel({
     <section
       {...getMarketInvariantAttributes(pair)}
       id="selected-market"
-      className="pulse-surface flex min-h-0 flex-col overflow-hidden rounded-xl"
+      className="pulse-surface flex min-h-0 flex-col overflow-hidden rounded-panel"
       data-testid="selected-pair-panel"
     >
-      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-3">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-surface-raised px-3">
         <div className="flex min-w-0 items-center gap-2">
           <PairAvatarStack
             baseSymbol={pair.baseToken}
@@ -59,34 +59,34 @@ export function SelectedPairPanel({
             size="md"
           />
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
+            <p className="text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
               {t("workspace.selected")}
             </p>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
               <h2
-                className="truncate text-[15px] font-semibold leading-5 text-base-text"
+                className="truncate text-title-sm font-semibold leading-5 text-content-primary"
                 data-testid="selected-pair-title"
               >
                 {pair.pair}
               </h2>
               <MarketSignalBadges pair={pair} />
               <AssetTradeabilityBadges pair={pair} compact={false} />
-              <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
+              <span className="border border-border-subtle bg-surface-panel px-2 py-1 font-mono text-meta uppercase tracking-eyebrow text-content-secondary">
                 {pair.dexName ?? pair.dex}
               </span>
-              <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
+              <span className="border border-border-subtle bg-surface-panel px-2 py-1 font-mono text-meta uppercase tracking-eyebrow text-content-secondary">
                 {pair.dataSource === "mock" ? t("market.demoData") : t("workspace.readOnlyData")}
               </span>
-              <span className="max-w-[128px] truncate border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] text-base-muted">
+              <span className="max-w-[128px] truncate border border-border-subtle bg-surface-panel px-2 py-1 font-mono text-meta text-content-secondary">
                 {pair.address}
               </span>
               {isDemoFallbackSelected ? (
-                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
+                <span className="border border-freshness-delayed/45 bg-freshness-delayed/10 px-2 py-1 font-mono text-meta text-freshness-delayed">
                   {t("workspace.demoFallback")}
                 </span>
               ) : null}
               {pair.stale ? (
-                <span className="border border-base-amber/45 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[9px] text-base-amber">
+                <span className="border border-freshness-delayed/45 bg-freshness-delayed/10 px-2 py-1 font-mono text-meta text-freshness-delayed">
                   {pair.staleReason ?? t("workspace.stalePair")}
                 </span>
               ) : null}
@@ -95,7 +95,7 @@ export function SelectedPairPanel({
                   href={pair.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="grid h-5 w-5 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
+                  className="grid h-5 w-5 place-items-center border border-border-subtle bg-surface-interactive text-content-secondary hover:border-border-strong hover:text-content-primary"
                   aria-label={t("workspace.openSource", { pair: pair.pair })}
                 >
                   <ExternalLink size={11} aria-hidden="true" />
@@ -104,11 +104,11 @@ export function SelectedPairPanel({
             </div>
           </div>
         </div>
-        <div className="hidden shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted md:flex">
+        <div className="hidden shrink-0 items-center gap-1 text-meta font-semibold uppercase tracking-eyebrow text-content-secondary md:flex">
           <button
             type="button"
             onClick={() => onRefreshChart(pair)}
-            className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-elevated px-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-base-muted hover:border-base-mint hover:text-base-mint"
+            className="inline-flex h-control-s items-center gap-1 rounded-control border border-border-subtle bg-surface-interactive px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus"
             title={t("workspace.refreshChart")}
           >
             <RefreshCw size={10} aria-hidden="true" />
@@ -117,13 +117,13 @@ export function SelectedPairPanel({
         </div>
       </div>
 
-      <div className="grid shrink-0 gap-1 border-b border-base-line p-2 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid shrink-0 gap-1 border-b border-border-subtle p-2 sm:grid-cols-2 lg:grid-cols-6">
         <Metric label={t("workspace.price", { quote: pair.quoteToken })} value={pair.price} detail={pair.priceUsd} />
         <Metric
           label={t("workspace.change24h")}
           value={typeof change24h === "number" ? localPercent(change24h) : t("common.noData")}
           detail={`5m ${typeof pair.priceChanges?.m5 === "number" ? localPercent(pair.priceChanges.m5) : t("common.noData")} / 1h ${typeof pair.priceChanges?.h1 === "number" ? localPercent(pair.priceChanges.h1) : t("common.noData")}`}
-          tone={typeof change24h !== "number" || change24h === 0 ? "default" : change24h > 0 ? "mint" : "rose"}
+          tone={typeof change24h !== "number" || change24h === 0 ? "default" : change24h > 0 ? "positive" : "negative"}
         />
         <Metric
           label={t("workspace.volume24h")}
@@ -163,26 +163,26 @@ function Metric({
   label: string;
   value: string;
   detail: string;
-  tone?: "default" | "mint" | "rose";
+  tone?: "default" | "positive" | "negative";
 }) {
   return (
-    <div className="border border-base-line bg-base-panel p-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+    <div className="border border-border-subtle bg-surface-panel p-2">
+      <p className="text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
         {label}
       </p>
       <p
         className={cx(
-          "mt-2 font-mono text-[15px] font-semibold leading-none",
-          tone === "mint"
-            ? "text-base-mint"
-            : tone === "rose"
-              ? "text-base-rose"
-              : "text-base-text"
+          "mt-2 font-mono text-title-sm font-semibold leading-none",
+          tone === "positive"
+            ? "text-market-positive"
+            : tone === "negative"
+              ? "text-market-negative"
+              : "text-content-primary"
         )}
       >
         {value}
       </p>
-      <p className="mt-1 font-mono text-[10px] text-base-muted">{detail}</p>
+      <p className="mt-1 font-mono text-meta text-content-secondary">{detail}</p>
     </div>
   );
 }
@@ -270,44 +270,44 @@ function ChartPanel({
   return (
     <div
       className={cx(
-        "market-scanline flex flex-col overflow-hidden rounded-xl border border-base-line/60 bg-base-panel",
+        "market-scanline flex flex-col overflow-hidden rounded-panel border border-border-subtle/60 bg-surface-panel",
         expanded
-          ? "fixed inset-3 z-[80] h-auto bg-base-panel shadow-2xl sm:inset-6"
+          ? "fixed inset-3 z-layer-modal h-auto bg-surface-panel shadow-overlay sm:inset-6"
           : "h-[320px] sm:h-[340px] lg:h-[360px] 2xl:h-[380px]"
       )}
       data-testid="chart-panel"
     >
-      <div className="relative z-20 shrink-0 border-b border-base-line bg-base-raised px-2 py-1.5 md:pr-[188px]">
+      <div className="relative z-layer-shell shrink-0 border-b border-border-subtle bg-surface-raised px-2 py-2 md:pr-chart-toolbar">
         <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-2 font-mono text-[12px] font-semibold text-base-text">
+          <p className="flex flex-wrap items-center gap-2 font-mono text-label font-semibold text-content-primary">
             <span>{pair.pair.replace(" / ", "/")}</span>
-            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-base-muted">
+            <span className="border border-border-subtle bg-surface-interactive px-2 py-1 text-meta uppercase tracking-eyebrow text-content-secondary">
               {chartLabel}
             </span>
           </p>
           {hasReadOnlyOhlcv && latest ? (
-            <p className="mt-1 font-mono text-[10px] text-base-mint">
+            <p className="mt-1 font-mono text-meta text-content-primary">
               O {formatChartValue(latest.open)} H {formatChartValue(latest.high)} L{" "}
               {formatChartValue(latest.low)} C {formatChartValue(latest.close)} V{" "}
               {localCurrency(latest.volume)}
             </p>
           ) : (
-            <p className="mt-1 font-mono text-[10px] text-base-amber">
+            <p className="mt-1 font-mono text-meta text-freshness-delayed">
               {t("chart.unavailableNoSynthetic")}
             </p>
           )}
-          <p className="font-mono text-[10px] text-base-muted">
+          <p className="font-mono text-meta text-content-secondary">
             {hasReadOnlyOhlcv
               ? t("chart.cachedReadOnly")
               : pair.dataSource === "mock" ? t("chart.notConnected") : t("chart.unavailablePair")}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-base-muted">
+          <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-meta text-content-secondary">
             <span>{t("chart.lastUpdated", { time: formatChartTimestamp(pair.chartUpdatedAt, locale) })}</span>
-            {statusMessage ? <span className="text-base-amber">{statusMessage}</span> : null}
+            {statusMessage ? <span className="text-freshness-delayed">{statusMessage}</span> : null}
           </div>
         </div>
-        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5 md:absolute md:right-2 md:top-1.5 md:z-30 md:mt-0 md:justify-end">
-          <div className="flex h-6 items-center border border-base-line bg-base-elevated">
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 md:absolute md:right-2 md:top-2 md:z-layer-popover md:mt-0 md:justify-end">
+          <div className="flex h-control-s items-center rounded-control border border-border-subtle bg-surface-interactive">
             {(["15m", "1h", "4h", "1d"] as ChartTimeframe[]).map((option) => (
               <button
                 key={option}
@@ -317,10 +317,10 @@ function ChartPanel({
                   onRefreshChart(pair, option);
                 }}
                 className={cx(
-                  "h-full border-r border-base-line px-1.5 font-mono text-[10px] uppercase last:border-r-0",
+                  "h-full border-r border-border-subtle px-2 font-mono text-meta uppercase outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus",
                   timeframe === option
-                    ? "bg-base-mint/10 text-base-mint"
-                    : "text-base-muted hover:text-base-text"
+                    ? "bg-surface-selected text-content-primary"
+                    : "text-content-secondary hover:text-content-primary"
                 )}
               >
                 {option.toUpperCase()}
@@ -331,7 +331,7 @@ function ChartPanel({
             type="button"
             onClick={() => onRefreshChart(pair, timeframe)}
             disabled={refreshStatus === "refreshing"}
-            className="relative z-40 inline-flex h-6 items-center gap-1 border border-base-line bg-base-elevated px-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-base-muted hover:border-base-mint hover:text-base-mint disabled:cursor-not-allowed disabled:opacity-60"
+            className="relative z-layer-popover inline-flex h-control-s items-center gap-1 rounded-control border border-border-subtle bg-surface-interactive px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
             title={t("workspace.refreshChart")}
           >
             <RefreshCw
@@ -349,7 +349,7 @@ function ChartPanel({
                 setFrozenCandles(undefined);
               }}
               data-testid="resume-live-chart"
-              className="relative z-40 h-6 rounded-full bg-base-mint px-2 font-mono text-[10px] font-bold text-[#031411]"
+              className="relative z-layer-popover h-control-s rounded-control bg-operation-ready px-2 font-mono text-meta font-bold text-content-primary"
             >
               {t("chart.resume")}
             </button>
@@ -357,17 +357,17 @@ function ChartPanel({
           <button
             type="button"
             onClick={() => setExpanded((current) => !current)}
-            className="relative z-40 grid h-6 w-6 place-items-center rounded-sm border border-base-line bg-base-elevated text-base-muted outline-none hover:border-base-mint hover:text-base-mint focus-visible:ring-2 focus-visible:ring-base-mint/40"
+            className="relative z-layer-popover grid h-control-s w-control-s place-items-center rounded-control border border-border-subtle bg-surface-interactive text-content-secondary outline-none hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus"
             aria-label={expanded ? t("chart.collapse") : t("chart.expand")}
           >
             {expanded ? <Minimize2 size={12} aria-hidden="true" /> : <Maximize2 size={12} aria-hidden="true" />}
           </button>
           <span
             className={cx(
-              "border px-1.5 py-0.5 font-mono text-[10px]",
+              "border px-2 py-1 font-mono text-meta",
               hasReadOnlyOhlcv
-                ? "border-base-mint/40 bg-base-mint/10 text-base-mint"
-                : "border-base-amber/45 bg-base-amber/10 text-base-amber"
+                ? "border-freshness-live/35 bg-freshness-live/10 text-freshness-live"
+                : "border-freshness-delayed/45 bg-freshness-delayed/10 text-freshness-delayed"
             )}
           >
             {hasReadOnlyOhlcv && latest ? t("chart.last", { value: formatChartValue(latest.close) }) : t("chart.noData")}
@@ -398,8 +398,8 @@ function ChartPanel({
         <title>{t("chart.svgTitle", { pair: pair.pair })}</title>
         <defs>
           <linearGradient id={`chart-fill-${pair.id}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="rgb(var(--color-mint))" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="rgb(var(--color-mint))" stopOpacity="0" />
+            <stop offset="0%" stopColor="rgb(var(--network-base))" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="rgb(var(--network-base))" stopOpacity="0" />
           </linearGradient>
         </defs>
         {Array.from({ length: 5 }).map((_, index) => (
@@ -409,7 +409,7 @@ function ChartPanel({
             x2={plotLeft + plotWidth}
             y1={(priceHeight / 4) * index}
             y2={(priceHeight / 4) * index}
-            stroke="rgb(var(--color-line))"
+            stroke="rgb(var(--border-subtle))"
             strokeOpacity={index === 0 || index === 4 ? "0.9" : "0.48"}
             strokeWidth="1"
           />
@@ -421,7 +421,7 @@ function ChartPanel({
             x2={plotLeft + (plotWidth / 7) * index}
             y1="0"
             y2={volumeTop + volumeHeight}
-            stroke="rgb(var(--color-line))"
+            stroke="rgb(var(--border-subtle))"
             strokeOpacity="0.24"
             strokeWidth="1"
           />
@@ -431,7 +431,7 @@ function ChartPanel({
           x2={plotLeft + plotWidth}
           y1={volumeTop}
           y2={volumeTop}
-          stroke="rgb(var(--color-line))"
+          stroke="rgb(var(--border-subtle))"
           strokeOpacity="0.85"
         />
         {axisTicks.map((value, index) => (
@@ -440,13 +440,13 @@ function ChartPanel({
             x={width - 6}
             y={Math.max(10, Math.min(priceHeight - 2, getChartY(value, min, spread, priceHeight) + 3))}
             textAnchor="end"
-            className="fill-base-muted font-mono text-[9px]"
+            className="fill-content-secondary font-mono text-meta"
           >
             {formatChartValue(value)}
           </text>
         ))}
         <path d={areaPath} fill={`url(#chart-fill-${pair.id})`} />
-        <path d={closePath} fill="none" stroke="rgb(var(--color-mint))" strokeWidth="1" opacity="0.5" />
+        <path d={closePath} fill="none" stroke="rgb(var(--network-base))" strokeWidth="1" opacity="0.72" />
         {visibleCandles.map((candle, index) => {
           const x = plotLeft + index * step;
           const openY = getChartY(candle.open, min, spread, priceHeight);
@@ -464,7 +464,7 @@ function ChartPanel({
                 x2={x}
                 y1={highY}
                 y2={lowY}
-                stroke={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
+                stroke={positive ? "rgb(var(--market-positive))" : "rgb(var(--market-negative))"}
                 strokeOpacity="0.92"
                 strokeWidth="1.1"
               />
@@ -473,7 +473,7 @@ function ChartPanel({
                 y={bodyY}
                 width={candleWidth}
                 height={bodyHeight}
-                fill={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
+                fill={positive ? "rgb(var(--market-positive))" : "rgb(var(--market-negative))"}
                 opacity={positive ? "0.86" : "0.78"}
               />
               <rect
@@ -481,7 +481,7 @@ function ChartPanel({
                 y={volumeTop + volumeHeight - volumeBarHeight}
                 width={candleWidth}
                 height={volumeBarHeight}
-                fill={positive ? "rgb(var(--color-mint))" : "rgb(var(--color-rose))"}
+                fill={positive ? "rgb(var(--market-positive))" : "rgb(var(--market-negative))"}
                 opacity={positive ? "0.28" : "0.2"}
               />
             </g>
@@ -490,20 +490,20 @@ function ChartPanel({
         {timeTickIndexes.map((index) => {
           const candle = visibleCandles[index];
           return candle ? (
-            <text key={`time-${index}`} x={plotLeft + index * step} y={height - 3} textAnchor={index === 0 ? "start" : index === visibleCandles.length - 1 ? "end" : "middle"} className="fill-base-muted font-mono text-[9px]">
+            <text key={`time-${index}`} x={plotLeft + index * step} y={height - 3} textAnchor={index === 0 ? "start" : index === visibleCandles.length - 1 ? "end" : "middle"} className="fill-content-secondary font-mono text-meta">
               {formatCandleTime(candle.timestamp, locale)}
             </text>
           ) : null;
         })}
         {hoveredCandle && hoveredIndex !== undefined ? (
-          <line x1={plotLeft + hoveredIndex * step} x2={plotLeft + hoveredIndex * step} y1="0" y2={volumeTop + volumeHeight} stroke="rgb(var(--color-text))" strokeDasharray="2 4" strokeOpacity="0.4" />
+          <line x1={plotLeft + hoveredIndex * step} x2={plotLeft + hoveredIndex * step} y1="0" y2={volumeTop + volumeHeight} stroke="rgb(var(--content-primary))" strokeDasharray="2 4" strokeOpacity="0.4" />
         ) : null}
         <line
           x1={plotLeft}
           x2={plotLeft + plotWidth}
           y1={currentPriceY}
           y2={currentPriceY}
-          stroke="rgb(var(--color-mint))"
+          stroke="rgb(var(--network-base))"
           strokeDasharray="3 5"
           strokeOpacity="0.58"
         />
@@ -512,26 +512,26 @@ function ChartPanel({
           y={Math.max(2, Math.min(priceHeight - 16, currentPriceY - 8))}
           width="58"
           height="16"
-          fill="rgb(var(--color-mint))"
+          fill="rgb(var(--network-base))"
           opacity="0.14"
         />
         <text
           x={width - 6}
           y={Math.max(12, Math.min(priceHeight - 4, currentPriceY + 3))}
           textAnchor="end"
-          className="fill-base-mint font-mono text-[10px] font-semibold"
+          className="fill-brand-accent font-mono text-meta font-semibold"
         >
           {formatChartValue(latest.close)}
         </text>
         </svg>
         {hoveredCandle ? (
-          <div className="pointer-events-none absolute left-3 top-3 rounded-sm border border-base-line bg-base-panel/95 px-2.5 py-2 font-mono text-[10px] text-base-text shadow-panel">
-            <p className="text-base-muted">{formatCandleTimestamp(hoveredCandle.timestamp, locale)}</p>
+          <div className="pointer-events-none absolute left-3 top-3 rounded-control border border-border-subtle bg-surface-panel/95 px-3 py-2 font-mono text-meta text-content-primary shadow-raised">
+            <p className="text-content-secondary">{formatCandleTimestamp(hoveredCandle.timestamp, locale)}</p>
             <p className="mt-1">O {formatChartValue(hoveredCandle.open)} · H {formatChartValue(hoveredCandle.high)} · L {formatChartValue(hoveredCandle.low)} · C {formatChartValue(hoveredCandle.close)}</p>
-            <p className="mt-1 text-base-muted">{t("chart.volume")} {localCurrency(hoveredCandle.volume)}</p>
+            <p className="mt-1 text-content-secondary">{t("chart.volume")} {localCurrency(hoveredCandle.volume)}</p>
           </div>
         ) : null}
-        <span className={cx("pointer-events-none absolute bottom-2 right-3 font-mono text-[10px]", lastMove >= 0 ? "text-base-mint" : "text-base-rose")}>{lastMove >= 0 ? "+" : ""}{formatChartValue(lastMove)}</span>
+        <span className={cx("pointer-events-none absolute bottom-2 right-3 font-mono text-meta", lastMove >= 0 ? "text-market-positive" : "text-market-negative")}>{lastMove >= 0 ? "+" : ""}{formatChartValue(lastMove)}</span>
         </div>
       ) : (
         <ChartUnavailablePlaceholder
@@ -566,25 +566,25 @@ function ChartUnavailablePlaceholder({
         : t("chart.unavailableBody");
 
   return (
-    <div className="relative flex min-h-0 w-full max-w-full flex-1 overflow-hidden border-t border-base-line bg-base-elevated/40 p-2">
+    <div className="relative flex min-h-0 w-full max-w-full flex-1 overflow-hidden border-t border-border-subtle bg-surface-interactive/40 p-2">
       <div
-        className="pointer-events-none absolute inset-2 border border-dashed border-base-line bg-base-panel/45"
+        className="pointer-events-none absolute inset-2 border border-dashed border-border-subtle bg-surface-panel/45"
         aria-hidden="true"
       />
-      <div className="relative z-10 m-auto max-w-[440px] border border-base-line bg-base-panel/95 px-4 py-3 text-center">
-        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-base-muted">
+      <div className="relative z-layer-sticky m-auto max-w-[440px] border border-border-subtle bg-surface-panel/95 px-4 py-3 text-center">
+        <p className="font-mono text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
           {headline}
         </p>
-        <p className="mt-2 font-mono text-[13px] font-semibold text-base-text">
+        <p className="mt-2 font-mono text-data font-semibold text-content-primary">
           {t("chart.noSyntheticTitle")}
         </p>
-        <p className="mt-2 text-[11px] leading-5 text-base-muted">{reason}</p>
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-base-muted">
-          <span className="border border-base-line bg-base-elevated px-1.5 py-0.5">
+        <p className="mt-2 text-meta leading-5 text-content-secondary">{reason}</p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 font-mono text-meta uppercase tracking-eyebrow text-content-secondary">
+          <span className="border border-border-subtle bg-surface-interactive px-2 py-1">
             {t("chart.requested", { timeframe: timeframe.toUpperCase() })}
           </span>
           {statusMessage ? (
-            <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 text-base-muted">
+            <span className="border border-border-subtle bg-surface-interactive px-2 py-1 text-content-secondary">
               {statusMessage}
             </span>
           ) : null}

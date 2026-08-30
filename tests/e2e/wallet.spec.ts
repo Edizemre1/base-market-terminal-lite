@@ -34,7 +34,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
 
-  test("switches to Base only after the manual action", async ({ page }) => {
+  test("switches to Base only after the manual action", async ({ page }, testInfo) => {
     await mockEnabledTradeServer(page);
     await installVerifiedWalletStub(page, { chainId: "0x1" });
     await page.goto("/terminal?data=mock");
@@ -42,41 +42,44 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.getByTestId("wallet-provider-legacy:injected").click();
     await openTradeDrawer(page);
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wrong_network");
+    await page.screenshot({ path: testInfo.outputPath("trade-wrong-network-1440.png"), fullPage: false });
     expect(await walletMethods(page)).not.toContain("wallet_switchEthereumChain");
     await page.getByRole("button", { name: /Switch to Base|Base ağına geç/ }).click();
     await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
     expect(await walletMethods(page)).toContain("wallet_switchEthereumChain");
   });
 
-  test("keeps exact no-route distinct from timeout and other provider outages", async ({ page }) => {
+  test("keeps exact no-route distinct from timeout and other provider outages", async ({ page }, testInfo) => {
     await installVerifiedWalletStub(page);
     await mockFailedTradeServer(page, "no-route");
     await page.goto("/terminal?data=mock");
     await connectWallet(page);
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "no_route");
-    await expect(page.getByTestId("trade-dock")).toContainText(/No route was found|route bulunamadı/);
+    await expect(page.getByTestId("trade-dock")).toContainText(/No route was found|işlem rotası bulunamadı/);
+    await page.screenshot({ path: testInfo.outputPath("trade-no-route-error-1440.png"), fullPage: false });
 
     await page.unroute("**/api/quote");
     await mockFailedTradeServer(page, "timeout");
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "provider_unavailable");
     await expect(page.getByTestId("trade-dock")).toContainText(/timed out|zaman aşımına/);
-    await expect(page.getByTestId("trade-dock")).not.toContainText(/No route was found|route bulunamadı/);
+    await expect(page.getByTestId("trade-dock")).not.toContainText(/No route was found|işlem rotası bulunamadı/);
   });
 
-  test("expires and invalidates a quote on pair or wallet context changes", async ({ page }) => {
+  test("expires and invalidates a quote on pair or wallet context changes", async ({ page }, testInfo) => {
     await installVerifiedWalletStub(page);
     await mockEnabledTradeServer(page, { expiryMs: 700 });
     await page.goto("/terminal?data=mock");
     await connectWallet(page);
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_expired", { timeout: 3_000 });
+    await page.screenshot({ path: testInfo.outputPath("trade-quote-expired-1440.png"), fullPage: false });
 
     await page.unroute("**/api/quote");
     await mockEnabledTradeServer(page);
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
     await page.keyboard.press("Escape");
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
@@ -99,31 +102,34 @@ test.describe("explicit wallet and transaction lifecycle", () => {
 
   test("runs mocked quote, exact approval, refreshed review, simulation, and swap through two explicit sends", async ({ page }, testInfo) => {
     await installVerifiedWalletStub(page);
-    await mockEnabledTradeServer(page);
+    await mockEnabledTradeServer(page, { delayMs: 450 });
     await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
     await openTradeDrawer(page);
 
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
+    await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_loading");
+    await page.screenshot({ path: testInfo.outputPath("trade-quote-loading-1440.png"), fullPage: false });
     await expect(page.getByTestId("trade-dock")).toContainText("LI.FI");
     await expect(page.getByTestId("trade-dock")).toContainText(/Minimum receive|Minimum alım/);
+    await page.screenshot({ path: testInfo.outputPath("trade-quote-available-1440.png"), fullPage: false });
     await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
     await expect(page.getByTestId("trade-review-dialog")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
-    await expect(page.getByTestId("trade-review-dialog")).toContainText(/Exact approval required|Kesin miktar approval gerekli/);
-    await expect(page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ })).toBeVisible();
+    await expect(page.getByTestId("trade-review-dialog")).toContainText(/Exact approval required|Kesin miktar token izni/);
+    await expect(page.getByRole("button", { name: /Approve exactly|token izni ver/ })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("trade-review-exact-approval-1440.png"), fullPage: true });
 
-    await page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await page.getByRole("button", { name: /Approve exactly|token izni ver/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
     await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
-    await expect(page.getByTestId("trade-dock")).toContainText(/Approval confirmed|Approval onaylandı/);
+    await expect(page.getByTestId("trade-dock")).toContainText(/Approval confirmed|Token izni \(approval\) onaylandı/);
     let sent = await sentTransactions(page);
     expect(sent).toHaveLength(1);
     expect(String(sent[0]?.data)).toMatch(/^0x095ea7b3/);
     expect(String(sent[0]?.data).endsWith(BigInt("100000000000000000").toString(16).padStart(64, "0"))).toBeTruthy();
 
-    await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
     await expect(page.getByTestId("trade-review-dialog")).toContainText(/Passed for current draft|Güncel taslak için geçti/);
     await page.getByRole("button", { name: /Confirm swap in wallet|Swap'ı cüzdanda onayla/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
@@ -135,10 +141,11 @@ test.describe("explicit wallet and transaction lifecycle", () => {
   });
 });
 
-async function mockEnabledTradeServer(page: Page, options: { expiryMs?: number } = {}) {
+async function mockEnabledTradeServer(page: Page, options: { expiryMs?: number; delayMs?: number } = {}) {
   const capabilities: TradeCapabilities = { quoteRequestEnabled: true, transactionExecutionEnabled: true, approvalRequestEnabled: true, swapRequestEnabled: true, providers: [{ name: "LI.FI", status: "enabled" }, { name: "OpenOcean", status: "disabled" }, { name: "Odos", status: "disabled" }] };
   await page.route("**/api/health", (route) => route.fulfill({ json: { ok: true, ...capabilities, quoteProviders: capabilities.providers } }));
-  await page.route("**/api/quote", (route) => {
+  await page.route("**/api/quote", async (route) => {
+    if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
     const createdAt = new Date().toISOString();
     const withoutFingerprint: Omit<TransactionQuote, "fingerprint"> = {
       kind: "transaction-quote", id: `mock_quote_${Date.now()}`, provider: "LI.FI", route: "Mocked CI route", walletAddress: account, pairKey: `base:pool:${pairAddress}`, side: "buy", chainId: BASE_TRADE_CHAIN_ID,

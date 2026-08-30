@@ -66,7 +66,7 @@ test.describe("living Base terminal", () => {
   });
 
   test("global search resolves token, pool, and address context", async ({ page }) => {
-    const search = page.getByRole("combobox", { name: /Search token|Token, pair/ });
+    const search = page.getByRole("combobox", { name: /Search token|Token, piyasa çifti/ });
     await expect(search).toHaveAttribute("data-search-ready", "true");
     await search.fill("blob");
     await expect(page.getByTestId("search-result-blob-usdc")).toContainText("BLOB / USDC");
@@ -78,7 +78,7 @@ test.describe("living Base terminal", () => {
     await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=markets/);
     await page.getByTestId("open-market-filters").click();
-    await page.getByTestId("market-filters-sheet").getByLabel(/Search token|Token, pair/).fill("BLOB");
+    await page.getByTestId("market-filters-sheet").getByLabel(/Search token|Token, piyasa çifti/).fill("BLOB");
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
     await expect(page.getByTestId("active-filter-chips")).toContainText(/Search: BLOB|Arama: BLOB/);
@@ -384,7 +384,7 @@ test.describe("living Base terminal", () => {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
-        await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: false });
+        await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: true });
         if (viewport.width === 390) {
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
@@ -398,9 +398,16 @@ test.describe("living Base terminal", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/terminal?data=mock");
       const visualInitial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+      await page.screenshot({ path: testInfo.outputPath(`market-board-compact-${locale}-1440.png`), fullPage: true });
+      await page.getByTestId("market-density-comfortable").click();
+      await expect(page.getByTestId("market-density-comfortable")).toHaveAttribute("aria-pressed", "true");
+      await page.screenshot({ path: testInfo.outputPath(`market-board-comfortable-${locale}-1440.png`), fullPage: true });
+      await page.getByTestId("market-density-compact").click();
       const visualWall = buildVisualWallSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: visualWall }));
       await page.getByTestId("refresh-terminal").click();
+      await expect(page.locator('[data-cell-updated="true"]').first()).toBeVisible({ timeout: 800 });
+      await page.screenshot({ path: testInfo.outputPath(`market-cell-update-tint-${locale}-1440.png`), fullPage: true });
       await expect(page.getByTestId("live-wall-lane-new")).toHaveAttribute("data-lane-count", "4");
       await expect(page.getByTestId("live-wall-lane-losers")).toHaveAttribute("data-lane-count", "4");
       await page.screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`), fullPage: false });
@@ -411,6 +418,9 @@ test.describe("living Base terminal", () => {
       await signalTrigger.click();
       await expect(page.getByTestId("market-signal-popover")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`signal-popover-${locale}-1440.png`), fullPage: false });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.screenshot({ path: testInfo.outputPath(`reduced-motion-signal-${locale}-1440.png`), fullPage: false });
+      await page.emulateMedia({ reducedMotion: "no-preference" });
       await page.keyboard.press("Escape");
 
       await page.unroute("**/api/market-snapshot?data=mock");
@@ -422,6 +432,26 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıktı/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
       await page.screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), fullPage: false });
+      await page.unroute("**/api/market-snapshot?data=mock");
+
+      await page.goto("/terminal?data=mock");
+      const delayedAt = new Date(Date.parse(visualInitial.generatedAt) + 180_000).toISOString();
+      const delayedWall: MarketTerminalSnapshot = {
+        ...visualInitial,
+        version: `visual-delayed-${locale}`,
+        generatedAt: delayedAt,
+        receivedAt: delayedAt,
+        sourceUpdatedAt: delayedAt,
+        freshness: "delayed",
+        allPairs: visualInitial.allPairs.map((pair) => ({ ...pair, stale: true, sourceUpdatedAt: delayedAt }))
+      };
+      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: delayedWall }));
+      await page.getByTestId("refresh-terminal").click();
+      const delayedPending = page.getByTestId("pending-market-updates");
+      if (await delayedPending.isVisible()) await delayedPending.click();
+      await expect(page.getByTestId("live-wall-lane-gainers")).toHaveAttribute("data-lane-count", "0");
+      await expect(page.getByTestId("live-wall-lane-gainers")).toHaveAttribute("data-lane-freshness", "delayed");
+      await page.screenshot({ path: testInfo.outputPath(`lane-empty-delayed-${locale}-1440.png`), fullPage: true });
       await page.unroute("**/api/market-snapshot?data=mock");
 
       await page.goto("/terminal?data=mock&pair=blob-usdc");
@@ -445,6 +475,10 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("connect-wallet-button").click();
       await page.screenshot({ path: testInfo.outputPath(`wallet-picker-${locale}-1440.png`), fullPage: false });
       await page.keyboard.press("Escape");
+      await page.goto("/status?data=mock");
+      await page.screenshot({ path: testInfo.outputPath(`secondary-status-${locale}-1440.png`), fullPage: true });
+      await page.goto("/calm-market-intelligence-missing");
+      await page.screenshot({ path: testInfo.outputPath(`state-404-${locale}-1440.png`), fullPage: true });
     }
   });
 });

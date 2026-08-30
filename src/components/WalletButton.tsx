@@ -25,13 +25,13 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
       onClick={wallet.openPicker}
       disabled={wallet.status === "connecting"}
       className={cx(
-        "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 border px-2 font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-base-mint/50 disabled:cursor-wait disabled:opacity-70 lg:h-8",
+        "inline-flex h-9 shrink-0 items-center justify-center gap-2 border px-2 font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait disabled:opacity-70 lg:h-8",
         connected
           ? wallet.wrongNetwork
-            ? "border-base-amber/50 bg-base-amber/10 text-base-amber"
-            : "border-base-mint/45 bg-base-mint/10 text-base-mint"
-          : "border-base-mint bg-base-mint text-white hover:bg-base-mint/90",
-        compact ? "w-9 px-0 text-[10px] sm:w-auto sm:max-w-[136px] sm:px-2 xl:min-w-[124px]" : "text-[11px]"
+            ? "border-freshness-delayed/50 bg-freshness-delayed/10 text-freshness-delayed"
+            : "border-operation-success/45 bg-operation-success/10 text-operation-success"
+          : "border-brand-action bg-brand-action text-content-on-accent hover:bg-brand-action/90",
+        compact ? "w-9 px-0 text-meta sm:w-auto sm:max-w-[136px] sm:px-2 xl:min-w-[124px]" : "text-meta"
       )}
       aria-label={connected ? t("wallet.openDetails", { address: label }) : t("wallet.connect")}
     >

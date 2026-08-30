@@ -57,6 +57,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Calm Market Intelligence token guard
+        run: npm run design:guard
+
+      - name: Design-language component contracts
+        run: npm run test:design
+
       - name: Lint
         run: npm run lint
 

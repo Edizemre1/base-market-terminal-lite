@@ -30,8 +30,8 @@ export function PairDetailTabs({
 }) {
   const i18n = useI18n();
   return (
-    <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
-      <div className="grid h-10 shrink-0 grid-cols-4 border-b border-base-line bg-base-raised" role="tablist" aria-label={i18n.t("details.aria")}>
+    <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-border-subtle bg-surface-panel">
+      <div className="grid h-10 shrink-0 grid-cols-4 border-b border-border-subtle bg-surface-raised" role="tablist" aria-label={i18n.t("details.aria")}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -44,10 +44,10 @@ export function PairDetailTabs({
             onClick={() => onTabChange(tab.id)}
             onKeyDown={(event) => handleTabKeyDown(event, tab.id, onTabChange)}
             className={cx(
-              "h-full min-w-0 border-r border-base-line px-2 text-[11px] font-semibold uppercase tracking-[0.14em] last:border-r-0",
+              "h-full min-w-0 border-r border-border-subtle px-2 text-meta font-semibold uppercase tracking-eyebrow last:border-r-0",
               activeTab === tab.id
-                ? "bg-base-panel text-base-mint"
-                : "text-base-muted hover:text-base-text"
+                ? "bg-surface-panel text-brand-accent"
+                : "text-content-secondary hover:text-content-primary"
             )}
           >
             {i18n.t(tab.labelKey)}
@@ -68,7 +68,7 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
   if (activeTab === "overview") {
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2 border border-base-line bg-base-elevated p-2">
+        <div className="flex flex-wrap items-center gap-2 border border-border-subtle bg-surface-interactive p-2">
           <AssetTradeabilityBadges pair={pair} compact={false} />
         </div>
         <div className="grid gap-2 md:grid-cols-4">
@@ -162,22 +162,22 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
   if (activeTab === "activity") {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
+        <table className="w-full min-w-[720px] border-collapse text-left text-meta">
           <thead>
-            <tr className="border-b border-base-line bg-base-elevated text-[10px] uppercase tracking-[0.12em] text-base-muted">
-              <th className="px-2 py-1.5">{t("details.window")}</th>
-              <th className="px-2 py-1.5">{t("details.transactions")}</th>
-              <th className="px-2 py-1.5">{t("chart.volume")}</th>
-              <th className="px-2 py-1.5">{t("details.source")}</th>
+            <tr className="border-b border-border-subtle bg-surface-interactive text-meta uppercase tracking-eyebrow text-content-secondary">
+              <th className="px-2 py-2">{t("details.window")}</th>
+              <th className="px-2 py-2">{t("details.transactions")}</th>
+              <th className="px-2 py-2">{t("chart.volume")}</th>
+              <th className="px-2 py-2">{t("details.source")}</th>
             </tr>
           </thead>
           <tbody>
             {pair.activity.map((event) => (
-              <tr key={`${event.time}-${event.wallet}`} className="h-8 border-b border-base-line last:border-b-0">
-                <td className="px-2 py-1.5 font-mono text-base-muted">{event.time}</td>
-                <td className="px-2 py-1.5 font-mono text-base-text">{event.amount}</td>
-                <td className="px-2 py-1.5 font-mono text-base-text">{event.value}</td>
-                <td className="px-2 py-1.5 font-mono text-base-muted">{event.wallet}</td>
+              <tr key={`${event.time}-${event.wallet}`} className="h-8 border-b border-border-subtle last:border-b-0">
+                <td className="px-2 py-2 font-mono text-content-secondary">{event.time}</td>
+                <td className="px-2 py-2 font-mono text-content-primary">{event.amount}</td>
+                <td className="px-2 py-2 font-mono text-content-primary">{event.value}</td>
+                <td className="px-2 py-2 font-mono text-content-secondary">{event.wallet}</td>
               </tr>
             ))}
           </tbody>
@@ -189,8 +189,8 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
   return (
     <div className="space-y-2">
       <PublicSignalsPanel pair={pair} providerStale={providerStale} />
-      <div className="rounded-sm border border-base-amber/35 bg-base-amber/10 p-3 text-[11px] leading-5 text-base-amber">
-        <p className="font-semibold text-base-text">
+      <div className="rounded-control border border-freshness-delayed/35 bg-freshness-delayed/10 p-3 text-meta leading-5 text-freshness-delayed">
+        <p className="font-semibold text-content-primary">
           {pair.dataSource === "mock" ? t("details.demoSafetyTitle") : t("details.safetyUnavailableTitle")}
         </p>
         <p>
@@ -219,16 +219,16 @@ function OverviewCell({
   tone?: "default" | "mint" | "rose";
 }) {
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
         className={cx(
-          "mt-1 font-mono text-[13px] font-semibold",
+          "mt-1 font-mono text-data font-semibold",
           tone === "mint"
-            ? "text-base-mint"
+            ? "text-brand-accent"
             : tone === "rose"
-              ? "text-base-rose"
-              : "text-base-text"
+              ? "text-market-negative"
+              : "text-content-primary"
         )}
       >
         {value}
@@ -252,10 +252,10 @@ function AddressCell({
   );
 
   return (
-    <div className="min-w-0 border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="min-w-0 border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
-        className="mt-1 break-all font-mono text-[11px] font-semibold text-base-text"
+        className="mt-1 break-all font-mono text-meta font-semibold text-content-primary"
         title={value}
       >
         {value ?? t("common.noData")}
@@ -299,7 +299,7 @@ function CopyValueButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       onClick={copyValue}
-      className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-panel px-1.5 font-mono text-[10px] text-base-muted hover:border-base-mint hover:text-base-mint"
+      className="inline-flex h-5 items-center gap-1 border border-border-subtle bg-surface-panel px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary"
       aria-label={t("details.copyAria", { label })}
     >
       <Copy size={10} aria-hidden="true" />
@@ -314,7 +314,7 @@ function ExternalDataLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-panel px-1.5 font-mono text-[10px] text-base-muted hover:border-base-mint hover:text-base-mint"
+      className="inline-flex h-5 items-center gap-1 border border-border-subtle bg-surface-panel px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary"
     >
       <ExternalLink size={10} aria-hidden="true" />
       {label}
@@ -332,16 +332,16 @@ function PublicSignalsPanel({
   const { t } = useI18n();
 
   return (
-    <div className="border border-base-line bg-base-elevated p-2" data-provider-stale={providerStale || undefined}>
+    <div className="border border-border-subtle bg-surface-interactive p-2" data-provider-stale={providerStale || undefined}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
+        <p className="text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
           {t("details.publicSignals")}
         </p>
-        <span className="font-mono text-[10px] text-base-muted">{t("details.heuristics")}</span>
+        <span className="font-mono text-meta text-content-secondary">{t("details.heuristics")}</span>
       </div>
       <MarketSignalBadges pair={pair} maximumMarketBadges={2} />
       <AssetTradeabilityBadges pair={pair} compact={false} className="mt-1" />
-      <p className="mt-2 text-[10px] text-base-muted">
+      <p className="mt-2 text-meta text-content-secondary">
         {t("details.signalsBody")}
       </p>
     </div>
@@ -378,8 +378,8 @@ function formatTxnWindow(window: { buys: number; sells: number } | undefined, fa
 
 function RiskGroup({ title, rows }: { title: string; rows: Array<[string, string]> }) {
   return (
-    <div className="rounded-sm bg-base-elevated p-3">
-      <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-base-muted">{title}</h3>
+    <div className="rounded-control bg-surface-interactive p-3">
+      <h3 className="mb-2 text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">{title}</h3>
       {rows.map(([label, value]) => <RiskRow key={label} label={label} value={value} />)}
     </div>
   );
@@ -387,12 +387,12 @@ function RiskGroup({ title, rows }: { title: string; rows: Array<[string, string
 
 function RiskRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[1fr_auto_18px] items-center gap-2 border-b border-base-line py-1 text-[11px] last:border-b-0">
-      <span className="text-base-text">{label}</span>
-      <span className="font-mono text-base-text">{value}</span>
+    <div className="grid grid-cols-[1fr_auto_18px] items-center gap-2 border-b border-border-subtle py-1 text-meta last:border-b-0">
+      <span className="text-content-primary">{label}</span>
+      <span className="font-mono text-content-primary">{value}</span>
       <AlertTriangle
         size={13}
-        className="text-base-amber"
+        className="text-freshness-delayed"
         aria-hidden="true"
       />
     </div>

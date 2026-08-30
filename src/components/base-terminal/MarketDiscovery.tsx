@@ -27,6 +27,7 @@ import type { BasePair } from "@/types/baseTerminal";
 import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
+import { StatePanel } from "@/components/ui/CalmComponents";
 
 export function MarketDiscovery({
   snapshot,
@@ -115,7 +116,7 @@ export function MarketDiscovery({
   return (
     <section
       id="market-discovery"
-      className="pulse-surface overflow-hidden rounded-xl"
+      className="pulse-surface overflow-hidden rounded-panel"
       data-testid="market-discovery"
       onPointerEnter={() => onInteractionChange(true)}
       onPointerLeave={() => onInteractionChange(false)}
@@ -124,14 +125,14 @@ export function MarketDiscovery({
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractionChange(false);
       }}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-base-line/60 px-3 py-3 sm:px-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle/60 px-3 py-3 sm:px-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-base-mint">
+          <p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">
             {compact ? t("market.compactEyebrow") : t("market.eyebrow")}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <h2 className="text-[16px] font-semibold text-base-text">{compact ? t("market.compactTitle") : t("market.title")}</h2>
-            <span className="font-mono text-[10px] text-base-muted">
+            <h2 className="text-title-sm font-semibold text-content-primary">{compact ? t("market.compactTitle") : t("market.title")}</h2>
+            <span className="font-mono text-meta text-content-secondary">
               {formatSnapshotFreshness(snapshot.generatedAt, locale, t)} · {snapshot.providerName}
             </span>
           </div>
@@ -142,7 +143,7 @@ export function MarketDiscovery({
             onClick={onRefresh}
             disabled={refreshStatus === "refreshing"}
             data-testid="refresh-market-board"
-            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-base-elevated px-2.5 font-mono text-[10px] text-base-muted hover:text-base-mint disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex h-8 items-center gap-2 rounded-pill bg-surface-interactive px-3 font-mono text-meta text-content-secondary hover:text-content-primary disabled:cursor-wait disabled:opacity-60"
           >
             <RefreshCw size={11} className={refreshStatus === "refreshing" ? "animate-spin" : undefined} />
             {refreshStatus === "refreshing" ? t("common.checking") : t("market.refresh")}
@@ -152,19 +153,19 @@ export function MarketDiscovery({
               type="button"
               onClick={onApplyPendingUpdates}
               data-testid="apply-market-updates"
-              className="inline-flex h-8 items-center rounded-full bg-base-mint px-3 text-[10px] font-bold text-[#031411] shadow-[0_0_18px_rgb(var(--color-mint)/0.16)]"
+              className="inline-flex h-8 items-center rounded-pill bg-brand-action px-3 text-meta font-bold text-content-on-accent shadow-raised"
             >
               {t("market.newUpdates", { count: pendingUpdateCount })}
             </button>
           ) : null}
-          <span className="font-mono text-[11px] text-base-muted" data-testid="discovery-result-count">
+          <span className="font-mono text-meta text-content-secondary" data-testid="discovery-result-count">
             {t("common.results", { count: rows.length })}
           </span>
           {!compact ? <button
             type="button"
             onClick={() => setAdvancedOpen((open) => !open)}
             aria-expanded={advancedOpen}
-            className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-base-line bg-base-panel px-2.5 text-[11px] font-semibold text-base-muted outline-none hover:border-base-mint hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
+            className="inline-flex h-8 items-center gap-2 rounded-control border border-border-subtle bg-surface-panel px-3 text-meta font-semibold text-content-secondary outline-none hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus"
           >
             <SlidersHorizontal size={13} aria-hidden="true" />
             {t("market.filters")}
@@ -173,7 +174,7 @@ export function MarketDiscovery({
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex h-8 items-center gap-1 px-1.5 text-[11px] text-base-amber outline-none hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40"
+              className="inline-flex h-8 items-center gap-1 px-2 text-meta text-freshness-delayed outline-none hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus"
             >
               <X size={12} aria-hidden="true" />
               {t("common.clear")}
@@ -182,7 +183,7 @@ export function MarketDiscovery({
         </div>
       </div>
 
-      {!compact ? <div className="border-b border-base-line px-3 py-2">
+      {!compact ? <div className="border-b border-border-subtle px-3 py-2">
         <div className="flex flex-wrap gap-1" role="tablist" aria-label={t("market.categories")}>
           {DISCOVERY_CATEGORIES.map((item) => {
             const disabled = categoryCounts[item.id] === 0 && item.id !== category;
@@ -200,26 +201,26 @@ export function MarketDiscovery({
                   setShowSelected(false);
                 }}
                 className={cx(
-                  "min-h-10 rounded-sm border px-2.5 text-[11px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40 disabled:cursor-not-allowed disabled:opacity-35 sm:min-h-8",
+                  "min-h-10 rounded-control border px-3 text-meta font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-35 sm:min-h-8",
                   category === item.id
-                    ? "border-base-mint/45 bg-base-mint/10 text-base-mint"
-                    : "border-transparent text-base-muted hover:border-base-line hover:bg-base-elevated hover:text-base-text"
+                    ? "border-brand-accent/45 bg-brand-accent/10 text-brand-accent"
+                    : "border-transparent text-content-secondary hover:border-border-subtle hover:bg-surface-interactive hover:text-content-primary"
                 )}
               >
                 {t(categoryKey(item.id))}
-                <span className="ml-1 font-mono text-[9px] opacity-70">{categoryCounts[item.id]}</span>
+                <span className="ml-1 font-mono text-meta opacity-70">{categoryCounts[item.id]}</span>
               </button>
             );
           })}
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-[10px] font-medium text-base-muted">{t("market.quickFilters")}</span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-meta font-medium text-content-secondary">{t("market.quickFilters")}</span>
           <QuickFilter label={t("market.fresh")} active={filters.quickFresh} onClick={() => patchFilters({ quickFresh: !filters.quickFresh })} />
           <QuickFilter label={t("market.liquid")} active={filters.quickLiquid} onClick={() => patchFilters({ quickLiquid: !filters.quickLiquid })} />
           <QuickFilter label={t("market.moving")} active={filters.quickMoving} onClick={() => patchFilters({ quickMoving: !filters.quickMoving })} />
           <QuickFilter label={t("market.highVolume")} active={filters.quickHighVolume} onClick={() => patchFilters({ quickHighVolume: !filters.quickHighVolume })} />
           <QuickFilter label={t("market.watched")} active={filters.quickWatched} onClick={() => patchFilters({ quickWatched: !filters.quickWatched })} />
-          <span className="ml-auto text-[10px] text-base-muted">{t(categoryDescriptionKey(currentCategory.id))}</span>
+          <span className="ml-auto text-meta text-content-secondary">{t(categoryDescriptionKey(currentCategory.id))}</span>
         </div>
       </div> : null}
 
@@ -233,25 +234,25 @@ export function MarketDiscovery({
       ) : null}
 
       {!compact && category === "volatile" ? (
-        <p className="border-b border-base-amber/30 bg-base-amber/10 px-3 py-1.5 text-[11px] text-base-amber">
+        <p className="border-b border-freshness-delayed/30 bg-freshness-delayed/10 px-3 py-2 text-meta text-freshness-delayed">
           {t("market.volatilityWarning")}
         </p>
       ) : null}
 
       {!compact && selectedOutsideFilters ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-base-amber/35 bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">
+        <div className="flex flex-wrap items-center gap-2 border-b border-freshness-delayed/35 bg-freshness-delayed/10 px-3 py-2 text-meta text-freshness-delayed">
           <span>{t("market.hiddenSelected", { pair: selectedPair.pair })}</span>
           <button
             type="button"
             onClick={() => setShowSelected(true)}
-            className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-base-amber/40"
+            className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-freshness-delayed/40"
           >
             {t("market.showSelected")}
           </button>
           <button
             type="button"
             onClick={resetFilters}
-            className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-base-amber/40"
+            className="font-semibold underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-freshness-delayed/40"
           >
             {t("market.clearFilters")}
           </button>
@@ -260,7 +261,7 @@ export function MarketDiscovery({
 
       <div className="hidden max-h-[230px] overflow-auto lg:block">
         <table className="w-full min-w-[700px] border-collapse text-left">
-          <thead className="bg-base-elevated text-[10px] font-semibold uppercase tracking-[0.08em] text-base-muted">
+          <thead className="bg-surface-interactive text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
             <tr>
               <th className="px-3 py-2">{t("market.market")}</th>
               <th className="px-2 py-2">{t("market.age")}</th>
@@ -288,7 +289,7 @@ export function MarketDiscovery({
         </table>
       </div>
 
-      <div className="divide-y divide-base-line lg:hidden">
+      <div className="divide-y divide-border-subtle lg:hidden">
         {visibleRows.map((row) => (
           <DiscoveryMobileCard
             key={row.pair.id}
@@ -304,10 +305,7 @@ export function MarketDiscovery({
       </div>
 
       {visibleRows.length === 0 ? (
-        <div className="px-4 py-8 text-center text-[12px] text-base-muted">
-          <p className="font-semibold text-base-text">{t("market.noMatches")}</p>
-          <p className="mt-1">{t("market.noMatchesBody")}</p>
-        </div>
+        <StatePanel className="m-4 text-center" title={t("market.noMatches")} body={t("market.noMatchesBody")} />
       ) : null}
     </section>
   );
@@ -337,30 +335,30 @@ function DiscoveryTableRow({
   return (
     <tr
       {...getMarketInvariantAttributes(pair)}
-      className={cx("border-t border-base-line/60 hover:bg-base-mint/5", selected && "bg-base-mint/10", updated && "market-update-flash")}
+      className={cx("border-t border-border-subtle/60 hover:bg-surface-interactive", selected && "bg-surface-selected")}
       data-testid={`discovery-row-${pair.id}`}
     >
       <td className="p-0">
-        <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-14 w-full items-center gap-2 px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-base-mint/40">
+        <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-14 w-full items-center gap-2 px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
           <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} size="sm" />
           <span className="min-w-0">
-            <span className="block truncate font-mono text-[12px] font-semibold text-base-text">{pair.pair}</span>
-            <span className="block truncate text-[10px] text-base-muted">{pair.dexName ?? pair.dex} · {pair.project}</span>
+            <span className="block truncate font-mono text-label font-semibold text-content-primary">{pair.pair}</span>
+            <span className="block truncate text-meta text-content-secondary">{pair.dexName ?? pair.dex} · {pair.project}</span>
           </span>
         </button>
       </td>
-      <td className="px-2 py-2 font-mono text-[11px] text-base-muted">{formatAge(pair, locale, t)}</td>
-      <td className="px-2 py-2 text-right font-mono text-[11px]">
-        <span className="block text-base-text">{getDisplayPrice(pair, t("common.noData"))}</span>
+      <td className="px-2 py-2 font-mono text-meta text-content-secondary">{formatAge(pair, locale, t)}</td>
+      <td className={cx("px-2 py-2 text-right font-mono text-meta", updated && "market-update-flash")} data-cell-updated={updated || undefined}>
+        <span className="block text-content-primary">{getDisplayPrice(pair, t("common.noData"))}</span>
         <span className={getChangeTone(change24h)}>{formatOptionalPercent(change24h, localPercent)}</span>
-        <span className="block text-[9px] text-base-muted">5m {formatOptionalPercent(pair.priceChanges?.m5, localPercent)} · 1h {formatOptionalPercent(pair.priceChanges?.h1, localPercent)}</span>
+        <span className="block text-meta text-content-secondary">5m {formatOptionalPercent(pair.priceChanges?.m5, localPercent)} · 1h {formatOptionalPercent(pair.priceChanges?.h1, localPercent)}</span>
       </td>
-      <td title={formatFullCurrency(getVolume24h(pair), locale)} className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getVolume24h(pair), localCurrency)}</td>
-      <td title={formatFullCurrency(getLiquidityUsd(pair), locale)} className="px-2 py-2 text-right font-mono text-[11px] text-base-text">{formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)}</td>
-      <td className="px-2 py-2 text-[10px] text-base-muted">
-        {row.activityScore !== undefined ? <span className="mr-1 inline-flex rounded-sm border border-base-cyan/30 bg-base-cyan/10 px-1.5 py-0.5 font-mono text-base-cyan">{t("market.activity", { score: row.activityScore })}</span> : null}
-        <span className={cx("inline-flex rounded-sm border px-1.5 py-0.5", pair.stale ? "border-base-amber/35 bg-base-amber/10 text-base-amber" : "border-base-line bg-base-elevated")}>{getDataStatus(pair, t)}</span>
-        <span className="mt-1 block font-mono text-[9px] text-base-muted">{freshness}</span>
+      <td title={formatFullCurrency(getVolume24h(pair), locale)} className="px-2 py-2 text-right font-mono text-meta text-content-primary">{formatOptionalCurrency(getVolume24h(pair), localCurrency)}</td>
+      <td title={formatFullCurrency(getLiquidityUsd(pair), locale)} className="px-2 py-2 text-right font-mono text-meta text-content-primary">{formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)}</td>
+      <td className="px-2 py-2 text-meta text-content-secondary">
+        {row.activityScore !== undefined ? <span className="mr-1 inline-flex rounded-control border border-trust-verified/30 bg-trust-verified/10 px-2 py-1 font-mono text-trust-verified">{t("market.activity", { score: row.activityScore })}</span> : null}
+        <span className={cx("inline-flex rounded-control border px-2 py-1", pair.stale ? "border-freshness-delayed/35 bg-freshness-delayed/10 text-freshness-delayed" : "border-border-subtle bg-surface-interactive")}>{getDataStatus(pair, t)}</span>
+        <span className="mt-1 block font-mono text-meta text-content-secondary">{freshness}</span>
       </td>
       <td className="px-2 py-2">
         <PinButton pair={pair} isPinned={isPinned} onTogglePin={onTogglePin} />
@@ -376,19 +374,19 @@ function DiscoveryMobileCard(props: Parameters<typeof DiscoveryTableRow>[0]) {
   const change = getChange24h(pair);
 
   return (
-    <article {...getMarketInvariantAttributes(pair)} className={cx("p-3", selected && "bg-base-mint/10", props.updated && "market-update-flash")} data-testid={`discovery-row-${pair.id}`}>
+    <article {...getMarketInvariantAttributes(pair)} className={cx("p-3", selected && "bg-surface-selected")} data-testid={`discovery-row-${pair.id}`}>
       <div className="flex items-start gap-2">
-        <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
+        <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus">
           <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} size="md" />
           <span className="min-w-0">
-            <span className="block truncate font-mono text-[13px] font-semibold text-base-text">{pair.pair}</span>
-            <span className="block truncate text-[11px] text-base-muted">{pair.dexName ?? pair.dex} · {formatAge(pair, locale, t)}</span>
+            <span className="block truncate font-mono text-data font-semibold text-content-primary">{pair.pair}</span>
+            <span className="block truncate text-meta text-content-secondary">{pair.dexName ?? pair.dex} · {formatAge(pair, locale, t)}</span>
           </span>
         </button>
         <PinButton pair={pair} isPinned={isPinned} onTogglePin={onTogglePin} />
       </div>
-      <button type="button" onClick={() => onSelect(pair.id)} className="mt-2 grid min-h-11 w-full grid-cols-3 gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40">
-        <MobileMetric label={t("market.priceChange")} value={getDisplayPrice(pair, t("common.noData"))} detail={formatOptionalPercent(change, localPercent)} tone={getChangeTone(change)} />
+      <button type="button" onClick={() => onSelect(pair.id)} className="mt-2 grid min-h-11 w-full grid-cols-3 gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <MobileMetric label={t("market.priceChange")} value={getDisplayPrice(pair, t("common.noData"))} detail={formatOptionalPercent(change, localPercent)} tone={getChangeTone(change)} updated={props.updated} />
         <MobileMetric label={t("market.volume24h")} value={formatOptionalCurrency(getVolume24h(pair), localCurrency)} detail={locale === "tr" ? "24s" : "24h"} />
         <MobileMetric label={t("market.liquidity")} value={formatOptionalCurrency(getLiquidityUsd(pair), localCurrency)} detail={`${getDataStatus(pair, t)} · ${freshness}`} />
       </button>
@@ -409,7 +407,7 @@ function AdvancedFilters({
 }) {
   const { t, formatCompactCurrency: localCurrency } = useI18n();
   return (
-    <div className="grid gap-2 border-b border-base-line bg-base-elevated p-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="discovery-advanced-filters">
+    <div className="grid gap-2 border-b border-border-subtle bg-surface-interactive p-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="discovery-advanced-filters">
       <NumberFilter label={t("market.advanced.minLiquidity")} value={filters.minLiquidity} onChange={(value) => onChange({ minLiquidity: value })} />
       <NumberFilter label={t("market.advanced.minVolume")} value={filters.minVolume} onChange={(value) => onChange({ minVolume: value })} />
       <NumberFilter label={t("market.advanced.minAge")} value={filters.minAgeMinutes} onChange={(value) => onChange({ minAgeMinutes: value })} />
@@ -427,34 +425,34 @@ function AdvancedFilters({
       <CheckFilter label={t("market.advanced.completeOnly")} checked={filters.completeOnly} onChange={(checked) => onChange({ completeOnly: checked })} />
       <CheckFilter label={t("market.advanced.hideStale")} checked={filters.hideStale} onChange={(checked) => onChange({ hideStale: checked })} />
       <CheckFilter label={t("market.advanced.hideLowLiquidity", { value: localCurrency(DISCOVERY_MIN_LIQUIDITY_USD) })} checked={filters.hideLowLiquidity} onChange={(checked) => onChange({ hideLowLiquidity: checked })} />
-      <button type="button" onClick={onReset} className="min-h-10 rounded-sm border border-base-line bg-base-panel px-3 text-[11px] font-semibold text-base-muted outline-none hover:border-base-mint hover:text-base-text focus-visible:ring-2 focus-visible:ring-base-mint/40">{t("market.advanced.reset")}</button>
+      <button type="button" onClick={onReset} className="min-h-10 rounded-control border border-border-subtle bg-surface-panel px-3 text-meta font-semibold text-content-secondary outline-none hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus">{t("market.advanced.reset")}</button>
     </div>
   );
 }
 
 function QuickFilter({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return <button type="button" aria-pressed={active} onClick={onClick} className={cx("min-h-10 rounded-full border px-2.5 text-[10px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-base-mint/40 sm:min-h-7", active ? "border-base-mint/45 bg-base-mint/10 text-base-mint" : "border-base-line bg-base-panel text-base-muted hover:text-base-text")}>{label}</button>;
+  return <button type="button" aria-pressed={active} onClick={onClick} className={cx("min-h-10 rounded-pill border px-3 text-meta font-semibold outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-7", active ? "border-brand-accent/45 bg-brand-accent/10 text-brand-accent" : "border-border-subtle bg-surface-panel text-content-secondary hover:text-content-primary")}>{label}</button>;
 }
 
 function NumberFilter({ label, value, onChange }: { label: string; value?: number; onChange: (value: number | undefined) => void }) {
-  return <label className="text-[10px] font-medium text-base-muted"><span className="mb-1 block">{label}</span><input type="number" value={value ?? ""} onChange={(event) => onChange(readOptionalNumber(event.target.value))} className="h-9 w-full rounded-sm border border-base-line bg-base-panel px-2 font-mono text-[11px] text-base-text outline-none focus:border-base-mint" /></label>;
+  return <label className="text-meta font-medium text-content-secondary"><span className="mb-1 block">{label}</span><input type="number" value={value ?? ""} onChange={(event) => onChange(readOptionalNumber(event.target.value))} className="h-9 w-full rounded-control border border-border-subtle bg-surface-panel px-2 font-mono text-meta text-content-primary outline-none focus:border-focus" /></label>;
 }
 
 function SelectFilter({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return <label className="text-[10px] font-medium text-base-muted"><span className="mb-1 block">{label}</span><select value={value} onChange={(event) => onChange(event.target.value)} className="h-9 w-full rounded-sm border border-base-line bg-base-panel px-2 text-[11px] text-base-text outline-none focus:border-base-mint">{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  return <label className="text-meta font-medium text-content-secondary"><span className="mb-1 block">{label}</span><select value={value} onChange={(event) => onChange(event.target.value)} className="h-9 w-full rounded-control border border-border-subtle bg-surface-panel px-2 text-meta text-content-primary outline-none focus:border-focus">{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
 }
 
 function CheckFilter({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return <label className="flex min-h-10 items-center gap-2 rounded-sm border border-base-line bg-base-panel px-2 text-[11px] text-base-muted"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-[rgb(var(--color-mint))]" />{label}</label>;
+  return <label className="flex min-h-10 items-center gap-2 rounded-control border border-border-subtle bg-surface-panel px-2 text-meta text-content-secondary"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 accent-brand-action" />{label}</label>;
 }
 
 function PinButton({ pair, isPinned, onTogglePin }: { pair: BasePair; isPinned: boolean; onTogglePin: (pair: BasePair) => void }) {
   const { t } = useI18n();
-  return <button type="button" data-testid={`pin-discovery-${pair.id}`} onClick={() => onTogglePin(pair)} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })} className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-sm border border-base-line bg-base-elevated text-base-muted outline-none hover:border-base-mint hover:text-base-mint focus-visible:ring-2 focus-visible:ring-base-mint/40", isPinned && "border-base-mint/45 bg-base-mint/10 text-base-mint")}><Star size={14} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" /></button>;
+  return <button type="button" data-testid={`pin-discovery-${pair.id}`} onClick={() => onTogglePin(pair)} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })} className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-control border border-border-subtle bg-surface-interactive text-content-secondary outline-none hover:border-border-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus", isPinned && "border-brand-accent/45 bg-brand-accent/10 text-brand-accent")}><Star size={14} fill={isPinned ? "currentColor" : "none"} aria-hidden="true" /></button>;
 }
 
-function MobileMetric({ label, value, detail, tone = "text-base-muted" }: { label: string; value: string; detail: string; tone?: string }) {
-  return <span className="min-w-0 rounded-sm bg-base-elevated p-2"><span className="block text-[9px] uppercase tracking-[0.08em] text-base-muted">{label}</span><span className="mt-1 block truncate font-mono text-[11px] font-semibold text-base-text">{value}</span><span className={cx("block truncate font-mono text-[9px]", tone)}>{detail}</span></span>;
+function MobileMetric({ label, value, detail, tone = "text-content-secondary", updated = false }: { label: string; value: string; detail: string; tone?: string; updated?: boolean }) {
+  return <span className={cx("min-w-0 rounded-control bg-surface-interactive p-2", updated && "market-update-flash")} data-cell-updated={updated || undefined}><span className="block text-meta uppercase tracking-eyebrow text-content-secondary">{label}</span><span className="mt-1 block truncate font-mono text-meta font-semibold text-content-primary">{value}</span><span className={cx("block truncate font-mono text-meta", tone)}>{detail}</span></span>;
 }
 
 function getDataStatus(pair: BasePair, t: (key: TranslationKey, values?: Record<string, string | number>) => string) {
@@ -495,8 +493,8 @@ function formatFullCurrency(value: number | undefined, locale: "tr" | "en") {
 }
 
 function getChangeTone(value: number | undefined) {
-  if (value === undefined || value === 0) return "text-base-muted";
-  return value > 0 ? "text-base-mint" : "text-base-rose";
+  if (value === undefined || value === 0) return "text-content-secondary";
+  return value > 0 ? "text-market-positive" : "text-market-negative";
 }
 
 function readOptionalNumber(value: string) {
