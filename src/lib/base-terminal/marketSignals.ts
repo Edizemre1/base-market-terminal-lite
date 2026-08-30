@@ -51,6 +51,7 @@ export type MarketSignalMetric = {
   volumeUsd?: number;
   liquidityUsd?: number;
   primaryDex?: string;
+  freshness?: "fresh" | "delayed" | "static";
 };
 
 export type MarketSignalBadge = {
@@ -279,7 +280,7 @@ function computePoolBadges(snapshot: MarketTerminalSnapshot, pool: PoolMarket, p
     const critical = poolLiquidity < MARKET_SIGNAL_THRESHOLDS.thinLiquidity.criticalUsd;
     badges.push(makeBadge(pool.id, "pool", "thin_liquidity", critical ? "critical" : "warning", "warning", critical ? "pool_liquidity_below_critical_floor" : "pool_liquidity_below_thin_floor", source, observedAt, dynamicExpiry(observedMs), critical ? 1 : 3, metric(poolLiquidity, "usd", critical ? MARKET_SIGNAL_THRESHOLDS.thinLiquidity.criticalUsd : MARKET_SIGNAL_THRESHOLDS.thinLiquidity.enterUsd, "snapshot")));
   }
-  if (pair) addVolatilityBadge(badges, pool.id, "pool", pair, poolLiquidity, source, observedMs, observedAt, false);
+  if (pair) addVolatilityBadge(badges, pool.id, "pool", pair, poolLiquidity, source, observedMs, observedAt, false, snapshot.freshness === "fresh" && pool.quality !== "expired" && !pair.stale ? "fresh" : "delayed");
   return badges.sort(compareBadges);
 }
 
@@ -304,10 +305,10 @@ function addMovementBadges(badges: MarketSignalBadge[], opportunity: TokenOpport
   if (snapshot.comparison.status === "ready" && previousAt !== undefined && currentAt !== undefined && previousAt < currentAt && volume1h !== undefined && volume1h >= MARKET_SIGNAL_THRESHOLDS.volumeSurge.minimumVolume1hUsd && previousVolume !== undefined && previousVolume > 0 && volume1h / previousVolume >= surgeThreshold) {
     badges.push(makeBadge(opportunity.id, "opportunity", "volume_surge", "positive", "activity", "comparable_1h_volume_rate_ratio", source, observedAt, dynamicExpiry(observedMs), 4, metric(volume1h / previousVolume, "ratio", MARKET_SIGNAL_THRESHOLDS.volumeSurge.ratioEnter, "1h", previousVolume, { volumeUsd: volume1h, liquidityUsd: liquidity })));
   }
-  addVolatilityBadge(badges, opportunity.id, "opportunity", pair, liquidity, source, observedMs, observedAt, previousTypes.has("volatile"));
+  addVolatilityBadge(badges, opportunity.id, "opportunity", pair, liquidity, source, observedMs, observedAt, previousTypes.has("volatile"), snapshot.freshness);
 }
 
-function addVolatilityBadge(badges: MarketSignalBadge[], subjectId: string, scope: "opportunity" | "pool", pair: BasePair, liquidity: number | undefined, source: string, observedMs: number, observedAt: string, wasActive: boolean) {
+function addVolatilityBadge(badges: MarketSignalBadge[], subjectId: string, scope: "opportunity" | "pool", pair: BasePair, liquidity: number | undefined, source: string, observedMs: number, observedAt: string, wasActive: boolean, freshness: MarketSignalMetric["freshness"]) {
   const change5m = finite(pair.priceChanges?.m5);
   const change1h = finite(pair.priceChanges?.h1);
   const threshold5m = wasActive ? MARKET_SIGNAL_THRESHOLDS.volatile.change5mExit : MARKET_SIGNAL_THRESHOLDS.volatile.change5mEnter;
@@ -317,7 +318,7 @@ function addVolatilityBadge(badges: MarketSignalBadge[], subjectId: string, scop
   if (!by5m && !by1h) return;
   const value = by1h ? change1h! : change5m!;
   const window = by1h ? "1h" : "5m";
-  badges.push(makeBadge(subjectId, scope, "volatile", "warning", "gauge", value < 0 ? "large_negative_absolute_price_move" : "large_positive_absolute_price_move", source, observedAt, dynamicExpiry(observedMs), 6, metric(value, "percent", by1h ? MARKET_SIGNAL_THRESHOLDS.volatile.change1hEnter : MARKET_SIGNAL_THRESHOLDS.volatile.change5mEnter, window, undefined, { liquidityUsd: liquidity })));
+  badges.push(makeBadge(subjectId, scope, "volatile", "warning", "gauge", value < 0 ? "large_negative_absolute_price_move" : "large_positive_absolute_price_move", source, observedAt, dynamicExpiry(observedMs), 6, metric(value, "percent", by1h ? MARKET_SIGNAL_THRESHOLDS.volatile.change1hEnter : MARKET_SIGNAL_THRESHOLDS.volatile.change5mEnter, window, undefined, { liquidityUsd: liquidity, freshness })));
 }
 
 function addLaunchBadge(badges: MarketSignalBadge[], subjectId: string, scope: "opportunity" | "pool", createdAt: string | undefined, source: string, observedMs: number, observedAt: string) {
@@ -410,7 +411,7 @@ function makeBadge(subjectId: string, scope: "opportunity" | "pool", type: Marke
   return { id: `${scope}:${subjectId}:${type}`, type, tone, iconKey, labelKey: `marketSignal.${type}`, shortLabelKey: `marketSignal.${type}.short`, reasonCode, source, observedAt, expiresAt, priority, metric: value, state: "active", scope, subjectId };
 }
 
-function metric(value: number, unit: MarketSignalMetric["unit"], threshold: number, window: MarketSignalMetric["window"], comparisonValue?: number, evidence: Pick<MarketSignalMetric, "volumeUsd" | "liquidityUsd" | "primaryDex"> = {}): MarketSignalMetric {
+function metric(value: number, unit: MarketSignalMetric["unit"], threshold: number, window: MarketSignalMetric["window"], comparisonValue?: number, evidence: Pick<MarketSignalMetric, "volumeUsd" | "liquidityUsd" | "primaryDex" | "freshness"> = {}): MarketSignalMetric {
   return { value, unit, threshold, window, comparisonValue, ...evidence };
 }
 

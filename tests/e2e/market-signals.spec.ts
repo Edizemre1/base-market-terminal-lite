@@ -95,6 +95,7 @@ test.describe("canonical market signal badge engine", () => {
     expect(types(await fixture({ change5m: 8 }))).toContain("volatile");
     expect(types(await fixture({ change1h: -20 }))).toContain("volatile");
     expect(badges(await fixture({ change1h: -20 })).find((badge) => badge.type === "volatile")?.reasonCode).toBe("large_negative_absolute_price_move");
+    expect(badges(await fixture({ change1h: -20 })).find((badge) => badge.type === "volatile")?.metric).toMatchObject({ freshness: "fresh" });
   });
 
   test("applies 36-second dwell, hysteresis, TTL, cooldown, and out-of-order rejection", async () => {

@@ -153,6 +153,11 @@ test.describe("living Base terminal", () => {
     await expect(row).toHaveCount(1);
     expect(await page.evaluate(() => (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload)).toBe("present");
     await expect(page.getByTestId("live-pulse-strip")).toContainText(/New pool|Yeni havuz/);
+    await row.getByTestId("market-signal-group").getByRole("button").click();
+    const multiPoolDetail = page.locator('[data-signal-detail="multi_pool"]');
+    await expect(multiPoolDetail).toBeVisible();
+    await multiPoolDetail.getByRole("button", { name: /Open pool details|havuz ayrıntılarını aç/i }).click();
+    await expect(page.getByTestId("pool-drawer")).toBeVisible();
   });
 
   test("keeps canonical bounded signal semantics across tape, lanes, matrix, watchlist and pair workspace", async ({ page }) => {

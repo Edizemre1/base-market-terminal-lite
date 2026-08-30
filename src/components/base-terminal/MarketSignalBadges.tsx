@@ -57,6 +57,8 @@ export const MARKET_SIGNAL_ICONS: Readonly<Record<MarketSignalIconKey, LucideIco
   database_alert: DatabaseZap
 });
 
+export const MARKET_SIGNAL_OPEN_POOLS_EVENT = "market-signal:open-pools";
+
 type SignalContextValue = {
   snapshot: MarketTerminalSnapshot;
   signals: MarketSignalSnapshot;
@@ -157,6 +159,12 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
   useEffect(() => () => cancelScheduledClose(), [cancelScheduledClose]);
   if (!badges.length) return null;
   const subject = opportunity?.focusTokenSymbol ?? pair?.pair ?? t("marketSignal.market");
+  const opportunityId = opportunity?.id ?? pair?.opportunityId;
+  const openPoolDetails = opportunityId ? () => {
+    setOpen(false);
+    setTransientOpen(false);
+    window.dispatchEvent(new CustomEvent(MARKET_SIGNAL_OPEN_POOLS_EVENT, { detail: { opportunityId } }));
+  } : undefined;
   const popover = visible && popoverPosition ? <div
     ref={popoverRef}
     id={popoverId}
@@ -173,7 +181,7 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
   >
     <span className="flex items-center justify-between gap-2"><strong className="text-[11px] text-base-text">{t("marketSignal.title")}</strong><span className="font-mono text-[8px] uppercase text-base-muted">{scope === "pool" ? t("marketSignal.poolScope") : t("marketSignal.opportunityScope")}</span></span>
     <span className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
-      {selection.all.map((badge) => <SignalDetail key={badge.id} badge={badge} locale={locale} />)}
+      {selection.all.map((badge) => <SignalDetail key={badge.id} badge={badge} locale={locale} onOpenPoolDetails={openPoolDetails} />)}
     </span>
     <span className="mt-2 block border-t border-base-line pt-2 text-[9px] leading-4 text-base-muted">{t("marketSignal.disclaimer")}</span>
   </div> : null;
@@ -235,7 +243,7 @@ function SignalGlyph({ badge }: { badge: MarketSignalBadge }) {
   ><Icon size={12} /></span>;
 }
 
-function SignalDetail({ badge, locale }: { badge: MarketSignalBadge; locale: "tr" | "en" }) {
+function SignalDetail({ badge, locale, onOpenPoolDetails }: { badge: MarketSignalBadge; locale: "tr" | "en"; onOpenPoolDetails?: () => void }) {
   const { t } = useI18n();
   const Icon = MARKET_SIGNAL_ICONS[badge.iconKey];
   return <span className="rounded-lg border border-base-line bg-base-elevated p-2" data-signal-detail={badge.type}>
@@ -245,7 +253,8 @@ function SignalDetail({ badge, locale }: { badge: MarketSignalBadge; locale: "tr
     {badge.metric?.volumeUsd !== undefined ? <span className="mt-1 block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.volumeEvidence", { value: formatMetricValue(badge.metric.volumeUsd, "usd", locale), window: badge.metric.window })}</span> : null}
     {badge.metric?.liquidityUsd !== undefined ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.liquidityEvidence", { value: formatMetricValue(badge.metric.liquidityUsd, "usd", locale) })}</span> : null}
     {badge.metric?.primaryDex ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.primaryDex", { value: badge.metric.primaryDex })}</span> : null}
-    {badge.type === "multi_pool" ? <span className="mt-1 block text-[8px] leading-4 text-base-mint">{t("marketSignal.poolAction")}</span> : null}
+    {badge.metric?.freshness ? <span className="block font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.freshness", { value: t(`marketSignal.freshnessValue.${badge.metric.freshness}`) })}</span> : null}
+    {badge.type === "multi_pool" && onOpenPoolDetails ? <button type="button" onClick={onOpenPoolDetails} className="mt-2 min-h-9 rounded-sm bg-base-mint/10 px-2 text-[9px] font-semibold text-base-mint">{t("marketSignal.poolAction")}</button> : null}
     <span className="mt-1 block break-words font-mono text-[8px] leading-4 text-base-muted">{t("marketSignal.source")}: {badge.source}<br />{t("marketSignal.observed")}: {formatUtc(badge.observedAt)}<br />{t("marketSignal.expires")}: {formatUtc(badge.expiresAt)}<br />{t("marketSignal.reasonCode")}: {badge.reasonCode}</span>
   </span>;
 }

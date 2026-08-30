@@ -19,7 +19,7 @@ import { safeReadJson, safeSetStorageItem } from "@/lib/safeStorage";
 import type { BasePair } from "@/types/baseTerminal";
 import { PairAvatarStack } from "@/components/TokenIdentity";
 import { orientPairToOpportunity, type TokenOpportunity } from "@/lib/base-terminal/opportunityModel";
-import { MarketSignalBadges, MarketSignalLegend, useMarketSignalContext } from "@/components/base-terminal/MarketSignalBadges";
+import { MARKET_SIGNAL_OPEN_POOLS_EVENT, MarketSignalBadges, MarketSignalLegend, useMarketSignalContext } from "@/components/base-terminal/MarketSignalBadges";
 import { hasMarketSignal, SIGNAL_FILTER_TYPES, type MarketSignalType } from "@/lib/base-terminal/marketSignals";
 
 const MATRIX_STORAGE_KEY = "mergen-terminal:market-matrix:v3";
@@ -146,6 +146,14 @@ export function MarketMatrix({ snapshot, selectedPair, onSelect, onTrade, isPair
   const [visibleLimit, setVisibleLimit] = useState(80);
   const [openOpportunityId, setOpenOpportunityId] = useState<string>();
   const { signals: signalSnapshot } = useMarketSignalContext();
+  useEffect(() => {
+    const openPoolDetails = (event: Event) => {
+      const opportunityId = (event as CustomEvent<{ opportunityId?: string }>).detail?.opportunityId;
+      if (opportunityId && snapshot.opportunities.some((opportunity) => opportunity.id === opportunityId)) setOpenOpportunityId(opportunityId);
+    };
+    window.addEventListener(MARKET_SIGNAL_OPEN_POOLS_EVENT, openPoolDetails);
+    return () => window.removeEventListener(MARKET_SIGNAL_OPEN_POOLS_EVENT, openPoolDetails);
+  }, [snapshot.opportunities]);
   useEffect(() => {
     const saved = safeReadJson<Partial<MatrixPreferences>>(MATRIX_STORAGE_KEY, {});
     setPreferences(normalizePreferences(saved));
