@@ -31,7 +31,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
             ? "border-base-amber/50 bg-base-amber/10 text-base-amber"
             : "border-base-mint/45 bg-base-mint/10 text-base-mint"
           : "border-base-mint bg-base-mint text-white hover:bg-base-mint/90",
-        compact ? "w-9 px-0 text-[10px] sm:w-auto sm:max-w-[116px] sm:px-2 xl:min-w-[112px]" : "text-[11px]"
+        compact ? "w-9 px-0 text-[10px] sm:w-auto sm:max-w-[136px] sm:px-2 xl:min-w-[124px]" : "text-[11px]"
       )}
       aria-label={connected ? t("wallet.openDetails", { address: label }) : t("wallet.connect")}
     >

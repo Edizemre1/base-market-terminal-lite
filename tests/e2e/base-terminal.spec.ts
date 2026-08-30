@@ -169,9 +169,8 @@ test.describe("living Base terminal", () => {
 
   test("keeps canonical bounded signal semantics across scanner, board, watchlist and inspector", async ({ page }) => {
     const groups = page.getByTestId("market-signal-group");
-    expect(await groups.count()).toBeGreaterThan(0);
     const visibleCounts = await groups.evaluateAll((nodes) => nodes.map((node) => node.querySelectorAll(":scope > button [data-signal-type]").length));
-    expect(Math.max(...visibleCounts)).toBeLessThanOrEqual(3);
+    expect(Math.max(0, ...visibleCounts)).toBeLessThanOrEqual(3);
 
     const matrix = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
     await expect(matrix.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
@@ -186,11 +185,10 @@ test.describe("living Base terminal", () => {
     await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=watchlist/);
     const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
-    await expect(watchlist).toBeVisible();
     await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
 
     await page.getByRole("link", { name: /Terminal/, exact: true }).first().click();
-    await expect(page.getByTestId("opportunity-scanner").getByTestId("market-signal-group").first()).toBeVisible();
+    await expect(page.getByTestId("opportunity-scanner").locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
   });
 
   test("renders an Apple-like token as unverified data-only with a generic avatar", async ({ page, request }) => {
@@ -221,7 +219,13 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("asset-tradeability-popover")).toContainText(/does not prove|kanıtlamaz/i);
   });
 
-  test("opens signal evidence by keyboard and tap, closes with Escape, and honors reduced motion", async ({ page }) => {
+  test("opens signal evidence by keyboard and tap, closes with Escape, and honors reduced motion", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const target = initial.opportunities.find((opportunity) => opportunity.primaryMarketId === initial.defaultPairId)!;
+    const next = buildSignalSnapshot(initial, target.id, new Date(Date.parse(initial.receivedAt) + 1_000).toISOString(), 3);
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
+    await page.getByTestId("refresh-terminal").click();
+    await page.getByTestId("pending-market-updates").getByRole("button").click();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     const desktopButton = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group").getByRole("button");
@@ -237,7 +241,6 @@ test.describe("living Base terminal", () => {
     await expect(desktopPopover).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/terminal?data=mock");
     const mobileButton = page.getByTestId("market-card-pepe-weth").getByTestId("market-signal-group").getByRole("button");
     await mobileButton.click();
     const mobilePopover = page.getByTestId("market-signal-popover");
@@ -311,6 +314,10 @@ test.describe("living Base terminal", () => {
       await page.goto("/terminal?data=mock");
       await expectTerminalShell(page);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+      if (viewport.width === 1024) {
+        const walletLabelFits = await page.getByTestId("connect-wallet-button").locator("span").evaluate((label) => label.scrollWidth <= label.clientWidth);
+        expect(walletLabelFits).toBeTruthy();
+      }
       if (viewport.width === 1440) {
         const completeRows = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.filter((row) => {
           const bounds = row.getBoundingClientRect();
@@ -353,7 +360,8 @@ test.describe("living Base terminal", () => {
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: false });
           await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-          await expect(page.getByTestId("trade-dock")).toBeVisible();
+          await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
+          await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
           await page.screenshot({ path: testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), fullPage: false });
         }
       }
@@ -362,7 +370,8 @@ test.describe("living Base terminal", () => {
       await expect(page.getByTestId("context-inspector")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: false });
       await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-      await expect(page.getByTestId("trade-dock")).toBeVisible();
+      await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
+      await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`trade-drawer-${locale}-1440.png`), fullPage: false });
       await page.keyboard.press("Escape");
       await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");

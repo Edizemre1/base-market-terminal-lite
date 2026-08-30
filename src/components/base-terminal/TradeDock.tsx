@@ -164,7 +164,6 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   }, [reviewOpen]);
 
   useEffect(() => {
-    if (reviewOpen && overlay.active.type !== "transaction_review") setReviewOpen(false);
     if (!reviewOpen && overlay.active.type === "transaction_review") overlay.close();
   }, [overlay, reviewOpen]);
 

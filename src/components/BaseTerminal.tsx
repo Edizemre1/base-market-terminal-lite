@@ -139,13 +139,8 @@ export function BaseTerminal({
   const openTrade = useCallback((pair: BasePair, side: "buy" | "sell") => {
     handleSelectPairById(pair.id);
     setTradeSide(side);
-    if (typeof window !== "undefined") {
-      const nextUrl = new URL(window.location.href);
-      nextUrl.searchParams.set("pair", getShareablePairKey(pair));
-      router.replace(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
-    }
     overlay.open("trade_drawer", { pairId: pair.id, side });
-  }, [handleSelectPairById, overlay, router]);
+  }, [handleSelectPairById, overlay]);
 
   const openWorkspace = useCallback((pair: BasePair) => {
     handleSelectPairById(pair.id);
