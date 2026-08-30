@@ -310,6 +310,10 @@ function DataSourceSwitcher() {
     });
   }
 
+  // Mock data stays available to explicit development and test routes, but it
+  // is not presented as a production/staging market mode.
+  if (process.env.NODE_ENV === "production") return null;
+
   return (
     <div className="hidden h-6 items-center border border-base-line bg-base-elevated lg:inline-flex">
       <DataSourceButton

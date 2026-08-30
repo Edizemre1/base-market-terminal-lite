@@ -9,6 +9,8 @@ import {
 } from "./responseValidation";
 import type { MarketDataProvider, PairRiskDetails } from "./types";
 import { parseStrictFiniteNumber } from "@/lib/marketMath";
+import { mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
+import { loadGeckoTerminalDiscovery } from "./geckoTerminalDiscoveryProvider";
 
 const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const BASE_CHAIN_ID = "base";
@@ -17,7 +19,7 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_PROFILE_TOKENS = 36;
 const REQUEST_CONCURRENCY = 6;
 const FEED_LIMIT = 8;
-const MARKET_UNIVERSE_LIMIT = 96;
+const MARKET_UNIVERSE_LIMIT = 1_000;
 const MIN_LIQUIDITY_USD = 10_000;
 const MIN_VOLUME_24H_USD = 5_000;
 const MIN_VOLUME_INFLOW_24H_USD = 10_000;
@@ -120,18 +122,27 @@ export function normalizeDexScreenerPair(payload: unknown): BasePair | undefined
 }
 
 export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
-  const { searchPairs, profilePairs } = await loadDexScreenerPairs();
+  const [{ searchPairs, profilePairs }, geckoDiscovery] = await Promise.all([
+    loadDexScreenerPairs(),
+    loadGeckoTerminalDiscovery()
+  ]);
   const normalizedSearchPairs = normalizePairs(searchPairs);
   const normalizedProfilePairs = normalizePairs(profilePairs);
-  const allPairs = dedupePairs([...normalizedProfilePairs, ...normalizedSearchPairs])
+  const allPairs = mergePoolPairs([...geckoDiscovery.pairs, ...normalizedProfilePairs, ...normalizedSearchPairs])
     .sort((left, right) => getBasePairQualityScore(right) - getBasePairQualityScore(left) || left.id.localeCompare(right.id))
     .slice(0, MARKET_UNIVERSE_LIMIT);
   const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
 
   return {
     mode: "dexscreener",
-    name: "DexScreener read-only Base data",
+    name: "GeckoTerminal + DexScreener read-only Base data",
     readOnly: true,
+    coverage: {
+      providers: geckoDiscovery.pairs.length > 0 ? ["GeckoTerminal", "DexScreener"] : ["DexScreener"],
+      pagesRequested: geckoDiscovery.coverage.pagesRequested,
+      pagesLoaded: geckoDiscovery.coverage.pagesLoaded,
+      capabilities: ["new_pools", "trending_pools", "top_pools", "token_profiles", "pair_enrichment"]
+    },
     getAllPairs: () => allPairs,
     getNewPairs: () => {
       const freshProfilePairs = normalizedProfilePairs.filter(isFreshPair);
@@ -438,6 +449,9 @@ function normalizePair(pair: DexPair): BasePair | undefined {
 
   return {
     dataSource: "dexscreener",
+    dataProviders: ["dexscreener"],
+    sourceUpdatedAt: new Date().toISOString(),
+    firstSeenAt: new Date().toISOString(),
     pairAddress: pairAddress.toLowerCase(),
     baseTokenAddress: baseToken.address?.toLowerCase(),
     quoteTokenAddress: quoteToken.address?.toLowerCase(),
@@ -669,20 +683,6 @@ function dedupeDexPairs(pairs: DexPair[]) {
   }
 
   return [...pairsByAddress.values()];
-}
-
-function dedupePairs(pairs: BasePair[]) {
-  const pairsById = new Map<string, BasePair>();
-
-  for (const pair of pairs) {
-    const current = pairsById.get(pair.id);
-
-    if (!current || getBasePairQualityScore(pair) > getBasePairQualityScore(current)) {
-      pairsById.set(pair.id, pair);
-    }
-  }
-
-  return [...pairsById.values()];
 }
 
 function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {

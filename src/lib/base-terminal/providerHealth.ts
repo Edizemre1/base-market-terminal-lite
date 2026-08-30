@@ -99,7 +99,7 @@ function isSnapshotStale(lastSuccessAt: string | undefined) {
 }
 
 function hasLiveProviderPairs(snapshot: MarketTerminalSnapshot) {
-  return snapshot.allPairs.some((pair) => pair.dataSource === "dexscreener");
+  return snapshot.allPairs.some((pair) => pair.dataSource === "dexscreener" || pair.dataSource === "geckoterminal");
 }
 
 function parseSnapshotTime(value: string) {

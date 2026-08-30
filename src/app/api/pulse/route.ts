@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 
 const SUPPORTED_VERIFIED_EVENTS: PulseEventType[] = [
   "new_pool",
+  "new_opportunity",
+  "primary_market_changed",
   "entered_trending",
   "entered_top_gainers",
   "price_move",
@@ -36,7 +38,12 @@ export async function GET(request: Request) {
       sourceUpdatedAt: snapshot.sourceUpdatedAt,
       freshness: snapshot.freshness,
       qualifiedPairCount: snapshot.allPairs.length,
-      signalMode: "verified-client-snapshot-diff",
+      rawPoolCount: snapshot.universe.rawPoolCount,
+      uniqueTokenCount: snapshot.universe.uniqueTokenCount,
+      activeOpportunityCount: snapshot.universe.activeOpportunityCount,
+      historyStatus: snapshot.historyStatus,
+      recentEventCount: snapshot.recentSignals.length,
+      signalMode: "bounded-server-snapshot-history",
       supportedEvents: SUPPORTED_VERIFIED_EVENTS,
       fabricatedEvents: false
     }, { headers: PULSE_HEADERS });

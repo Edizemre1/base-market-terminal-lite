@@ -14,6 +14,8 @@ import { shouldAcceptMarketSnapshot } from "@/lib/base-terminal/providerHealth";
 
 export type PulseEventType =
   | "new_pool"
+  | "new_opportunity"
+  | "primary_market_changed"
   | "entered_trending"
   | "entered_top_gainers"
   | "price_move"

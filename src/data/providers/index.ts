@@ -1,4 +1,6 @@
 import type { BasePair } from "@/types/baseTerminal";
+import { buildDiscoveryUniverse, mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
+import { recordDiscoveryHistory } from "@/lib/base-terminal/discoveryHistory";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
 import type {
@@ -25,6 +27,8 @@ const READ_ONLY_DATA_UNAVAILABLE_LABEL =
 const SNAPSHOT_CACHE_TTL_MS = 12_000;
 const SNAPSHOT_FAIL_SOFT_MS = 3 * 60_000;
 const SNAPSHOT_RETRY_BACKOFF_MS = 5_000;
+const RESERVOIR_TTL_MS = 30 * 60_000;
+const ACTIVE_RESERVOIR_GRACE_MS = 3 * 60_000;
 type SnapshotCacheEntry = {
   snapshot?: MarketTerminalSnapshot;
   cachedAt?: number;
@@ -98,7 +102,7 @@ export async function getMarketTerminalSnapshot(
     return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
   }
 
-  const inFlight = loadLiveMarketTerminalSnapshot(mode)
+  const inFlight = loadLiveMarketTerminalSnapshot(mode, entry.snapshot)
     .then((snapshot) => {
       snapshotCache.set(mode, { snapshot, cachedAt: Date.now() });
       return snapshot;
@@ -121,9 +125,9 @@ export async function getMarketTerminalSnapshot(
   return inFlight;
 }
 
-async function loadLiveMarketTerminalSnapshot(mode: MarketDataMode) {
+async function loadLiveMarketTerminalSnapshot(mode: MarketDataMode, previous?: MarketTerminalSnapshot) {
   const provider = await getMarketDataProvider(mode);
-  const snapshot = await buildMarketTerminalSnapshot(provider);
+  const snapshot = await buildMarketTerminalSnapshot(provider, undefined, previous);
   if (mode === "dexscreener" && snapshot.allPairs.length === 0) {
     throw new Error("Provider returned no qualified Base pairs");
   }
@@ -132,27 +136,39 @@ async function loadLiveMarketTerminalSnapshot(mode: MarketDataMode) {
 
 async function buildMarketTerminalSnapshot(
   provider: MarketDataProvider,
-  fallbackReason?: string
+  fallbackReason?: string,
+  previous?: MarketTerminalSnapshot
 ): Promise<MarketTerminalSnapshot> {
+  const receivedAt = new Date().toISOString();
   const [allPairInputs, newPairInputs, volumeInflowInputs, momentumPairInputs] = await Promise.all([
     provider.getAllPairs(),
     provider.getNewPairs(),
     provider.getVolumeInflows(),
     provider.getMomentumPairs()
   ]);
-  const allPairs = await hydratePairs(
+  const hydratedPairs = await hydratePairs(
     provider,
     dedupePairs([...allPairInputs, ...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
   );
+  const discoveryInput = mergeWithPreviousReservoir(hydratedPairs, previous, receivedAt);
+  const discovery = buildDiscoveryUniverse(
+    discoveryInput.map((pair) => ({
+      ...pair,
+      sourceUpdatedAt: pair.sourceUpdatedAt ?? receivedAt,
+      firstSeenAt: pair.firstSeenAt ?? receivedAt
+    })),
+    previous?.opportunities,
+    new Date(receivedAt)
+  );
+  const allPairs = discovery.pairs;
   const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
   const newPairs = selectHydratedPairs(newPairInputs, pairsById);
   const volumeInflows = selectHydratedPairs(volumeInflowInputs, pairsById);
   const momentumPairs = selectHydratedPairs(momentumPairInputs, pairsById);
-  const defaultPairId = allPairs[0]?.id ?? "";
+  const defaultPairId = discovery.primaryPairs[0]?.id ?? allPairs[0]?.id ?? "";
 
-  const receivedAt = new Date().toISOString();
   const generatedAt = provider.mode === "mock" ? "mock-static" : receivedAt;
-  return {
+  const snapshot: MarketTerminalSnapshot = {
     mode: provider.mode,
     providerName: provider.name,
     feedStatusLabel: getMarketFeedStatusLabel(provider.mode),
@@ -163,11 +179,20 @@ async function buildMarketTerminalSnapshot(
     freshness: provider.mode === "mock" ? "static" : "fresh",
     defaultPairId,
     allPairs,
+    poolMarkets: discovery.poolMarkets,
+    opportunities: discovery.opportunities,
+    universe: discovery.universe,
+    recentSignals: [],
+    historyStatus: provider.mode === "mock" ? "static" : "warming",
+    comparison: buildOpportunityComparison(provider.mode, previous),
+    providerCoverage: provider.coverage,
     newPairs,
     volumeInflows,
     momentumPairs,
     fallbackReason
   };
+  const history = recordDiscoveryHistory(snapshot);
+  return { ...snapshot, recentSignals: history.signals, historyStatus: history.status };
 }
 
 async function hydratePairs(provider: MarketDataProvider, pairs: BasePair[]) {
@@ -245,6 +270,21 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
     freshness: "delayed",
     defaultPairId: "",
     allPairs: [],
+    poolMarkets: [],
+    opportunities: [],
+    universe: {
+      rawPoolCount: 0,
+      uniqueTokenCount: 0,
+      activeOpportunityCount: 0,
+      freshOpportunityCount: 0,
+      newPools24h: 0,
+      capacity: { pools: 1_000, opportunities: 600 },
+      qualityCounts: { active: 0, thin: 0, incomplete: 0, expired: 0 },
+      providerCoverage: []
+    },
+    recentSignals: [],
+    historyStatus: "warming",
+    comparison: { status: "warming", opportunityVolume1h: {} },
     newPairs: [],
     volumeInflows: [],
     momentumPairs: [],
@@ -287,7 +327,7 @@ function getDefaultPairId({
 }
 
 function isLivePair(pair: BasePair) {
-  return pair.dataSource === "dexscreener";
+  return pair.dataSource === "dexscreener" || pair.dataSource === "geckoterminal";
 }
 
 function findPreferredNeutralPair(pairs: BasePair[]) {
@@ -316,4 +356,43 @@ function getPairQualityScore(pair: BasePair) {
 
 function normalizePairToken(symbol: string) {
   return symbol.trim().replace(/[^a-z0-9]/gi, "").toUpperCase();
+}
+
+function mergeWithPreviousReservoir(current: BasePair[], previous: MarketTerminalSnapshot | undefined, receivedAt: string) {
+  if (!previous) return current;
+  const currentKeys = new Set(current.map((pair) => (pair.pairAddress ?? pair.id).toLowerCase()));
+  const now = Date.parse(receivedAt);
+  const retained = previous.allPairs.flatMap((pair) => {
+    const key = (pair.pairAddress ?? pair.id).toLowerCase();
+    if (currentKeys.has(key)) return [];
+    const updatedAt = Date.parse(pair.sourceUpdatedAt ?? previous.sourceUpdatedAt);
+    if (!Number.isFinite(updatedAt) || now - updatedAt > RESERVOIR_TTL_MS) return [];
+    const delayed = now - updatedAt > ACTIVE_RESERVOIR_GRACE_MS;
+    return [{
+      ...pair,
+      stale: pair.stale || delayed,
+      staleReason: pair.stale || delayed ? "Pool was not present in recent provider refreshes; retained only in the bounded reservoir." : undefined
+    }];
+  });
+  const previousByKey = new Map(previous.allPairs.map((pair) => [(pair.pairAddress ?? pair.id).toLowerCase(), pair]));
+  return mergePoolPairs([
+    ...current.map((pair) => {
+      const before = previousByKey.get((pair.pairAddress ?? pair.id).toLowerCase());
+      return { ...pair, firstSeenAt: before?.firstSeenAt ?? pair.firstSeenAt ?? receivedAt, stale: false, staleReason: undefined };
+    }),
+    ...retained
+  ]);
+}
+
+function buildOpportunityComparison(mode: MarketDataMode, previous?: MarketTerminalSnapshot): MarketTerminalSnapshot["comparison"] {
+  if (mode === "mock") return { status: "static", opportunityVolume1h: {} };
+  if (!previous || previous.freshness !== "fresh") return { status: "warming", opportunityVolume1h: {} };
+  return {
+    status: "ready",
+    previousGeneratedAt: previous.generatedAt,
+    opportunityVolume1h: Object.fromEntries(previous.opportunities.flatMap((opportunity) => {
+      const value = opportunity.aggregate.volumes?.h1;
+      return typeof value === "number" && Number.isFinite(value) && value >= 0 ? [[opportunity.id, value]] : [];
+    }))
+  };
 }

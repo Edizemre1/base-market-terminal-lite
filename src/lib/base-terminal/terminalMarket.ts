@@ -1,10 +1,23 @@
 import { getNormalizedMarketModel } from "@/lib/base-terminal/marketModel";
 import type { BasePair } from "@/types/baseTerminal";
+import type { MarketTerminalSnapshot } from "@/data/providers";
+import {
+  NEW_POOL_MAX_AGE_MINUTES,
+  getOpportunityPrimaryPair,
+  type TokenOpportunity
+} from "@/lib/base-terminal/opportunityModel";
 
 export type TerminalLaneId = "new" | "moving" | "volume" | "liquidity";
 export type TerminalLane = {
   id: TerminalLaneId;
   pairs: BasePair[];
+  derived: boolean;
+  fallback: boolean;
+};
+
+export type TokenOpportunityLane = {
+  id: TerminalLaneId;
+  opportunities: TokenOpportunity[];
   derived: boolean;
   fallback: boolean;
 };
@@ -16,6 +29,9 @@ export type MarketFilters = {
   minimumVolume24h?: number;
   maximumAgeMinutes?: number;
   change: "all" | "gainers" | "losers";
+  dex?: string;
+  quoteTokenAddress?: string;
+  category?: "all" | TerminalLaneId;
   sortBy: MarketSortKey;
   sortDirection: "asc" | "desc";
 };
@@ -23,13 +39,19 @@ export type MarketFilters = {
 export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   query: "",
   change: "all",
+  dex: "",
+  quoteTokenAddress: "",
+  category: "all",
   sortBy: "volume24h",
   sortDirection: "desc"
 };
 
 export function buildOpportunityLanes(current: BasePair[], previous: BasePair[] = [], limit = 6): TerminalLane[] {
   const previousByKey = new Map(previous.map((pair) => [getMarketKey(pair), pair]));
-  const byNew = eligible(current, (pair) => getNormalizedMarketModel(pair).ageMinutes !== undefined)
+  const byNew = eligible(current, (pair) => {
+    const age = getNormalizedMarketModel(pair).ageMinutes;
+    return age !== undefined && age >= 0 && age <= NEW_POOL_MAX_AGE_MINUTES;
+  })
     .sort((left, right) => compareNumbers(getNormalizedMarketModel(left).ageMinutes!, getNormalizedMarketModel(right).ageMinutes!) || compareKeys(left, right));
   const byMoving = current
     .map((pair) => ({ pair, score: getMovingNowScore(pair) }))
@@ -52,6 +74,104 @@ export function buildOpportunityLanes(current: BasePair[], previous: BasePair[] 
     { id: "volume", pairs: (volumeSurges.length ? volumeSurges : byVolume).slice(0, limit), derived: volumeSurges.length > 0, fallback: volumeSurges.length === 0 },
     { id: "liquidity", pairs: byLiquidity.slice(0, limit), derived: false, fallback: false }
   ];
+}
+
+export function buildTokenOpportunityLanes(snapshot: MarketTerminalSnapshot, limit = 6): TokenOpportunityLane[] {
+  const pairsById = new Map(snapshot.allPairs.map((pair) => [pair.id, pair]));
+  const eligible = snapshot.opportunities.filter((opportunity) => opportunity.quality !== "expired");
+  const newCandidates = eligible
+    .filter((opportunity) => opportunity.categoryEligibility.newlyCreated)
+    .map((opportunity) => ({ opportunity, score: opportunity.newestPoolCreatedAt ? Date.parse(opportunity.newestPoolCreatedAt) : Number.NEGATIVE_INFINITY }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort(descendingCandidate);
+  const movingCandidates = eligible
+    .filter((opportunity) => opportunity.quality === "active")
+    .flatMap((opportunity) => {
+      const pair = pairsById.get(opportunity.primaryMarketId);
+      const score = pair ? getMovingNowScore(pair) : undefined;
+      return score === undefined ? [] : [{ opportunity, score }];
+    })
+    .sort(descendingCandidate);
+  const surgeCandidates = eligible
+    .filter((opportunity) => opportunity.quality === "active")
+    .flatMap((opportunity) => {
+      const current = opportunity.aggregate.volumes?.h1;
+      const previous = snapshot.comparison.opportunityVolume1h[opportunity.id];
+      return snapshot.comparison.status === "ready" && current !== undefined && previous !== undefined && previous > 0
+        ? [{ opportunity, score: current / previous }]
+        : [];
+    })
+    .filter((entry) => entry.score >= 1.8)
+    .sort(descendingCandidate);
+  const volumeLeaders = eligible
+    .filter((opportunity) => opportunity.quality === "active")
+    .flatMap((opportunity) => opportunity.aggregate.volumes?.h24 === undefined ? [] : [{ opportunity, score: opportunity.aggregate.volumes.h24 }])
+    .sort(descendingCandidate);
+  const liquidityCandidates = eligible
+    .filter((opportunity) => opportunity.quality === "active")
+    .flatMap((opportunity) => opportunity.aggregate.liquidityUsd === undefined ? [] : [{ opportunity, score: opportunity.aggregate.liquidityUsd }])
+    .sort(descendingCandidate);
+  const volumeFallback = snapshot.comparison.status !== "ready" || surgeCandidates.length === 0;
+  const candidates: Record<TerminalLaneId, Candidate[]> = {
+    new: newCandidates,
+    moving: movingCandidates.length ? movingCandidates : volumeLeaders,
+    volume: volumeFallback ? volumeLeaders : surgeCandidates,
+    liquidity: liquidityCandidates
+  };
+  const allocated = allocateOpportunityDiversity(candidates, limit);
+  return (["new", "moving", "volume", "liquidity"] as const).map((id) => ({
+    id,
+    opportunities: allocated[id],
+    derived: id === "moving" || (id === "volume" && !volumeFallback),
+    fallback: id === "moving" ? movingCandidates.length === 0 : id === "volume" ? volumeFallback : false
+  }));
+}
+
+export function getOpportunityDisplayPair(snapshot: MarketTerminalSnapshot, opportunity: TokenOpportunity) {
+  return getOpportunityPrimaryPair(opportunity, snapshot.allPairs);
+}
+
+type Candidate = { opportunity: TokenOpportunity; score: number };
+
+function allocateOpportunityDiversity(candidates: Record<TerminalLaneId, Candidate[]>, limit: number) {
+  const laneOrder: TerminalLaneId[] = ["new", "moving", "volume", "liquidity"];
+  const rankByOpportunity = new Map<string, Array<{ lane: TerminalLaneId; normalized: number }>>();
+  for (const lane of laneOrder) {
+    const rows = candidates[lane];
+    rows.forEach((entry, index) => {
+      const ranks = rankByOpportunity.get(entry.opportunity.id) ?? [];
+      ranks.push({ lane, normalized: rows.length <= 1 ? 1 : 1 - index / (rows.length - 1) });
+      rankByOpportunity.set(entry.opportunity.id, ranks);
+    });
+  }
+  const strongestLane = new Map<string, TerminalLaneId>();
+  for (const [id, ranks] of rankByOpportunity) {
+    ranks.sort((left, right) => right.normalized - left.normalized || laneOrder.indexOf(left.lane) - laneOrder.indexOf(right.lane));
+    strongestLane.set(id, ranks[0].lane);
+  }
+  const result = Object.fromEntries(laneOrder.map((lane) => [lane, [] as TokenOpportunity[]])) as Record<TerminalLaneId, TokenOpportunity[]>;
+  const globalCounts = new Map<string, number>();
+  for (const lane of laneOrder) {
+    for (const entry of candidates[lane]) {
+      if (result[lane].length >= limit) break;
+      if (strongestLane.get(entry.opportunity.id) !== lane || globalCounts.has(entry.opportunity.id)) continue;
+      result[lane].push(entry.opportunity);
+      globalCounts.set(entry.opportunity.id, 1);
+    }
+  }
+  for (const lane of laneOrder) {
+    for (const entry of candidates[lane]) {
+      if (result[lane].length >= limit) break;
+      if (globalCounts.has(entry.opportunity.id) || result[lane].some((item) => item.id === entry.opportunity.id)) continue;
+      result[lane].push(entry.opportunity);
+      globalCounts.set(entry.opportunity.id, 1);
+    }
+  }
+  return result;
+}
+
+function descendingCandidate(left: Candidate, right: Candidate) {
+  return right.score - left.score || left.opportunity.id.localeCompare(right.opportunity.id);
 }
 
 /**
@@ -93,6 +213,8 @@ export function filterAndSortMarkets(pairs: BasePair[], filters: MarketFilters) 
     if (filters.maximumAgeMinutes !== undefined && (model.ageMinutes === undefined || model.ageMinutes > filters.maximumAgeMinutes)) return false;
     if (filters.change === "gainers" && (model.change24h === undefined || model.change24h <= 0)) return false;
     if (filters.change === "losers" && (model.change24h === undefined || model.change24h >= 0)) return false;
+    if (filters.dex && ![pair.dexId, pair.dexName, pair.dex].some((value) => normalizeFacet(value) === filters.dex)) return false;
+    if (filters.quoteTokenAddress && normalizeFacet(pair.quoteTokenAddress) !== filters.quoteTokenAddress) return false;
     return true;
   });
 
@@ -177,6 +299,10 @@ function finitePositiveOrZero(value: number | undefined) {
 
 function finiteNonNegative(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function normalizeFacet(value: string | undefined) {
+  return value?.trim().toLocaleLowerCase("en-US") ?? "";
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

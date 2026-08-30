@@ -1,4 +1,6 @@
 import type { BasePair, PairActivity, PairRiskCheck } from "@/types/baseTerminal";
+import type { DiscoveryUniverse, PoolMarket, TokenOpportunity } from "@/lib/base-terminal/opportunityModel";
+import type { PulseSignal } from "@/lib/base-terminal/pulse";
 
 export type MarketDataMode = "mock" | "dexscreener" | "geckoterminal";
 export type FeedStatusLabel =
@@ -23,6 +25,12 @@ export type MarketDataProvider = {
   mode: MarketDataMode;
   name: string;
   readOnly: true;
+  coverage?: {
+    providers: string[];
+    pagesRequested: number;
+    pagesLoaded: number;
+    capabilities: string[];
+  };
   getAllPairs: () => MaybePromise<BasePair[]>;
   getNewPairs: () => MaybePromise<BasePair[]>;
   getVolumeInflows: () => MaybePromise<BasePair[]>;
@@ -45,6 +53,17 @@ export type MarketTerminalSnapshot = {
   freshness: "fresh" | "delayed" | "static";
   defaultPairId: string;
   allPairs: BasePair[];
+  poolMarkets: PoolMarket[];
+  opportunities: TokenOpportunity[];
+  universe: DiscoveryUniverse;
+  recentSignals: PulseSignal[];
+  historyStatus: "warming" | "ready" | "static";
+  comparison: {
+    status: "warming" | "ready" | "static";
+    previousGeneratedAt?: string;
+    opportunityVolume1h: Record<string, number>;
+  };
+  providerCoverage?: MarketDataProvider["coverage"];
   newPairs: BasePair[];
   volumeInflows: BasePair[];
   momentumPairs: BasePair[];

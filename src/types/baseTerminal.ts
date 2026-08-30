@@ -20,7 +20,20 @@ export type PairTxnWindow = {
 };
 
 export type BasePair = {
-  dataSource?: "mock" | "dexscreener";
+  dataSource?: "mock" | "dexscreener" | "geckoterminal";
+  dataProviders?: Array<"mock" | "dexscreener" | "geckoterminal">;
+  sourceUpdatedAt?: string;
+  firstSeenAt?: string;
+  qualityTier?: "active" | "thin" | "incomplete" | "expired";
+  opportunityId?: string;
+  opportunityKind?: "token" | "pair";
+  focusTokenAddress?: string;
+  focusTokenSymbol?: string;
+  focusTokenName?: string;
+  focusTokenLogoUrl?: string;
+  poolCount?: number;
+  isPrimaryMarket?: boolean;
+  poolOrientation?: "direct" | "inverted" | "pair";
   stale?: boolean;
   staleReason?: string;
   pairAddress?: string;

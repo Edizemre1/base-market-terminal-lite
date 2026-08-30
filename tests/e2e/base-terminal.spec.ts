@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { buildDiscoveryUniverse } from "../../src/lib/base-terminal/opportunityModel";
+import type { MarketTerminalSnapshot } from "../../src/data/providers";
 
 test.describe("living Base terminal", () => {
   test.beforeEach(async ({ page }) => {
@@ -15,6 +17,31 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
     await expect(page.getByTestId("trade-dock")).toBeVisible();
     await expect(page.getByTestId("trade-dock")).toContainText(/Indicative context|Gösterge bağlamı/);
+    const selectedBox = await page.getByTestId("selected-pair-panel").boundingBox();
+    const dockBox = await page.getByTestId("trade-dock").boundingBox();
+    expect(selectedBox?.y).toBeLessThan(900);
+    expect(dockBox?.y).toBeLessThan(900);
+  });
+
+  test("renders address-unique token discovery by default and preserves exact pools on demand", async ({ page }) => {
+    const tapeIds = await page.getByTestId("live-market-tape").locator("[data-opportunity-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
+    expect(new Set(tapeIds).size).toBe(tapeIds.length);
+
+    const laneRows = page.getByTestId("opportunity-lanes").locator("[data-opportunity-id]");
+    const laneIds = await laneRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
+    expect(new Set(laneIds).size).toBe(laneIds.length);
+    const newAges = await page.getByTestId("opportunity-lane-new").locator("[data-pool-age-minutes]").evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-pool-age-minutes"))));
+    expect(newAges.every((age) => Number.isFinite(age) && age >= 0 && age <= 7 * 24 * 60)).toBeTruthy();
+
+    const tokenRows = page.getByTestId("market-matrix").locator('table tbody [data-focus-token-address]:not([data-focus-token-address=""])');
+    const tokenAddresses = await tokenRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-focus-token-address")));
+    expect(new Set(tokenAddresses).size).toBe(tokenAddresses.length);
+    await page.getByRole("button", { name: /Pools|Havuzlar/, exact: true }).click();
+    await expect(page.getByRole("button", { name: /Pools|Havuzlar/, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
+    await expect(page.getByRole("columnheader", { name: /Pool address|Havuz adresi/ })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /Quote token|Karşı token/ })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /Orientation|Yön/ })).toBeVisible();
   });
 
   test("redirects legacy root parameters to canonical terminal and keeps deep-linked selection", async ({ page }) => {
@@ -48,6 +75,12 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("market-result-count")).toContainText("1");
     await page.getByRole("button", { name: /Reset all filters|Tüm filtreleri sıfırla/ }).click();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
+    await page.getByRole("combobox", { name: /DEX filter|DEX filtresi/ }).selectOption({ index: 1 });
+    await expect(page.getByTestId("active-filter-chips")).toContainText("DEX:");
+    await page.getByRole("combobox", { name: /Opportunity category|Fırsat kategorisi/ }).selectOption("new");
+    await expect(page.getByTestId("active-filter-chips")).toContainText(/Category:|Kategori:/);
+    await page.getByRole("button", { name: /Reset all filters|Tüm filtreleri sıfırla/ }).click();
+    await expect(page.getByTestId("active-filter-chips")).toHaveCount(0);
   });
 
   test("persists no more than four pinned markets and renders the shared multichart", async ({ page }) => {
@@ -90,6 +123,36 @@ test.describe("living Base terminal", () => {
     await expect(page.getByText(/Delayed data|Veri gecikmeli/)).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await page.screenshot({ path: testInfo.outputPath("terminal-delayed-source-1440.png"), fullPage: true });
+  });
+
+  test("ingests a new pool for an existing token on refresh without reloading or duplicating its token row", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const target = initial.allPairs.find((pair) => pair.opportunityId && pair.poolCount === 1)!;
+    const newPoolAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const now = new Date().toISOString();
+    const newPool = { ...target, id: newPoolAddress, pairAddress: newPoolAddress, pairCreatedAt: now, pairCreatedAtMs: Date.parse(now), age: "0m", ageMinutes: 0, firstSeenAt: now, sourceUpdatedAt: now, opportunityId: undefined, poolCount: undefined, isPrimaryMarket: false };
+    const discovery = buildDiscoveryUniverse([...initial.allPairs, newPool], initial.opportunities, new Date(now));
+    const next: MarketTerminalSnapshot = {
+      ...initial,
+      version: "mock-ingestion-fixture-v2",
+      allPairs: discovery.pairs,
+      poolMarkets: discovery.poolMarkets,
+      opportunities: discovery.opportunities,
+      universe: discovery.universe,
+      newPairs: [newPool],
+      recentSignals: [{ key: `new_pool:base:pool:${newPoolAddress}`, type: "new_pool", pairId: newPoolAddress, pair: newPool.pair, headline: "New Base pool", detail: `${newPool.pair} entered the verified Base pool reservoir.`, createdAt: now, source: "deterministic fixture", sourceUpdatedAt: now, timeframe: "snapshot", direction: "neutral" }]
+    };
+    const opportunityId = target.opportunityId!;
+    const row = page.getByTestId("market-matrix").locator(`table tbody [data-opportunity-id="${opportunityId}"]`);
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute("data-pool-count", "1");
+    await page.evaluate(() => { (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload = "present"; });
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
+    await page.getByTestId("refresh-terminal").click();
+    await expect(row).toHaveAttribute("data-pool-count", "2");
+    await expect(row).toHaveCount(1);
+    expect(await page.evaluate(() => (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload)).toBe("present");
+    await expect(page.getByTestId("live-pulse-strip")).toContainText(/New pool|Yeni havuz/);
   });
 
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {

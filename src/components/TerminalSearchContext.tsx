@@ -32,6 +32,8 @@ export type ProviderHealthState = {
 
 export type PinnedPair = {
   key: string;
+  opportunityId?: string;
+  focusTokenAddress?: string;
   pairIdentity: string;
   id?: string;
   pairAddress?: string;
@@ -47,7 +49,7 @@ export type PinnedPair = {
   change24h: number;
   volume24h: number;
   liquidity: number;
-  dataSource?: "mock" | "dexscreener";
+  dataSource?: "mock" | "dexscreener" | "geckoterminal";
   stale: boolean;
 };
 
@@ -243,6 +245,8 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
 
   return {
     key,
+    opportunityId: readStoredText(candidate.opportunityId, 180),
+    focusTokenAddress: readStoredText(candidate.focusTokenAddress, 42)?.toLowerCase(),
     pairIdentity: normalizePairIdentity(readStoredText(candidate.pairIdentity, 128) ?? pair),
     id: readStoredText(candidate.id, 128),
     pairAddress,
@@ -257,7 +261,7 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
     change24h: candidate.change24h,
     volume24h: candidate.volume24h,
     liquidity: candidate.liquidity,
-    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" ? candidate.dataSource : undefined,
+    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" || candidate.dataSource === "geckoterminal" ? candidate.dataSource : undefined,
     stale: true
   };
 }
@@ -265,6 +269,8 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
 function toPinnedPair(pair: BasePair): PinnedPair {
   return {
     key: getPinnedPairKey(pair),
+    opportunityId: pair.opportunityId,
+    focusTokenAddress: pair.focusTokenAddress,
     pairIdentity: normalizePairIdentity(pair.pair),
     id: pair.id,
     pairAddress: pair.pairAddress,
@@ -288,6 +294,8 @@ function toPinnedPair(pair: BasePair): PinnedPair {
 function toStoredPinnedPair(pair: PinnedPair) {
   return {
     key: pair.key,
+    opportunityId: pair.opportunityId,
+    focusTokenAddress: pair.focusTokenAddress,
     pairIdentity: pair.pairIdentity,
     id: pair.id,
     pairAddress: pair.pairAddress,
@@ -307,7 +315,8 @@ function toStoredPinnedPair(pair: PinnedPair) {
 }
 
 function findCurrentPair(pairs: BasePair[], pinnedPair: PinnedPair) {
-  return pairs.find((pair) => !pair.stale && pairsMatchPinnedPair(pair, pinnedPair));
+  const exactPool = pairs.find((pair) => !pair.stale && Boolean(pair.pairAddress && pinnedPair.pairAddress) && pair.pairAddress?.toLowerCase() === pinnedPair.pairAddress?.toLowerCase());
+  return exactPool ?? pairs.find((pair) => !pair.stale && pairsMatchPinnedPair(pair, pinnedPair));
 }
 
 function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {
@@ -317,14 +326,16 @@ function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {
     Boolean(pair.pairAddress && pinnedPair.pairAddress) &&
     pair.pairAddress?.toLowerCase() === pinnedPair.pairAddress?.toLowerCase();
   const idMatches = Boolean(pinnedPair.id) && pair.id === pinnedPair.id;
+  const opportunityMatches = Boolean(pair.opportunityId && pinnedPair.opportunityId) && pair.opportunityId === pinnedPair.opportunityId;
+  const focusTokenMatches = Boolean(pair.focusTokenAddress && pinnedPair.focusTokenAddress) && pair.focusTokenAddress?.toLowerCase() === pinnedPair.focusTokenAddress?.toLowerCase();
 
-  if (pairAddressMatches || pairKey === pinnedKey) return true;
+  if (opportunityMatches || focusTokenMatches || pairAddressMatches || pairKey === pinnedKey) return true;
   if (pair.pairAddress && pinnedPair.pairAddress) return false;
   return idMatches || normalizePairIdentity(pair.pair) === pinnedPair.pairIdentity;
 }
 
 function getPinnedPairKey(pair: BasePair) {
-  return pair.pairAddress?.toLowerCase() ?? pair.id;
+  return pair.opportunityId ?? pair.focusTokenAddress?.toLowerCase() ?? pair.pairAddress?.toLowerCase() ?? pair.id;
 }
 
 function normalizePairIdentity(value: string) {
