@@ -7,8 +7,9 @@ import { MarketSignalBadges } from "@/components/base-terminal/MarketSignalBadge
 import { PairAvatarStack } from "@/components/TokenIdentity";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { useI18n } from "@/i18n/I18nProvider";
+import type { TranslationKey } from "@/i18n/dictionaries";
 import { buildLiveMarketWall, type LiquidityDirection, type LiveWallEntry, type LiveWallLane, type LiveWallLaneId, type LiveWallTimeframe } from "@/lib/base-terminal/liveMarketWall";
-import type { PulseSignal } from "@/lib/base-terminal/pulse";
+import type { PulseEventType, PulseSignal } from "@/lib/base-terminal/pulse";
 import { cx } from "@/lib/format";
 import { safeReadJson, safeSetStorageItem } from "@/lib/safeStorage";
 import type { BasePair } from "@/types/baseTerminal";
@@ -28,9 +29,9 @@ export function LivePulseRail({ signals, onSelect, onInteractionChange }: { sign
     <div className="flex min-h-14 items-stretch gap-2 overflow-x-auto px-2 py-1.5 motion-reduce:scroll-auto">
       <div className="sticky left-0 z-10 flex w-24 shrink-0 items-center gap-2 bg-base-panel pr-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-base-mint/10 text-base-mint"><Activity size={14} /></span><span><b className="block text-[9px] uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.livePulse")}</b><small className="text-[8px] text-base-muted">{rows.length}</small></span></div>
       {rows.length ? rows.map((signal) => <button key={signal.key} type="button" disabled={!signal.pairId} onClick={() => signal.pairId && onSelect(signal.pairId)} className="group min-w-[250px] max-w-[320px] shrink-0 rounded-md bg-base-elevated/75 px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-base-mint/10 focus-visible:ring-2 focus-visible:ring-base-mint/50 motion-reduce:transition-none" data-pulse-event={signal.type}>
-        <span className="flex items-center justify-between gap-2"><strong className="truncate text-[10px] text-base-text">{signal.pair ?? signal.headline}</strong><span className={cx("shrink-0 font-mono text-[8px]", signal.direction === "up" ? "text-base-mint" : signal.direction === "down" ? "text-base-rose" : "text-base-muted")}>{formatPulseValue(signal, formatCompactCurrency, formatPercent)}</span></span>
-        <span className="mt-0.5 flex items-center justify-between gap-2 text-[8px] text-base-muted"><span className="truncate">{signal.headline}</span><span className="shrink-0">{signal.timeframe ?? "snapshot"} · {formatObservedTime(signal.createdAt, locale)}</span></span>
-        <span className="mt-0.5 block truncate text-[7px] text-base-muted/80">{signal.source} · {signal.freshness ?? "fresh"}</span>
+        <span className="flex items-center justify-between gap-2"><strong className="truncate text-[10px] text-base-text">{signal.pair ?? t(PULSE_EVENT_KEYS[signal.type])}</strong><span className={cx("shrink-0 font-mono text-[8px]", signal.direction === "up" ? "text-base-mint" : signal.direction === "down" ? "text-base-rose" : "text-base-muted")}>{formatPulseValue(signal, formatCompactCurrency, formatPercent)}</span></span>
+        <span className="mt-0.5 flex items-center justify-between gap-2 text-[8px] text-base-muted"><span className="truncate">{t(PULSE_EVENT_KEYS[signal.type])}</span><span className="shrink-0">{signal.timeframe === "snapshot" || !signal.timeframe ? t("alerts.snapshot") : signal.timeframe} · {formatObservedTime(signal.createdAt, locale)}</span></span>
+        <span className="mt-0.5 block truncate text-[7px] text-base-muted/80">{signal.source} · {t(PULSE_FRESHNESS_KEYS[signal.freshness ?? "fresh"])}</span>
       </button>) : <p className="flex min-w-[300px] items-center text-[9px] text-base-muted">{t("terminalV3.livePulseEmpty")}</p>}
     </div>
   </section>;
@@ -197,3 +198,23 @@ function formatObservedTime(value: string, locale: "tr" | "en") {
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleTimeString(locale === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "—";
 }
+
+const PULSE_EVENT_KEYS: Record<PulseEventType, TranslationKey> = {
+  new_pool: "signal.new_pool",
+  new_opportunity: "signal.new_opportunity",
+  primary_market_changed: "signal.primary_market_changed",
+  entered_trending: "signal.entered_trending",
+  entered_top_gainers: "signal.entered_top_gainers",
+  price_move: "signal.price_move",
+  volume_burst: "signal.volume_burst",
+  liquidity_change: "signal.liquidity_change",
+  watchlist_move: "signal.watchlist_move",
+  data_recovered: "signal.data_recovered",
+  data_delayed: "signal.data_delayed"
+};
+
+const PULSE_FRESHNESS_KEYS: Record<NonNullable<PulseSignal["freshness"]>, TranslationKey> = {
+  fresh: "marketSignal.freshnessValue.fresh",
+  delayed: "marketSignal.freshnessValue.delayed",
+  static: "marketSignal.freshnessValue.static"
+};

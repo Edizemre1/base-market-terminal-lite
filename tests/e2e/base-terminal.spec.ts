@@ -158,6 +158,11 @@ test.describe("living Base terminal", () => {
     await page.evaluate(() => { (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload = "present"; });
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
     await page.getByTestId("refresh-terminal").click();
+    await expect(page.getByTestId("live-pulse-rail")).toContainText("New pool");
+    await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
+    await expect(page.getByTestId("live-pulse-rail")).toContainText("Yeni havuz");
+    await expect(page.getByTestId("live-pulse-rail")).toContainText("görüntü");
+    await expect(page.getByTestId("live-pulse-rail")).toContainText("güncel");
     await expect(row).toHaveAttribute("data-pool-count", "2");
     await expect(row).toHaveCount(1);
     expect(await page.evaluate(() => (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload)).toBe("present");
