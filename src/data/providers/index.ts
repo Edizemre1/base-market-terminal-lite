@@ -388,14 +388,19 @@ function mergeWithPreviousReservoir(current: BasePair[], previous: MarketTermina
 }
 
 function buildOpportunityComparison(mode: MarketDataMode, previous?: MarketTerminalSnapshot): MarketTerminalSnapshot["comparison"] {
-  if (mode === "mock") return { status: "static", opportunityVolume1h: {} };
-  if (!previous || previous.freshness !== "fresh") return { status: "warming", opportunityVolume1h: {} };
+  if (mode === "mock") return { status: "static", opportunityVolume1h: {}, opportunityMetrics: {} };
+  if (!previous || previous.freshness !== "fresh") return { status: "warming", opportunityVolume1h: {}, opportunityMetrics: {} };
   return {
     status: "ready",
     previousGeneratedAt: previous.generatedAt,
     opportunityVolume1h: Object.fromEntries(previous.opportunities.flatMap((opportunity) => {
       const value = opportunity.aggregate.volumes?.h1;
       return typeof value === "number" && Number.isFinite(value) && value >= 0 ? [[opportunity.id, value]] : [];
-    }))
+    })),
+    opportunityMetrics: Object.fromEntries(previous.opportunities.map((opportunity) => [opportunity.id, {
+      liquidityUsd: opportunity.aggregate.liquidityUsd,
+      volumes: opportunity.aggregate.volumes,
+      transactions: opportunity.aggregate.transactions
+    }]))
   };
 }

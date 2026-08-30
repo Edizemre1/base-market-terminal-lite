@@ -35,9 +35,13 @@ export type PulseSignal = {
   createdAt: string;
   source: string;
   sourceUpdatedAt: string;
-  timeframe?: "snapshot" | "5m" | "24h";
+  timeframe?: "snapshot" | "5m" | "1h" | "24h";
   direction?: "up" | "down" | "neutral";
   value?: number;
+  metric?: "price_usd" | "price_change_percent" | "volume_usd" | "liquidity_usd" | "activity_score" | "freshness";
+  previousValue?: number;
+  currentValue?: number;
+  freshness?: "fresh" | "delayed" | "static";
 };
 
 export type VisitPairSnapshot = {
@@ -88,7 +92,9 @@ export function diffMarketSnapshots(
       type: "data_delayed",
       headline: "Market data delayed",
       detail: current.fallbackReason ?? "The last healthy snapshot is being retained.",
-      direction: "neutral"
+      direction: "neutral",
+      metric: "freshness",
+      freshness: "delayed"
     });
   }
   if (!isDelayedSnapshot(current) && isDelayedSnapshot(previous)) {
@@ -98,7 +104,9 @@ export function diffMarketSnapshots(
       type: "data_recovered",
       headline: "Market data recovered",
       detail: `${current.providerName} returned a healthy snapshot.`,
-      direction: "neutral"
+      direction: "neutral",
+      metric: "freshness",
+      freshness: current.freshness
     });
   }
 
@@ -121,7 +129,10 @@ export function diffMarketSnapshots(
           type: "new_pool",
           headline: "New qualified Base pool",
           detail: `${pair.pair} appeared with ${formatUsd(liquidity)} liquidity and ${formatUsd(volume24h)} 24h volume.`,
-          timeframe: "snapshot"
+          timeframe: "snapshot",
+          metric: "liquidity_usd",
+          currentValue: liquidity,
+          freshness: current.freshness
         })
       );
       continue;
@@ -137,7 +148,10 @@ export function diffMarketSnapshots(
             headline: "Entered Trending Activity",
             detail: `${pair.pair} reached Activity Score ${score} from complete verified fields.`,
             timeframe: "snapshot",
-            value: score
+            value: score,
+            metric: "activity_score",
+            currentValue: score,
+            freshness: current.freshness
           })
         );
       }
@@ -153,7 +167,11 @@ export function diffMarketSnapshots(
             detail: `${pair.pair} is ${formatPercent(change24h)} over the provider's verified 24h window.`,
             timeframe: "24h",
             direction: change24h >= 0 ? "up" : "down",
-            value: change24h
+            value: change24h,
+            metric: "price_change_percent",
+            previousValue: before.priceChanges?.h24,
+            currentValue: change24h,
+            freshness: current.freshness
           })
         );
       }
@@ -169,7 +187,11 @@ export function diffMarketSnapshots(
           detail: `${pair.pair} moved ${formatPercent(priceMove)} since the previous verified snapshot; liquidity ${formatUsd(liquidity)}.`,
           timeframe: "snapshot",
           direction: priceMove > 0 ? "up" : "down",
-          value: priceMove
+          value: priceMove,
+          metric: "price_usd",
+          previousValue: before.priceUsdValue,
+          currentValue: pair.priceUsdValue,
+          freshness: current.freshness
         })
       );
     }
@@ -191,7 +213,11 @@ export function diffMarketSnapshots(
           detail: `${pair.pair} 5m volume is ${multiple.toFixed(1)}× the prior provider snapshot at ${formatUsd(currentM5)}; liquidity ${formatUsd(liquidity)}.`,
           timeframe: "5m",
           direction: "up",
-          value: multiple
+          value: multiple,
+          metric: "volume_usd",
+          previousValue: previousM5,
+          currentValue: currentM5,
+          freshness: current.freshness
         })
       );
     }
@@ -211,7 +237,11 @@ export function diffMarketSnapshots(
           detail: `${pair.pair} liquidity moved ${formatPercent(liquidityMove)} to ${formatUsd(liquidity)} between verified snapshots.`,
           timeframe: "snapshot",
           direction: liquidityMove > 0 ? "up" : "down",
-          value: liquidityMove
+          value: liquidityMove,
+          metric: "liquidity_usd",
+          previousValue: getLiquidityUsd(before),
+          currentValue: liquidity,
+          freshness: current.freshness
         })
       );
     }
@@ -401,7 +431,7 @@ function createPairSignal(
   common: Pick<PulseSignal, "createdAt" | "source" | "sourceUpdatedAt">,
   event: Omit<PulseSignal, "key" | "pairId" | "pair" | "createdAt" | "source" | "sourceUpdatedAt">
 ): PulseSignal {
-  return { ...common, ...event, key: `${event.type}:${getPairIdentity(pair)}`, pairId: pair.id, pair: pair.pair };
+  return { ...common, ...event, key: `${event.type}:${getPairIdentity(pair)}:${event.timeframe ?? "snapshot"}`, pairId: pair.id, pair: pair.pair };
 }
 
 function getTrendingPairIds(pairs: BasePair[]) {

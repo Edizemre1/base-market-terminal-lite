@@ -62,6 +62,11 @@ export type MarketTerminalSnapshot = {
     status: "warming" | "ready" | "static";
     previousGeneratedAt?: string;
     opportunityVolume1h: Record<string, number>;
+    opportunityMetrics?: Record<string, {
+      liquidityUsd?: number;
+      volumes?: Partial<Record<"m5" | "h1" | "h24", number>>;
+      transactions?: Partial<Record<"m5" | "h1" | "h24", { buys: number; sells: number }>>;
+    }>;
   };
   providerCoverage?: MarketDataProvider["coverage"];
   newPairs: BasePair[];

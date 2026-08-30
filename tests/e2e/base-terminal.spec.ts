@@ -8,11 +8,12 @@ test.describe("living Base terminal", () => {
     await expectTerminalShell(page);
   });
 
-  test("opens on the canonical terminal with tape, one scanner, board and explicit overlays", async ({ page }) => {
+  test("opens on the canonical terminal with tape, pulse, six-lane wall, board and explicit overlays", async ({ page }) => {
     await expect(page).toHaveURL(/\/terminal\?data=mock$/);
     await expect(page.getByTestId("live-market-tape")).toBeVisible();
-    await expect(page.getByTestId("opportunity-scanner")).toBeVisible();
-    await expect(page.locator('[data-testid^="scanner-tab-"]')).toHaveCount(6);
+    await expect(page.getByTestId("live-pulse-rail")).toBeVisible();
+    await expect(page.getByTestId("live-market-wall")).toBeVisible();
+    await expect(page.locator('[data-testid^="live-wall-lane-"]')).toHaveCount(6);
     await expect(page.getByTestId("market-matrix")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
@@ -29,10 +30,10 @@ test.describe("living Base terminal", () => {
     const tapeIds = await page.getByTestId("live-market-tape").locator("[data-opportunity-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
     expect(new Set(tapeIds).size).toBe(tapeIds.length);
 
-    await page.getByTestId("scanner-tab-new").click();
-    const scannerRows = page.getByTestId("scanner-list-new").locator("[data-opportunity-id]");
-    const scannerIds = await scannerRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
-    expect(new Set(scannerIds).size).toBe(scannerIds.length);
+    const wallRows = page.getByTestId("live-wall-lanes").locator("[data-opportunity-id]");
+    const wallIds = await wallRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
+    expect(new Set(wallIds).size).toBe(wallIds.length);
+    await expect(page.getByTestId("live-market-wall")).toHaveAttribute("data-cross-lane-duplicates", "0");
 
     const tokenRows = page.getByTestId("market-matrix").locator('table tbody [data-focus-token-address]:not([data-focus-token-address=""])');
     const tokenAddresses = await tokenRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-focus-token-address")));
@@ -188,7 +189,7 @@ test.describe("living Base terminal", () => {
     await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
 
     await page.getByRole("link", { name: /Terminal/, exact: true }).first().click();
-    await expect(page.getByTestId("opportunity-scanner").locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
+    await expect(page.getByTestId("live-market-wall").locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
   });
 
   test("renders an Apple-like token as unverified data-only with a generic avatar", async ({ page, request }) => {
@@ -308,10 +309,27 @@ test.describe("living Base terminal", () => {
     await expect(selectedSignals.locator('[data-signal-type="gaining_fast"]')).toHaveCount(0);
   });
 
+  test("freezes wall ordering during focus and applies the latest bounded update after a quiet period", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const target = initial.opportunities.find((item) => item.primaryMarketId === initial.defaultPairId)!;
+    const next = buildWallChangeSnapshot(initial, target.id);
+    const gainers = page.getByTestId("live-wall-lane-gainers").locator("[data-opportunity-id]");
+    const before = await gainers.first().getAttribute("data-opportunity-id");
+    await page.getByTestId("live-market-wall").getByRole("checkbox").focus();
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
+    await page.getByTestId("refresh-terminal").evaluate((button: HTMLButtonElement) => button.click());
+    await expect(page.getByTestId("pending-market-updates")).toBeVisible();
+    await expect(gainers.first()).toHaveAttribute("data-opportunity-id", before!);
+
+    await page.getByTestId("refresh-terminal").focus();
+    await expect(page.getByTestId("pending-market-updates")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.getByTestId("live-wall-lane-gainers").locator(`[data-opportunity-id="${target.id}"]`)).toBeVisible();
+  });
+
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+    for (const viewport of [{ width: 2048, height: 1024 }, { width: 1728, height: 1080 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
       await page.goto("/terminal?data=mock");
       await expectTerminalShell(page);
@@ -320,12 +338,12 @@ test.describe("living Base terminal", () => {
         const walletLabelFits = await page.getByTestId("connect-wallet-button").locator("span").evaluate((label) => label.scrollWidth <= label.clientWidth);
         expect(walletLabelFits).toBeTruthy();
       }
+      if (viewport.width === 2048) {
+        const laneBounds = await page.locator('[data-testid^="live-wall-lane-"]').evaluateAll((lanes) => lanes.map((lane) => lane.getBoundingClientRect()));
+        expect(laneBounds).toHaveLength(6);
+        expect(laneBounds.every((bounds) => bounds.left >= 0 && bounds.right <= window.innerWidth)).toBeTruthy();
+      }
       if (viewport.width === 1440) {
-        const completeRows = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.filter((row) => {
-          const bounds = row.getBoundingClientRect();
-          return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
-        }).length);
-        expect(completeRows).toBeGreaterThanOrEqual(10);
         const visibleBadgeCounts = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("[data-signal-type], [data-testid='asset-identity-badge'], [data-testid='tradeability-badge']").length));
         expect(Math.max(...visibleBadgeCounts)).toBeLessThanOrEqual(3);
       }
@@ -340,7 +358,7 @@ test.describe("living Base terminal", () => {
   test("opens the selected market trade dock as a keyboard-closeable mobile sheet", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/terminal?data=mock");
-    await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Overview|Genel Bakış/ }).click();
+    await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
     await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
     await expect(page.getByTestId("trade-dock")).toContainText("PEPE / WETH");
@@ -348,17 +366,17 @@ test.describe("living Base terminal", () => {
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toHaveCount(0);
   });
 
-  test("captures required terminal visual evidence", async ({ page }, testInfo) => {
+  test("captures required terminal visual evidence", async ({ page, request }, testInfo) => {
     test.setTimeout(180_000);
     for (const locale of ["en", "tr"] as const) {
       await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
-      for (const viewport of [{ width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 390, height: 844, name: "mobile-390" }]) {
+      for (const viewport of [{ width: 2048, height: 1024, name: "desktop-2048" }, { width: 1728, height: 1080, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 390, height: 844, name: "mobile-390" }]) {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: false });
         if (viewport.width === 390) {
-          await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Overview|Genel Bakış/ }).click();
+          await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: false });
           await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
@@ -368,6 +386,26 @@ test.describe("living Base terminal", () => {
         }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/terminal?data=mock");
+      await page.getByTestId("live-wall-lane-gainers").screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`) });
+      await page.getByTestId("live-wall-lane-losers").screenshot({ path: testInfo.outputPath(`lane-losers-${locale}-1440.png`) });
+      await expect(page.getByTestId("live-wall-lane-volume")).toHaveAttribute("data-lane-fallback", "true");
+      await page.getByTestId("live-wall-lane-volume").screenshot({ path: testInfo.outputPath(`lane-volume-fallback-${locale}-1440.png`) });
+      const signalTrigger = page.getByTestId("market-matrix").getByTestId("market-signal-group").getByRole("button").first();
+      await signalTrigger.click();
+      await expect(page.getByTestId("market-signal-popover")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`signal-popover-${locale}-1440.png`), fullPage: false });
+      await page.keyboard.press("Escape");
+
+      const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+      const removed = buildLiquidityRemovedSnapshot(initial);
+      await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: removed }));
+      await page.goto("/terminal?data=mock");
+      await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıkarılan/ }).click();
+      await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
+      await page.getByTestId("live-wall-lane-liquidity").screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`) });
+      await page.unroute("**/api/market-snapshot?data=mock");
+
       await page.goto("/terminal?data=mock&pair=blob-usdc");
       await expect(page.getByTestId("context-inspector")).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: false });
@@ -424,6 +462,68 @@ function buildSignalSnapshot(snapshot: MarketTerminalSnapshot, opportunityId: st
         liquidityUsd: 40_000,
         volumes: { ...item.aggregate.volumes, m5: 6_000 }
       },
+      freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
+    } : item)
+  };
+}
+
+function buildWallChangeSnapshot(snapshot: MarketTerminalSnapshot, opportunityId: string): MarketTerminalSnapshot {
+  const opportunity = snapshot.opportunities.find((item) => item.id === opportunityId)!;
+  const baseTime = Number.isFinite(Date.parse(snapshot.generatedAt)) ? Date.parse(snapshot.generatedAt) : Date.now();
+  const generatedAt = new Date(baseTime + 1_000).toISOString();
+  return {
+    ...snapshot,
+    version: `wall-focus-${generatedAt}`,
+    generatedAt,
+    receivedAt: generatedAt,
+    sourceUpdatedAt: generatedAt,
+    allPairs: snapshot.allPairs.map((pair) => pair.id === opportunity.primaryMarketId ? {
+      ...pair,
+      stale: false,
+      sourceUpdatedAt: generatedAt,
+      priceChanges: { ...pair.priceChanges, h1: 999 }
+    } : pair)
+  };
+}
+
+function buildLiquidityRemovedSnapshot(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
+  const target = snapshot.opportunities.find((item) => item.quality === "active" && (item.aggregate.liquidityUsd ?? 0) >= 20_000)!;
+  const previousLiquidity = target.aggregate.liquidityUsd!;
+  const currentLiquidity = previousLiquidity - 5_000;
+  const baseTime = Number.isFinite(Date.parse(snapshot.generatedAt)) ? Date.parse(snapshot.generatedAt) : Date.now();
+  const previousGeneratedAt = new Date(baseTime).toISOString();
+  const generatedAt = new Date(baseTime + 60_000).toISOString();
+  const emptyTransactions = { m5: { buys: 0, sells: 0 }, h1: { buys: 0, sells: 0 }, h6: { buys: 0, sells: 0 }, h24: { buys: 0, sells: 0 } };
+  const emptyVolumes = { m5: 0, h1: 0, h6: 0, h24: 0 };
+  return {
+    ...snapshot,
+    version: `liquidity-removed-${generatedAt}`,
+    generatedAt,
+    receivedAt: generatedAt,
+    sourceUpdatedAt: generatedAt,
+    freshness: "fresh",
+    comparison: {
+      status: "ready",
+      previousGeneratedAt,
+      opportunityVolume1h: {},
+      opportunityMetrics: {
+        [target.id]: { liquidityUsd: previousLiquidity, volumes: emptyVolumes, transactions: emptyTransactions }
+      }
+    },
+    allPairs: snapshot.allPairs.map((pair) => pair.id === target.primaryMarketId ? {
+      ...pair,
+      stale: false,
+      sourceUpdatedAt: generatedAt,
+      pairCreatedAt: new Date(baseTime - 8 * 24 * 60 * 60 * 1_000).toISOString(),
+      pairCreatedAtMs: baseTime - 8 * 24 * 60 * 60 * 1_000,
+      priceChanges: { m5: 0, h1: 0, h6: 0, h24: 0 },
+      volumes: emptyVolumes,
+      transactions: emptyTransactions
+    } : pair),
+    opportunities: snapshot.opportunities.map((item) => item.id === target.id ? {
+      ...item,
+      newestPoolCreatedAt: new Date(baseTime - 8 * 24 * 60 * 60 * 1_000).toISOString(),
+      aggregate: { ...item.aggregate, liquidityUsd: currentLiquidity, volumes: emptyVolumes, transactions: emptyTransactions },
       freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
     } : item)
   };

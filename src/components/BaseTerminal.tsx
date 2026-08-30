@@ -12,7 +12,8 @@ import {
 } from "@/components/base-terminal/PulseTerminalPanels";
 import { SelectedPairPanel } from "@/components/base-terminal/SelectedPairPanel";
 import { TradeDock } from "@/components/base-terminal/TradeDock";
-import { LiveMarketTape, MarketMatrix, OpportunityScanner, PinnedMarketGrid } from "@/components/base-terminal/TerminalMarketSurface";
+import { LiveMarketTape, MarketMatrix, PinnedMarketGrid } from "@/components/base-terminal/TerminalMarketSurface";
+import { LiveMarketWall, LivePulseRail } from "@/components/base-terminal/LiveMarketWall";
 import { ContextInspector } from "@/components/base-terminal/ContextInspector";
 import { MarketSignalProvider } from "@/components/base-terminal/MarketSignalBadges";
 import { TradeabilityProvider } from "@/components/base-terminal/AssetTradeabilityBadges";
@@ -23,7 +24,7 @@ import {
 } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { getChartCacheKey, getShareablePairKey } from "@/lib/base-terminal/pairs";
-import { getSnapshotRefreshCadence, shouldQueueMarketUpdate } from "@/lib/base-terminal/liveUpdates";
+import { coalescePendingOpportunityIds, getSnapshotRefreshCadence, shouldAutoApplyPendingUpdate, shouldQueueMarketUpdate, UPDATE_AUTO_APPLY_QUIET_MS } from "@/lib/base-terminal/liveUpdates";
 import {
   diffMarketSnapshots,
   getChangedPairIds,
@@ -42,8 +43,6 @@ import { useI18n } from "@/i18n/I18nProvider";
 import { APP_NAME } from "@/lib/appInfo";
 import { orientPairToOpportunity } from "@/lib/base-terminal/opportunityModel";
 import { useOverlayManager } from "@/components/OverlayManager";
-
-const AUTO_APPLY_DELAY_MS = 4_000;
 
 type PendingSnapshot = {
   snapshot: MarketTerminalSnapshot;
@@ -93,6 +92,12 @@ export function BaseTerminal({
   const snapshotRefreshInFlightRef = useRef(false);
   const snapshotRefreshRequestIdRef = useRef(0);
   const refreshAbortRef = useRef<AbortController | undefined>(undefined);
+  const interactionLocksRef = useRef(new Set<string>());
+  const setInteractionLock = useCallback((reason: string, locked: boolean) => {
+    if (locked) interactionLocksRef.current.add(reason);
+    else interactionLocksRef.current.delete(reason);
+    setInteractionLocked(interactionLocksRef.current.size > 0);
+  }, []);
   const { selectedPair, handleSelectPairById } = useSelectedPairState({
     initialSnapshot: data,
     snapshotData,
@@ -181,6 +186,11 @@ export function BaseTerminal({
   }, [interactionLocked]);
 
   useEffect(() => {
+    setInteractionLock("overlay", overlay.active.type !== "none");
+    return () => setInteractionLock("overlay", false);
+  }, [overlay.active.type, setInteractionLock]);
+
+  useEffect(() => {
     setSnapshotData(data);
     snapshotRef.current = data;
     setPulseSignals((current) => mergePulseSignals(current, data.recentSignals));
@@ -231,12 +241,17 @@ export function BaseTerminal({
       }
 
       const changedPairIds = getChangedPairIds(snapshotRef.current, nextSnapshot);
+      const changedOpportunityIds = coalescePendingOpportunityIds([], changedPairIds.map((pairId) => nextSnapshot.opportunities.find((opportunity) => opportunity.poolMarketIds.includes(pairId))?.id ?? pairId));
       const signals = mergePulseSignals(nextSnapshot.recentSignals, diffMarketSnapshots(snapshotRef.current, nextSnapshot, {
         watchedPairIds: watchedPairIdsRef.current
       }));
-      const candidate = { snapshot: nextSnapshot, signals, changedPairIds };
+      const candidate = { snapshot: nextSnapshot, signals, changedPairIds: changedOpportunityIds };
       if (shouldQueueMarketUpdate(changedPairIds.length, interactionLockedRef.current)) {
-        setPendingSnapshot(candidate);
+        setPendingSnapshot((current) => ({
+          snapshot: candidate.snapshot,
+          signals: mergePulseSignals(current?.signals ?? [], candidate.signals),
+          changedPairIds: coalescePendingOpportunityIds(current?.changedPairIds ?? [], candidate.changedPairIds)
+        }));
         setProviderHealth(buildProviderHealth(nextSnapshot, "idle"));
       } else {
         applySnapshot(candidate);
@@ -254,10 +269,10 @@ export function BaseTerminal({
   }, [applySnapshot]);
 
   useEffect(() => {
-    if (!pendingSnapshot || interactionLocked) return;
-    const timeoutId = window.setTimeout(() => applySnapshot(pendingSnapshot), AUTO_APPLY_DELAY_MS);
+    if (!pendingSnapshot || !shouldAutoApplyPendingUpdate({ interactionLocked, overlayOpen: overlay.active.type !== "none", quietForMs: UPDATE_AUTO_APPLY_QUIET_MS })) return;
+    const timeoutId = window.setTimeout(() => applySnapshot(pendingSnapshot), UPDATE_AUTO_APPLY_QUIET_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [applySnapshot, interactionLocked, pendingSnapshot]);
+  }, [applySnapshot, interactionLocked, overlay.active.type, pendingSnapshot]);
 
   useEffect(() => {
     registerPairs(snapshotData.allPairs);
@@ -354,15 +369,14 @@ export function BaseTerminal({
   }
 
   const inspectorOpen = overlay.active.type === "market_inspector";
-  const marketBoard = <MarketMatrix snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} onInteractionChange={setInteractionLocked} watchlistOnly={view === "watchlist"} />;
+  const marketBoard = <MarketMatrix snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} onInteractionChange={(locked) => setInteractionLock("market-board", locked)} watchlistOnly={view === "watchlist"} />;
   return <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] w-full scroll-mt-16 overflow-x-hidden bg-base-black px-2.5 py-2.5 outline-none sm:px-4 lg:px-5" data-testid="pulse-terminal"><h1 className="sr-only">{viewTitle}</h1>
-    <MarketSignalProvider snapshot={snapshotData}><TradeabilityProvider><div className="mx-auto max-w-[1720px] space-y-2.5">
+    <MarketSignalProvider snapshot={snapshotData}><TradeabilityProvider><div className="mx-auto max-w-[2200px] space-y-2.5">
       {snapshotData.fallbackReason ? <div className="rounded-lg bg-base-amber/10 px-3 py-2 text-[10px] text-base-amber">{t("terminal.unavailableBody")}</div> : null}
-      {pendingSnapshot ? <div className="flex items-center justify-between rounded-lg border border-base-mint/25 bg-base-mint/5 px-3 py-2 text-[10px] text-base-mint" data-testid="pending-market-updates"><span>{t("market.newUpdates", { count: pendingSnapshot.changedPairIds.length })}</span><button type="button" onClick={() => applySnapshot(pendingSnapshot)} className="min-h-9 rounded-sm bg-base-mint px-3 font-bold text-[#031411]">{t("terminalV3.applyUpdates")}</button></div> : null}
 
-      {view === "terminal" ? <><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} /><OpportunityScanner snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} isPairPinned={isPairPinned} /><section className={cx("grid min-w-0 items-start gap-2.5", inspectorOpen && "lg:grid-cols-[minmax(0,1fr)_350px]")} data-testid="terminal-workspace"><div className="min-w-0">{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section></> : null}
+      {view === "terminal" ? <><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} pendingUpdateCount={pendingSnapshot?.changedPairIds.length} onApplyUpdates={pendingSnapshot ? () => applySnapshot(pendingSnapshot) : undefined} /><LivePulseRail signals={pulseSignals} onSelect={openPair} onInteractionChange={(locked) => setInteractionLock("pulse-rail", locked)} /><LiveMarketWall snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} onInteractionChange={(locked) => setInteractionLock("live-wall", locked)} /><section className={cx("grid min-w-0 items-start gap-2.5", inspectorOpen && "lg:grid-cols-[minmax(0,1fr)_350px]")} data-testid="terminal-workspace"><div className="min-w-0">{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section></> : null}
 
-      {view === "markets" ? <section className={cx("grid min-w-0 items-start gap-2.5", inspectorOpen && "lg:grid-cols-[minmax(0,1fr)_350px]")}><div className="min-w-0 space-y-2.5"><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
+      {view === "markets" ? <section className={cx("grid min-w-0 items-start gap-2.5", inspectorOpen && "lg:grid-cols-[minmax(0,1fr)_350px]")}><div className="min-w-0 space-y-2.5"><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} pendingUpdateCount={pendingSnapshot?.changedPairIds.length} onApplyUpdates={pendingSnapshot ? () => applySnapshot(pendingSnapshot) : undefined} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
 
       {view === "watchlist" ? <section className={cx("grid min-w-0 items-start gap-2.5", inspectorOpen && "lg:grid-cols-[minmax(0,1fr)_350px]")}><div className="min-w-0 space-y-2.5"><PinnedMarketGrid pairs={pinnedMarketPairs} onSelect={openPair} onUnpin={togglePinnedPair} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
 
@@ -371,7 +385,7 @@ export function BaseTerminal({
       {view === "alerts" ? <section className="mx-auto w-full max-w-3xl" data-testid="alerts-workspace"><AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} embedded /></section> : null}
       {view === "portfolio" ? <section className="pulse-surface rounded-xl p-5" data-testid="portfolio-workspace"><BriefcaseBusiness size={20} className="text-base-mint" /><h2 className="mt-3 text-lg font-semibold">{t("portfolio.title")}</h2><p className="mt-2 max-w-2xl text-[11px] leading-6 text-base-muted">{t("portfolio.scope")}</p><div className="mt-4 rounded-lg bg-base-elevated p-4 text-[11px] text-base-muted">{t("portfolio.empty")}</div></section> : null}
 
-      {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={setInteractionLocked} /></TradeDrawer> : null}
+      {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={(locked) => setInteractionLock("trade", locked)} /></TradeDrawer> : null}
     </div></TradeabilityProvider></MarketSignalProvider>
   </main>;
 }
