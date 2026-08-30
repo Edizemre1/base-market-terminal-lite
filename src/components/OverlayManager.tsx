@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -98,7 +99,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousRouteScopeRef.current === routeScope) return;
     previousRouteScopeRef.current = routeScope;
     closeAll();
