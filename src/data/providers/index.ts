@@ -165,7 +165,10 @@ async function buildMarketTerminalSnapshot(
   const newPairs = selectHydratedPairs(newPairInputs, pairsById);
   const volumeInflows = selectHydratedPairs(volumeInflowInputs, pairsById);
   const momentumPairs = selectHydratedPairs(momentumPairInputs, pairsById);
-  const defaultPairId = discovery.primaryPairs[0]?.id ?? allPairs[0]?.id ?? "";
+  const providerDefaultPairId = allPairInputs[0]?.id;
+  const defaultPairId = provider.mode === "mock" && providerDefaultPairId && pairsById.has(providerDefaultPairId)
+    ? providerDefaultPairId
+    : discovery.primaryPairs[0]?.id ?? allPairs[0]?.id ?? "";
 
   const generatedAt = provider.mode === "mock" ? "mock-static" : receivedAt;
   const snapshot: MarketTerminalSnapshot = {

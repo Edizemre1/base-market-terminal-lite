@@ -81,6 +81,8 @@ test.describe("market data safety defaults", () => {
     expect(sampleSnapshot.mode).toBe("mock");
     expect(sampleSnapshot.allPairs.length).toBeGreaterThan(0);
     expect(sampleSnapshot.allPairs.every((pair) => pair.dataSource === "mock")).toBeTruthy();
+    expect(sampleSnapshot.defaultPairId).toBe("pepe-weth");
+    expect(sampleSnapshot.allPairs.find((pair) => pair.id === sampleSnapshot.defaultPairId)?.pair).toBe("PEPE / WETH");
   });
 });
 
