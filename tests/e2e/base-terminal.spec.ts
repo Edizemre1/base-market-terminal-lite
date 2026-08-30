@@ -61,10 +61,10 @@ test.describe("living Base terminal", () => {
   });
 
   test("global search resolves token, pool, and address context", async ({ page }) => {
-    await page.getByRole("combobox", { name: /Search token|Token, pair/ }).fill("toshi");
-    await expect(page.getByTestId("search-result-toshi-weth")).toContainText("TOSHI / WETH");
-    await page.getByTestId("search-result-toshi-weth").click();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("TOSHI / WETH");
+    await page.getByRole("combobox", { name: /Search token|Token, pair/ }).fill("blob");
+    await expect(page.getByTestId("search-result-blob-usdc")).toContainText("BLOB / USDC");
+    await page.getByTestId("search-result-blob-usdc").click();
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
   });
 
   test("applies filters, shows active chips, updates result count, and resets", async ({ page }) => {
@@ -189,7 +189,7 @@ test.describe("living Base terminal", () => {
     const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
     const target = initial.allPairs.find((pair) => pair.id === "blob-usdc")!;
     const opportunityId = target.opportunityId!;
-    const generatedAt = new Date(Date.parse(initial.generatedAt) + 60_000).toISOString();
+    const generatedAt = new Date(Date.now() + 60_000).toISOString();
     const next: MarketTerminalSnapshot = {
       ...initial,
       version: "apple-like-identity-fixture-v1",

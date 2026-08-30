@@ -37,6 +37,7 @@ export async function installVerifiedWalletStub(page: Page, options: { chainId?:
       on: (event: string, listener: (...args: unknown[]) => void) => { const current = listeners.get(event) ?? new Set(); current.add(listener); listeners.set(event, current); },
       removeListener: (event: string, listener: (...args: unknown[]) => void) => listeners.get(event)?.delete(listener)
     };
-    Object.assign(window, { ethereum: provider, __walletHarness: { requests, emit } });
+    const disconnect = () => { accounts = []; emit("accountsChanged", accounts); };
+    Object.assign(window, { ethereum: provider, __walletHarness: { requests, emit, disconnect } });
   }, { account: "0x1111111111111111111111111111111111111111", initialChain: options.chainId ?? "0x2105", reject: options.rejectConnection ?? false, initialAllowance: options.allowanceRaw ?? "0" });
 }

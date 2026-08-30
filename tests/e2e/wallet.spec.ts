@@ -80,7 +80,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_required");
 
-    await page.evaluate(() => (window as Window & { __walletHarness?: { emit: (event: string, value: unknown) => void } }).__walletHarness?.emit("accountsChanged", []));
+    await page.evaluate(() => (window as Window & { __walletHarness?: { disconnect: () => void } }).__walletHarness?.disconnect());
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wallet_required");
     expect(await sentTransactions(page)).toHaveLength(0);
   });
