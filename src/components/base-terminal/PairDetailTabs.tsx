@@ -5,8 +5,9 @@ import type { BasePair } from "@/types/baseTerminal";
 import type { DetailTab } from "@/components/base-terminal/types";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
-import { getChange24h, getLiquidityUsd, getPairAgeMinutes, getVolume24h } from "@/lib/base-terminal/discovery";
+import { getChange24h, getVolume24h } from "@/lib/base-terminal/discovery";
 import { getBaseScanAddressUrl } from "@/lib/safeUrl";
+import { MarketSignalBadges } from "@/components/base-terminal/MarketSignalBadges";
 
 const tabs: Array<{ id: DetailTab; labelKey: TranslationKey }> = [
   { id: "overview", labelKey: "details.overview" },
@@ -325,70 +326,21 @@ function PublicSignalsPanel({
   providerStale: boolean;
 }) {
   const { t } = useI18n();
-  const signals = getPublicMarketSignals(pair, providerStale, t);
 
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
+    <div className="border border-base-line bg-base-elevated p-2" data-provider-stale={providerStale || undefined}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
           {t("details.publicSignals")}
         </p>
         <span className="font-mono text-[10px] text-base-muted">{t("details.heuristics")}</span>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {signals.map((signal) => (
-          <span
-            key={signal}
-            className="border border-base-amber/40 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber"
-          >
-            {signal}
-          </span>
-        ))}
-      </div>
+      <MarketSignalBadges pair={pair} maximumMarketBadges={2} />
       <p className="mt-2 text-[10px] text-base-muted">
         {t("details.signalsBody")}
       </p>
     </div>
   );
-}
-
-function getPublicMarketSignals(pair: BasePair, providerStale: boolean, t: (key: TranslationKey) => string) {
-  const signals: string[] = [];
-  const liquidity = getLiquidityUsd(pair);
-  const volume24h = getVolume24h(pair);
-  const ageMinutes = getPairAgeMinutes(pair);
-  const volumeLiquidityRatio = typeof liquidity === "number" && liquidity > 0 && typeof volume24h === "number" ? volume24h / liquidity : undefined;
-  const shortTermMove = Math.max(
-    Math.abs(pair.priceChanges?.m5 ?? 0),
-    Math.abs(pair.priceChanges?.h1 ?? 0),
-    Math.abs(pair.priceChanges?.h6 ?? 0)
-  );
-
-  if (pair.stale || providerStale) {
-    signals.push(t("details.signal.stale"));
-  }
-
-  if (typeof liquidity === "number" && liquidity > 0 && liquidity < 50_000) {
-    signals.push(t("details.signal.lowLiquidity"));
-  }
-
-  if (typeof volumeLiquidityRatio === "number" && volumeLiquidityRatio >= 2) {
-    signals.push(t("details.signal.volumeLiquidity"));
-  }
-
-  if (typeof ageMinutes === "number" && ageMinutes >= 0 && ageMinutes <= 24 * 60) {
-    signals.push(t("details.signal.newPair"));
-  }
-
-  if (!pair.pairCreatedAt) {
-    signals.push(t("details.signal.missingAge"));
-  }
-
-  if (shortTermMove >= 15) {
-    signals.push(t("details.signal.largeMove"));
-  }
-
-  return signals.length > 0 ? signals : [t("details.signal.none")];
 }
 
 function getExternalLink(label: string, href: string | undefined) {

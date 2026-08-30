@@ -14,6 +14,7 @@ import {
 import { SelectedPairPanel } from "@/components/base-terminal/SelectedPairPanel";
 import { TradeDock } from "@/components/base-terminal/TradeDock";
 import { LiveMarketTape, MarketMatrix, OpportunityLanes, PinnedMarketGrid } from "@/components/base-terminal/TerminalMarketSurface";
+import { MarketSignalProvider } from "@/components/base-terminal/MarketSignalBadges";
 import type { DetailTab } from "@/components/base-terminal/types";
 import {
   useTerminalSearch,
@@ -341,6 +342,7 @@ export function BaseTerminal({
 
   return (
     <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] w-full scroll-mt-16 overflow-x-hidden bg-base-black px-2.5 py-3 outline-none sm:px-4 lg:px-5" data-testid="pulse-terminal">
+      <MarketSignalProvider snapshot={snapshotData}>
       <div className="mx-auto max-w-[1720px] space-y-3">
         {snapshotData.fallbackReason ? <div className="rounded-lg bg-base-amber/10 px-3 py-2 text-[11px] text-base-amber">{t("terminal.unavailableBody")}</div> : null}
 
@@ -391,6 +393,7 @@ export function BaseTerminal({
 
         {view === "portfolio" ? <section className="grid min-w-0 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_360px]" data-testid="portfolio-workspace"><div className="pulse-surface rounded-xl p-5"><BriefcaseBusiness size={20} className="text-base-mint" /><h2 className="mt-3 text-lg font-semibold">{t("portfolio.title")}</h2><p className="mt-2 max-w-2xl text-[11px] leading-6 text-base-muted">{t("portfolio.scope")}</p><div className="mt-4 rounded-lg bg-base-elevated p-4 text-[11px] text-base-muted">{t("portfolio.empty")}</div></div><TradeDockPlacement open={mobileTradeOpen} onClose={() => setMobileTradeOpen(false)}><TradeDock pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={setInteractionLocked} /></TradeDockPlacement></section> : null}
       </div>
+      </MarketSignalProvider>
     </main>
   );
 }

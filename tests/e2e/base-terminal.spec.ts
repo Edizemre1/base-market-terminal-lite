@@ -155,6 +155,109 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("live-pulse-strip")).toContainText(/New pool|Yeni havuz/);
   });
 
+  test("keeps canonical bounded signal semantics across tape, lanes, matrix, watchlist and pair workspace", async ({ page }) => {
+    const groups = page.getByTestId("market-signal-group");
+    expect(await groups.count()).toBeGreaterThan(0);
+    const visibleCounts = await groups.evaluateAll((nodes) => nodes.map((node) => node.querySelectorAll(":scope > button [data-signal-type]").length));
+    expect(Math.max(...visibleCounts)).toBeLessThanOrEqual(3);
+
+    const selected = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group");
+    const matrix = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
+    for (const surface of [selected, matrix]) {
+      await expect(surface.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
+      await expect(surface.locator('[data-signal-type="delayed"]')).toHaveCount(1);
+    }
+
+    await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Pin|izle/ }).click();
+    const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
+    await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
+    await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
+    await expect(page).toHaveURL(/view=watchlist/);
+    await expect(page.getByTestId("pinned-multichart").getByTestId("market-signal-group")).toBeVisible();
+
+    await page.getByRole("link", { name: /Terminal/, exact: true }).first().click();
+    await expect(page.getByTestId("opportunity-lanes").getByTestId("market-signal-group").first()).toBeVisible();
+    await expect(page.getByText(/Public data signals|Açık veri sinyalleri/)).toBeVisible();
+  });
+
+  test("opens signal evidence by keyboard and tap, closes with Escape, and honors reduced motion", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const desktopButton = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group").getByRole("button");
+    await desktopButton.focus();
+    const desktopPopover = page.getByTestId("market-signal-popover");
+    await expect(desktopPopover).toBeVisible();
+    await expect(desktopPopover).toContainText(/Source|Kaynak/);
+    await expect(desktopPopover).toContainText(/Observed|Gözlem/);
+    await expect(desktopPopover).toContainText(/Expires|Bitiş/);
+    const entering = page.locator('[data-signal-state="entering"]').first();
+    await expect(entering).toHaveCSS("animation-name", "none");
+    await page.keyboard.press("Escape");
+    await expect(desktopPopover).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/terminal?data=mock");
+    const mobileButton = page.getByTestId("live-market-tape").getByTestId("market-signal-group").first().getByRole("button");
+    await mobileButton.click();
+    const mobilePopover = page.getByTestId("market-signal-popover");
+    await expect(mobilePopover).toBeVisible();
+    const bounds = await mobilePopover.boundingBox();
+    expect(bounds?.x).toBeGreaterThanOrEqual(0);
+    expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(390);
+    await page.keyboard.press("Escape");
+    await expect(mobilePopover).toHaveCount(0);
+  });
+
+  test("filters by signal with a translated empty state and persists the safe preference", async ({ page }) => {
+    await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
+    await page.getByTestId("market-signal-legend").locator("summary").click();
+    await page.locator('[data-signal-filter="security_unknown"]').click();
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
+    await expect(page.getByTestId("active-filter-chips")).toContainText(/Security not assessed|Güvenlik değerlendirilmedi/);
+    await page.locator('[data-signal-filter="risk_flagged"]').click();
+    await expect(page.getByTestId("market-result-count")).toContainText("0");
+    await expect(page.getByText(/No qualified markets match|Uygun piyasa bulunamadı/)).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("market-result-count")).toContainText("0");
+
+    await page.getByRole("button", { name: "en", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByTestId("market-signal-legend")).toContainText("Signals");
+    await page.getByRole("button", { name: /Reset all filters/ }).click();
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
+  });
+
+  test("updates live badge entry, cooldown exit and TTL removal from ordered snapshots", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const target = initial.opportunities.find((opportunity) => opportunity.primaryMarketId === initial.defaultPairId)!;
+    const baseTime = Date.parse(initial.receivedAt);
+    const snapshots = [
+      buildSignalSnapshot(initial, target.id, new Date(baseTime + 1_000).toISOString(), 3),
+      buildSignalSnapshot(initial, target.id, new Date(baseTime + 45_000).toISOString(), 2.3),
+      buildSignalSnapshot(initial, target.id, new Date(baseTime + 90_000).toISOString(), 2.3)
+    ];
+    let refreshIndex = 0;
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: snapshots[Math.min(refreshIndex++, snapshots.length - 1)] }));
+
+    const selectedSignals = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group");
+    await page.getByTestId("refresh-terminal").click();
+    await page.getByTestId("pending-market-updates").getByRole("button").click();
+    await selectedSignals.getByRole("button").click();
+    await expect(page.locator('[data-signal-detail="gaining_fast"]')).toBeVisible();
+    await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/confirming|doğrulanıyor/i);
+    await page.keyboard.press("Escape");
+
+    await page.getByTestId("refresh-terminal").click();
+    await page.getByTestId("pending-market-updates").getByRole("button").click();
+    await selectedSignals.getByRole("button").click();
+    await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/cooldown|bekleme/i);
+    await page.keyboard.press("Escape");
+
+    await page.getByTestId("refresh-terminal").click();
+    await selectedSignals.getByRole("button").click();
+    await expect(page.locator('[data-signal-detail="gaining_fast"]')).toHaveCount(0);
+  });
+
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
@@ -212,4 +315,34 @@ async function expectTerminalShell(page: Page) {
   await expect(page.getByTestId("terminal-topbar")).toBeVisible();
   await expect(page.getByTestId("pulse-terminal")).toBeVisible();
   await expect(page.getByTestId("live-pulse-strip")).toBeVisible();
+}
+
+function buildSignalSnapshot(snapshot: MarketTerminalSnapshot, opportunityId: string, generatedAt: string, change5m: number): MarketTerminalSnapshot {
+  const opportunity = snapshot.opportunities.find((item) => item.id === opportunityId)!;
+  return {
+    ...snapshot,
+    version: `signal-browser-${generatedAt}`,
+    generatedAt,
+    receivedAt: generatedAt,
+    sourceUpdatedAt: generatedAt,
+    freshness: "fresh",
+    fallbackReason: undefined,
+    allPairs: snapshot.allPairs.map((pair) => pair.id === opportunity.primaryMarketId ? {
+      ...pair,
+      stale: false,
+      sourceUpdatedAt: generatedAt,
+      priceUsdValue: (pair.priceUsdValue ?? 1) * (1 + change5m / 1_000),
+      priceChanges: { ...pair.priceChanges, m5: change5m }
+    } : pair),
+    opportunities: snapshot.opportunities.map((item) => item.id === opportunityId ? {
+      ...item,
+      quality: "active",
+      aggregate: {
+        ...item.aggregate,
+        liquidityUsd: 40_000,
+        volumes: { ...item.aggregate.volumes, m5: 6_000 }
+      },
+      freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
+    } : item)
+  };
 }
