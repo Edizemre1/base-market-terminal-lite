@@ -271,10 +271,10 @@ export function getIdentityDisplay(pair: BasePair, preferred: { address?: string
   // pair label. Bind the presented token label back to the exact contract side
   // before identity assessment so an official address is not misclassified.
   if (normalized && normalized === baseAddress) {
-    return { address, name: pair.baseToken, symbol: pair.baseToken };
+    return { address, name: preferred.name ?? pair.focusTokenName ?? pair.baseToken, symbol: pair.baseToken };
   }
   if (normalized && normalized === quoteAddress) {
-    return { address, name: pair.quoteToken, symbol: pair.quoteToken };
+    return { address, name: preferred.name ?? pair.focusTokenName ?? pair.quoteToken, symbol: pair.quoteToken };
   }
   return {
     address,
