@@ -321,6 +321,9 @@ test.describe("living Base terminal", () => {
     await page.getByTestId("refresh-terminal").evaluate((button: HTMLButtonElement) => button.click());
     await expect(page.getByTestId("pending-market-updates")).toBeVisible();
     await expect(gainers.first()).toHaveAttribute("data-opportunity-id", before!);
+    await page.waitForTimeout(2_500);
+    await expect(page.getByTestId("pending-market-updates")).toBeVisible();
+    await expect(gainers.first()).toHaveAttribute("data-opportunity-id", before!);
 
     await page.getByTestId("refresh-terminal").hover();
     await page.getByTestId("refresh-terminal").focus();
@@ -393,7 +396,6 @@ test.describe("living Base terminal", () => {
       const visualWall = buildVisualWallSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: visualWall }));
       await page.getByTestId("refresh-terminal").click();
-      await page.getByTestId("pending-market-updates").click();
       await expect(page.getByTestId("live-wall-lane-new")).toHaveAttribute("data-lane-count", "4");
       await expect(page.getByTestId("live-wall-lane-losers")).toHaveAttribute("data-lane-count", "4");
       await page.screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`), fullPage: false });
@@ -410,6 +412,7 @@ test.describe("living Base terminal", () => {
       const removed = buildLiquidityRemovedSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: removed }));
       await page.getByTestId("refresh-terminal").click();
+      await expect(page.getByTestId("pending-market-updates")).toBeVisible();
       await page.getByTestId("pending-market-updates").click();
       await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıkarılan/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
@@ -491,6 +494,7 @@ function buildWallChangeSnapshot(snapshot: MarketTerminalSnapshot, opportunityId
       ...pair,
       stale: false,
       sourceUpdatedAt: generatedAt,
+      priceUsdValue: (pair.priceUsdValue ?? 1) * 1.01,
       priceChanges: { ...pair.priceChanges, h1: 999 }
     } : pair)
   };
@@ -524,6 +528,8 @@ function buildLiquidityRemovedSnapshot(snapshot: MarketTerminalSnapshot): Market
       ...pair,
       stale: false,
       sourceUpdatedAt: generatedAt,
+      liquidityUsd: currentLiquidity,
+      liquidity: currentLiquidity,
       pairCreatedAt: new Date(baseTime - 8 * 24 * 60 * 60 * 1_000).toISOString(),
       pairCreatedAtMs: baseTime - 8 * 24 * 60 * 60 * 1_000,
       priceChanges: { m5: 0, h1: 0, h6: 0, h24: 0 },
