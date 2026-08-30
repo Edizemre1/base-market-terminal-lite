@@ -4,10 +4,15 @@ import { useState } from "react";
 import Image from "next/image";
 import { cx } from "@/lib/format";
 import { sanitizeTokenLogoUrl } from "@/lib/safeUrl";
+import { resolveAssetIdentity } from "@/lib/base-terminal/assetTradeability";
 
 type TokenAvatarProps = {
   symbol: string;
   logoUrl?: string;
+  address?: string;
+  name?: string;
+  chainId?: string | number;
+  observedAt?: string;
   size?: "sm" | "md" | "lg";
   className?: string;
 };
@@ -58,13 +63,16 @@ export function BaseNetworkIcon({ className }: { className?: string }) {
 
 export function TokenAvatar({
   symbol,
-  logoUrl,
+  address,
+  name,
+  chainId,
+  observedAt,
   size = "md",
   className
 }: TokenAvatarProps) {
   const [failed, setFailed] = useState(false);
   const initial = symbol.trim().slice(0, 2).toUpperCase() || "?";
-  const safeLogoUrl = sanitizeTokenLogoUrl(logoUrl);
+  const { identity, safeLogoUrl } = getTokenAvatarPresentation({ symbol, address, name, chainId, observedAt });
 
   return (
     <span
@@ -74,6 +82,8 @@ export function TokenAvatar({
         className
       )}
       title={symbol}
+      data-avatar-kind={safeLogoUrl && !failed ? "verified-official" : "generic"}
+      data-identity-status={identity.status}
     >
       {safeLogoUrl && !failed ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -92,25 +102,49 @@ export function TokenAvatar({
   );
 }
 
+export function getTokenAvatarPresentation(input: Pick<TokenAvatarProps, "symbol" | "address" | "name" | "chainId" | "observedAt">) {
+  const identity = resolveAssetIdentity({ chainId: input.chainId, tokenAddress: input.address, displayName: input.name, displaySymbol: input.symbol, observedAt: input.observedAt });
+  // Upstream market logos are never identity evidence. Only an exact-address
+  // registry record may supply an official logo.
+  const safeLogoUrl = identity.status === "verified" ? sanitizeTokenLogoUrl(identity.officialLogoUrl) : undefined;
+  return { identity, safeLogoUrl };
+}
+
 export function PairAvatarStack({
   baseSymbol,
   quoteSymbol,
   baseLogoUrl,
   quoteLogoUrl,
+  baseAddress,
+  quoteAddress,
+  baseName,
+  quoteName,
+  chainId,
+  observedAt,
   size = "md"
 }: {
   baseSymbol: string;
   quoteSymbol: string;
   baseLogoUrl?: string;
   quoteLogoUrl?: string;
+  baseAddress?: string;
+  quoteAddress?: string;
+  baseName?: string;
+  quoteName?: string;
+  chainId?: string | number;
+  observedAt?: string;
   size?: "sm" | "md" | "lg";
 }) {
   return (
     <span className="flex shrink-0 items-center">
-      <TokenAvatar symbol={baseSymbol} logoUrl={baseLogoUrl} size={size} />
+      <TokenAvatar symbol={baseSymbol} logoUrl={baseLogoUrl} address={baseAddress} name={baseName} chainId={chainId} observedAt={observedAt} size={size} />
       <TokenAvatar
         symbol={quoteSymbol}
         logoUrl={quoteLogoUrl}
+        address={quoteAddress}
+        name={quoteName}
+        chainId={chainId}
+        observedAt={observedAt}
         size={size}
         className="-ml-2 border-base-panel"
       />

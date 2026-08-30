@@ -11,6 +11,7 @@ import { localizeAgeLabel } from "@/i18n/dictionaries";
 import { getChange24h, getLiquidityUsd, getVolume24h } from "@/lib/base-terminal/discovery";
 import { getMarketInvariantAttributes } from "@/lib/base-terminal/marketModel";
 import { MarketSignalBadges } from "@/components/base-terminal/MarketSignalBadges";
+import { AssetTradeabilityBadges } from "@/components/base-terminal/AssetTradeabilityBadges";
 
 export function SelectedPairPanel({
   pair,
@@ -50,6 +51,11 @@ export function SelectedPairPanel({
             quoteSymbol={pair.quoteToken}
             baseLogoUrl={pair.tokenLogoUrl}
             quoteLogoUrl={pair.quoteTokenLogoUrl}
+            baseAddress={pair.baseTokenAddress}
+            quoteAddress={pair.quoteTokenAddress}
+            baseName={pair.project}
+            chainId={pair.chainId}
+            observedAt={pair.sourceUpdatedAt}
             size="md"
           />
           <div className="min-w-0">
@@ -64,6 +70,7 @@ export function SelectedPairPanel({
                 {pair.pair}
               </h2>
               <MarketSignalBadges pair={pair} />
+              <AssetTradeabilityBadges pair={pair} compact={false} />
               <span className="border border-base-line bg-base-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted">
                 {pair.dexName ?? pair.dex}
               </span>

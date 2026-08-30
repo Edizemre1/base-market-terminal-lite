@@ -3,6 +3,19 @@ export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 export type TradeSide = "buy" | "sell";
 
+export type QuoteFailureCode =
+  | "no-route"
+  | "unsupported-token"
+  | "invalid-amount"
+  | "rate-limited"
+  | "timeout"
+  | "provider-unavailable"
+  | "invalid-provider-response"
+  | "expired"
+  | "capability-disabled"
+  | "token-metadata-invalid"
+  | "invalid-request";
+
 export type TradeToken = {
   address: string;
   symbol: string;

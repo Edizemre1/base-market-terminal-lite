@@ -185,6 +185,34 @@ test.describe("living Base terminal", () => {
     await expect(page.getByText(/Public data signals|Açık veri sinyalleri/)).toBeVisible();
   });
 
+  test("renders an Apple-like token as unverified data-only with a generic avatar", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const target = initial.allPairs.find((pair) => pair.id === "blob-usdc")!;
+    const opportunityId = target.opportunityId!;
+    const generatedAt = new Date(Date.parse(initial.generatedAt) + 60_000).toISOString();
+    const next: MarketTerminalSnapshot = {
+      ...initial,
+      version: "apple-like-identity-fixture-v1",
+      generatedAt,
+      receivedAt: generatedAt,
+      sourceUpdatedAt: generatedAt,
+      allPairs: initial.allPairs.map((pair) => pair.id === target.id ? { ...pair, baseToken: "AAPL", project: "Apple Token", tokenLogoUrl: "https://assets.coingecko.com/apple-official.png", sourceUpdatedAt: generatedAt } : pair),
+      opportunities: initial.opportunities.map((opportunity) => opportunity.id === opportunityId ? { ...opportunity, focusTokenSymbol: "AAPL", focusTokenName: "Apple Token", focusTokenLogoUrl: "https://assets.coingecko.com/apple-official.png" } : opportunity)
+    };
+    await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
+    await page.getByTestId("refresh-terminal").click();
+    const row = page.getByTestId("matrix-row-blob-usdc");
+    await expect(row).toContainText("AAPL");
+    const avatar = row.locator('[data-identity-status="unverified"]').first();
+    await expect(avatar).toHaveAttribute("data-avatar-kind", "generic");
+    await expect(avatar.locator("img")).toHaveCount(0);
+    const badges = row.getByTestId("asset-tradeability-group");
+    await expect(badges).toHaveAttribute("data-identity-status", "unverified");
+    await expect(badges).toHaveAttribute("data-tradeability-status", "market_data_only");
+    await badges.click();
+    await expect(page.getByTestId("asset-tradeability-popover")).toContainText(/does not prove|kanıtlamaz/i);
+  });
+
   test("opens signal evidence by keyboard and tap, closes with Escape, and honors reduced motion", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });

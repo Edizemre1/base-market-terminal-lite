@@ -1,6 +1,6 @@
 import { parseStrictFiniteNumber } from "@/lib/marketMath";
 import { readArray, readRecord, readString } from "@/data/providers/responseValidation";
-import type { TransactionQuote, QuoteProviderAdapter, QuoteRequest, TradeCapabilities, TradeFee } from "./types";
+import type { QuoteFailureCode, TransactionQuote, QuoteProviderAdapter, QuoteRequest, TradeCapabilities, TradeFee } from "./types";
 import { createQuoteFingerprint, isEvmAddress, normalizeHexQuantity, validateTransactionQuote } from "./validation";
 
 const QUOTE_TIMEOUT_MS = 8_000;
@@ -13,6 +13,13 @@ let quoteSequence = 0;
 
 type CircuitState = { failures: number; openUntil: number };
 type QuoteCacheEntry = { quote: TransactionQuote; cachedUntil: number };
+
+export class QuoteProviderError extends Error {
+  constructor(public readonly code: QuoteFailureCode, message: string) {
+    super(message);
+    this.name = "QuoteProviderError";
+  }
+}
 
 export class SequentialQuoteService {
   private readonly inFlight = new Map<string, Promise<TransactionQuote>>();
@@ -43,8 +50,10 @@ export class SequentialQuoteService {
 
   private async loadSequentially(request: QuoteRequest) {
     let lastError: unknown;
+    let attempted = false;
     for (const adapter of this.adapters) {
       if (!adapter.enabled() || this.isCircuitOpen(adapter.id)) continue;
+      attempted = true;
       try {
         const candidate = await withTimeout((signal) => adapter.quote(request, signal), QUOTE_TIMEOUT_MS);
         const createdAt = new Date().toISOString();
@@ -55,21 +64,24 @@ export class SequentialQuoteService {
           expiresAt: new Date(Date.now() + QUOTE_SAFETY_TTL_MS).toISOString()
         };
         const quote: TransactionQuote = { ...withoutFingerprint, fingerprint: createQuoteFingerprint(withoutFingerprint) };
-        if (!validateTransactionQuote(quote)) throw new Error("Provider returned an invalid transaction quote");
+        if (!validateTransactionQuote(quote)) throw new QuoteProviderError("invalid-provider-response", "Provider returned an invalid transaction quote");
         this.circuits.set(adapter.id, { failures: 0, openUntil: 0 });
         this.cache.set(getRequestKey(request), { quote, cachedUntil: Date.now() + QUOTE_CACHE_MS });
         return quote;
       } catch (error) {
         lastError = error;
-        const current = this.circuits.get(adapter.id) ?? { failures: 0, openUntil: 0 };
-        const failures = current.failures + 1;
-        this.circuits.set(adapter.id, {
-          failures,
-          openUntil: failures >= CIRCUIT_FAILURE_THRESHOLD ? Date.now() + CIRCUIT_OPEN_MS : 0
-        });
+        if (countsTowardCircuit(error)) {
+          const current = this.circuits.get(adapter.id) ?? { failures: 0, openUntil: 0 };
+          const failures = current.failures + 1;
+          this.circuits.set(adapter.id, {
+            failures,
+            openUntil: failures >= CIRCUIT_FAILURE_THRESHOLD ? Date.now() + CIRCUIT_OPEN_MS : 0
+          });
+        }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error("No transaction quote provider is currently available");
+    if (!attempted) throw new QuoteProviderError("provider-unavailable", "No transaction quote provider is currently available");
+    throw lastError instanceof Error ? lastError : new QuoteProviderError("provider-unavailable", "No transaction quote provider is currently available");
   }
 
   private isCircuitOpen(id: QuoteProviderAdapter["id"]) {
@@ -99,8 +111,15 @@ export const lifiQuoteAdapter: QuoteProviderAdapter = {
     const apiKey = process.env.LIFI_API_KEY?.trim();
     if (apiKey) headers["x-lifi-api-key"] = apiKey;
     const response = await fetch(url, { headers, signal, cache: "no-store" });
-    if (!response.ok) throw new Error(`Quote provider rejected the request (${response.status})`);
-    return parseLifiQuote(await response.json(), request);
+    const body = await response.text();
+    if (!response.ok) throw classifyLifiFailure(response.status, body);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new QuoteProviderError("invalid-provider-response", "Quote provider returned invalid JSON");
+    }
+    return parseLifiQuote(payload, request);
   }
 };
 
@@ -141,9 +160,9 @@ export function parseLifiQuote(payload: unknown, request: QuoteRequest): Omit<Tr
   const value = normalizeHexQuantity(transaction?.value ?? "0x0");
   const transactionFrom = readAddress(transaction?.from) ?? request.walletAddress;
   const transactionChain = parseStrictFiniteNumber(transaction?.chainId);
-  if (!root || !estimate || !transaction || !expectedAmountRaw || !minimumAmountRaw || !target || !data || !value) throw new Error("Quote provider response is incomplete");
-  if (transactionChain !== undefined && transactionChain !== request.chainId) throw new Error("Quote provider returned the wrong chain");
-  if (transactionFrom.toLowerCase() !== request.walletAddress.toLowerCase()) throw new Error("Quote provider returned the wrong wallet");
+  if (!root || !estimate || !transaction || !expectedAmountRaw || !minimumAmountRaw || !target || !data || !value) throw new QuoteProviderError("invalid-provider-response", "Quote provider response is incomplete");
+  if (transactionChain !== undefined && transactionChain !== request.chainId) throw new QuoteProviderError("invalid-provider-response", "Quote provider returned the wrong chain");
+  if (transactionFrom.toLowerCase() !== request.walletAddress.toLowerCase()) throw new QuoteProviderError("invalid-provider-response", "Quote provider returned the wrong wallet");
 
   const gasCosts = readArray(estimate.gasCosts).map(readRecord).filter(Boolean);
   const feeCosts = readArray(estimate.feeCosts).map(readRecord).filter(Boolean);
@@ -226,7 +245,35 @@ async function withTimeout<T>(operation: (signal: AbortSignal) => Promise<T>, ti
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await operation(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new QuoteProviderError("timeout", "Quote provider timed out");
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function classifyLifiFailure(status: number, body: string) {
+  const normalized = safeProviderMessage(body);
+  if (status === 429) return new QuoteProviderError("rate-limited", "Quote provider rate limit reached");
+  if (/unsupported (?:token|asset)|token (?:is )?not supported|not supported token/i.test(normalized)) {
+    return new QuoteProviderError("unsupported-token", "Quote provider does not support an exact token");
+  }
+  if (/invalid (?:amount|fromamount)|amount (?:is )?(?:invalid|too small|too low)|insufficient amount/i.test(normalized)) {
+    return new QuoteProviderError("invalid-amount", "Quote provider rejected the exact amount");
+  }
+  if (/no (?:available )?(?:route|quote)|route (?:not found|unavailable)|cannot find (?:a )?route/i.test(normalized)) {
+    return new QuoteProviderError("no-route", "Quote provider found no route for the exact request");
+  }
+  if (status >= 500) return new QuoteProviderError("provider-unavailable", `Quote provider is unavailable (${status})`);
+  return new QuoteProviderError("provider-unavailable", `Quote provider rejected the request (${status})`);
+}
+
+function safeProviderMessage(body: string) {
+  return body.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 2_000);
+}
+
+function countsTowardCircuit(error: unknown) {
+  if (!(error instanceof QuoteProviderError)) return true;
+  return ["rate-limited", "timeout", "provider-unavailable", "invalid-provider-response"].includes(error.code);
 }

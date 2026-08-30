@@ -8,6 +8,7 @@ import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
 import { getChange24h, getVolume24h } from "@/lib/base-terminal/discovery";
 import { getBaseScanAddressUrl } from "@/lib/safeUrl";
 import { MarketSignalBadges } from "@/components/base-terminal/MarketSignalBadges";
+import { AssetTradeabilityBadges } from "@/components/base-terminal/AssetTradeabilityBadges";
 
 const tabs: Array<{ id: DetailTab; labelKey: TranslationKey }> = [
   { id: "overview", labelKey: "details.overview" },
@@ -67,6 +68,9 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean,
   if (activeTab === "overview") {
     return (
       <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2 border border-base-line bg-base-elevated p-2">
+          <AssetTradeabilityBadges pair={pair} compact={false} />
+        </div>
         <div className="grid gap-2 md:grid-cols-4">
           <OverviewCell label={t("details.pair")} value={pair.pair} />
           <OverviewCell label="DEX" value={pair.dexName ?? pair.dex} />
@@ -336,6 +340,7 @@ function PublicSignalsPanel({
         <span className="font-mono text-[10px] text-base-muted">{t("details.heuristics")}</span>
       </div>
       <MarketSignalBadges pair={pair} maximumMarketBadges={2} />
+      <AssetTradeabilityBadges pair={pair} compact={false} className="mt-1" />
       <p className="mt-2 text-[10px] text-base-muted">
         {t("details.signalsBody")}
       </p>
