@@ -455,41 +455,46 @@ test.describe("living Base terminal", () => {
       await captureVisualEvidence(page, testInfo.outputPath(`lane-empty-delayed-${locale}-1440.png`), true);
       await page.unroute("**/api/market-snapshot?data=mock");
 
-      await page.goto("/terminal?data=mock&pair=blob-usdc");
-      await expect(page.getByTestId("context-inspector")).toBeVisible();
-      await captureVisualEvidence(page, testInfo.outputPath(`inspector-${locale}-1440.png`), false);
-      await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-      await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
-      await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
-      await captureVisualEvidence(page, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);
-      await page.keyboard.press("Escape");
-      await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
-      await captureVisualEvidence(page, testInfo.outputPath(`pair-workspace-${locale}-1440.png`), true);
-      await page.evaluate(() => localStorage.removeItem("base-terminal-lite:pinned-pairs"));
-      await page.goto("/terminal?data=mock");
+      const detailPage = await page.context().newPage();
+      await detailPage.setViewportSize({ width: 1440, height: 900 });
+      await detailPage.goto("/terminal?data=mock&pair=blob-usdc");
+      await expect(detailPage.getByTestId("context-inspector")).toBeVisible();
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`inspector-${locale}-1440.png`), false);
+      await detailPage.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
+      await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
+      await expect(detailPage.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);
+      await detailPage.keyboard.press("Escape");
+      await detailPage.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`pair-workspace-${locale}-1440.png`), true);
+      await detailPage.evaluate(() => localStorage.removeItem("base-terminal-lite:pinned-pairs"));
+      await detailPage.goto("/terminal?data=mock");
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
-        await page.getByTestId(`matrix-row-${id}`).getByRole("button", { name: /Pin|izle/ }).click();
+        await detailPage.getByTestId(`matrix-row-${id}`).getByRole("button", { name: /Pin|izle/ }).click();
       }
-      await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
-      await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
-      await captureVisualEvidence(page, testInfo.outputPath(`multichart-${locale}-1440.png`), true);
-      await page.getByTestId("connect-wallet-button").click();
-      await captureVisualEvidence(page, testInfo.outputPath(`wallet-picker-${locale}-1440.png`), false);
-      await page.keyboard.press("Escape");
-      await page.goto("/status?data=mock");
-      await captureVisualEvidence(page, testInfo.outputPath(`secondary-status-${locale}-1440.png`), true);
-      await page.goto("/calm-market-intelligence-missing");
-      await captureVisualEvidence(page, testInfo.outputPath(`state-404-${locale}-1440.png`), true);
+      await detailPage.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
+      await expect(detailPage.getByTestId("pinned-multichart")).toContainText("4/4");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`multichart-${locale}-1440.png`), true);
+      await detailPage.getByTestId("connect-wallet-button").click();
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`wallet-picker-${locale}-1440.png`), false);
+      await detailPage.keyboard.press("Escape");
+      await detailPage.goto("/status?data=mock");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`secondary-status-${locale}-1440.png`), true);
+      await detailPage.goto("/calm-market-intelligence-missing");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`state-404-${locale}-1440.png`), true);
+      await detailPage.close();
     }
   });
 });
 
 async function captureVisualEvidence(page: Page, path: string, fullPage: boolean) {
+  const expectedWidth = page.viewportSize()?.width;
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(() => page.evaluate(() => ({
     horizontalOffset: window.scrollX,
-    hasPageOverflow: document.documentElement.scrollWidth > window.innerWidth
-  }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false });
+    hasPageOverflow: document.documentElement.scrollWidth > window.innerWidth,
+    viewportWidth: window.innerWidth
+  }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false, viewportWidth: expectedWidth });
   await page.screenshot({ path, fullPage });
 }
 
