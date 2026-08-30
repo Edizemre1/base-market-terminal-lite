@@ -435,7 +435,8 @@ test.describe("living Base terminal", () => {
       await page.unroute("**/api/market-snapshot?data=mock");
 
       await page.goto("/terminal?data=mock");
-      const delayedAt = new Date(Date.parse(visualInitial.generatedAt) + 180_000).toISOString();
+      const parsedDelayedBase = Date.parse(visualInitial.generatedAt);
+      const delayedAt = new Date((Number.isFinite(parsedDelayedBase) ? parsedDelayedBase : Date.now()) + 180_000).toISOString();
       const delayedWall: MarketTerminalSnapshot = {
         ...visualInitial,
         version: `visual-delayed-${locale}`,
