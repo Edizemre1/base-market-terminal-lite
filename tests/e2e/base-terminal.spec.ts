@@ -131,7 +131,7 @@ test.describe("living Base terminal", () => {
     await page.getByTestId("refresh-terminal").click();
     await expect(page.getByTestId("market-feed-delayed")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
-    await page.screenshot({ path: testInfo.outputPath("terminal-delayed-source-1440.png"), fullPage: true });
+    await captureVisualEvidence(page, testInfo.outputPath("terminal-delayed-source-1440.png"), true);
   });
 
   test("ingests a new pool for an existing token on refresh without reloading or duplicating its token row", async ({ page, request }) => {
@@ -384,42 +384,42 @@ test.describe("living Base terminal", () => {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
-        await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: true });
+        await captureVisualEvidence(page, testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), true);
         if (viewport.width === 390) {
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
-          await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: false });
+          await captureVisualEvidence(page, testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), false);
           await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
           await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
           await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
-          await page.screenshot({ path: testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), fullPage: false });
+          await captureVisualEvidence(page, testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), false);
         }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/terminal?data=mock");
       const visualInitial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
-      await page.screenshot({ path: testInfo.outputPath(`market-board-compact-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`market-board-compact-${locale}-1440.png`), true);
       await page.getByTestId("market-density-comfortable").click();
       await expect(page.getByTestId("market-density-comfortable")).toHaveAttribute("aria-pressed", "true");
-      await page.screenshot({ path: testInfo.outputPath(`market-board-comfortable-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`market-board-comfortable-${locale}-1440.png`), true);
       await page.getByTestId("market-density-compact").click();
       const visualWall = buildVisualWallSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: visualWall }));
       await page.getByTestId("refresh-terminal").click();
       await expect(page.locator('[data-cell-updated="true"]').first()).toBeVisible({ timeout: 800 });
-      await page.screenshot({ path: testInfo.outputPath(`market-cell-update-tint-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`market-cell-update-tint-${locale}-1440.png`), true);
       await expect(page.getByTestId("live-wall-lane-new")).toHaveAttribute("data-lane-count", "4");
       await expect(page.getByTestId("live-wall-lane-losers")).toHaveAttribute("data-lane-count", "4");
-      await page.screenshot({ path: testInfo.outputPath(`lane-gainers-${locale}-1440.png`), fullPage: false });
-      await page.screenshot({ path: testInfo.outputPath(`lane-losers-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`lane-gainers-${locale}-1440.png`), false);
+      await captureVisualEvidence(page, testInfo.outputPath(`lane-losers-${locale}-1440.png`), false);
       await expect(page.getByTestId("live-wall-lane-volume")).toHaveAttribute("data-lane-fallback", "true");
-      await page.screenshot({ path: testInfo.outputPath(`lane-volume-fallback-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`lane-volume-fallback-${locale}-1440.png`), false);
       const signalTrigger = page.getByTestId("market-matrix").getByTestId("market-signal-group").getByRole("button").first();
       await signalTrigger.click();
       await expect(page.getByTestId("market-signal-popover")).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`signal-popover-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`signal-popover-${locale}-1440.png`), false);
       await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.screenshot({ path: testInfo.outputPath(`reduced-motion-signal-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`reduced-motion-signal-${locale}-1440.png`), false);
       await page.emulateMedia({ reducedMotion: "no-preference" });
       await page.keyboard.press("Escape");
 
@@ -431,7 +431,7 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("pending-market-updates").click();
       await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıktı/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
-      await page.screenshot({ path: testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), false);
       await page.unroute("**/api/market-snapshot?data=mock");
 
       await page.goto("/terminal?data=mock");
@@ -452,19 +452,19 @@ test.describe("living Base terminal", () => {
       if (await delayedPending.isVisible()) await delayedPending.click();
       await expect(page.getByTestId("live-wall-lane-gainers")).toHaveAttribute("data-lane-count", "0");
       await expect(page.getByTestId("live-wall-lane-gainers")).toHaveAttribute("data-lane-freshness", "delayed");
-      await page.screenshot({ path: testInfo.outputPath(`lane-empty-delayed-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`lane-empty-delayed-${locale}-1440.png`), true);
       await page.unroute("**/api/market-snapshot?data=mock");
 
       await page.goto("/terminal?data=mock&pair=blob-usdc");
       await expect(page.getByTestId("context-inspector")).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`inspector-${locale}-1440.png`), false);
       await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
       await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
       await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`trade-drawer-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);
       await page.keyboard.press("Escape");
       await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
-      await page.screenshot({ path: testInfo.outputPath(`pair-workspace-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`pair-workspace-${locale}-1440.png`), true);
       await page.evaluate(() => localStorage.removeItem("base-terminal-lite:pinned-pairs"));
       await page.goto("/terminal?data=mock");
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
@@ -472,17 +472,26 @@ test.describe("living Base terminal", () => {
       }
       await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
       await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
-      await page.screenshot({ path: testInfo.outputPath(`multichart-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`multichart-${locale}-1440.png`), true);
       await page.getByTestId("connect-wallet-button").click();
-      await page.screenshot({ path: testInfo.outputPath(`wallet-picker-${locale}-1440.png`), fullPage: false });
+      await captureVisualEvidence(page, testInfo.outputPath(`wallet-picker-${locale}-1440.png`), false);
       await page.keyboard.press("Escape");
       await page.goto("/status?data=mock");
-      await page.screenshot({ path: testInfo.outputPath(`secondary-status-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`secondary-status-${locale}-1440.png`), true);
       await page.goto("/calm-market-intelligence-missing");
-      await page.screenshot({ path: testInfo.outputPath(`state-404-${locale}-1440.png`), fullPage: true });
+      await captureVisualEvidence(page, testInfo.outputPath(`state-404-${locale}-1440.png`), true);
     }
   });
 });
+
+async function captureVisualEvidence(page: Page, path: string, fullPage: boolean) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(() => page.evaluate(() => ({
+    horizontalOffset: window.scrollX,
+    hasPageOverflow: document.documentElement.scrollWidth > window.innerWidth
+  }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false });
+  await page.screenshot({ path, fullPage });
+}
 
 async function expectTerminalShell(page: Page) {
   await expect(page.getByTestId("terminal-topbar")).toBeVisible();
