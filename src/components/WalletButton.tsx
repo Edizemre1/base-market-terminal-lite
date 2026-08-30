@@ -21,6 +21,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
     <button
       type="button"
       data-testid="connect-wallet-button"
+      data-wallet-ready={wallet.ready ? "true" : "false"}
       onClick={wallet.openPicker}
       disabled={wallet.status === "connecting"}
       className={cx(

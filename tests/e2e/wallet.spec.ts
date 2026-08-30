@@ -25,7 +25,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
   test("connects only after explicit provider selection", async ({ page }) => {
     await installVerifiedWalletStub(page);
     await page.goto("/terminal?data=mock&view=portfolio");
-    await page.getByTestId("connect-wallet-button").click();
+    await openWalletPicker(page);
     await expect(page.getByTestId("wallet-picker")).toBeVisible();
     expect(await walletMethods(page)).toEqual([]);
     await page.getByTestId("wallet-provider-legacy:injected").click();
@@ -38,7 +38,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await mockEnabledTradeServer(page);
     await installVerifiedWalletStub(page, { chainId: "0x1" });
     await page.goto("/terminal?data=mock&view=portfolio");
-    await page.getByTestId("connect-wallet-button").click();
+    await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wrong_network");
     expect(await walletMethods(page)).not.toContain("wallet_switchEthereumChain");
@@ -88,7 +88,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
   test("reports a rejected connection without exposing raw provider errors", async ({ page }) => {
     await installVerifiedWalletStub(page, { rejectConnection: true });
     await page.goto("/terminal?data=mock");
-    await page.getByTestId("connect-wallet-button").click();
+    await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
     await expect(page.getByTestId("wallet-picker-error")).toContainText(/cancelled|iptal edildi/);
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
@@ -98,7 +98,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await installVerifiedWalletStub(page);
     await mockEnabledTradeServer(page);
     await page.goto("/terminal?data=mock");
-    await page.getByTestId("connect-wallet-button").click();
+    await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
 
     await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
@@ -150,8 +150,14 @@ async function mockFailedTradeServer(page: Page, code: "no-route" | "timeout") {
 }
 
 async function connectWallet(page: Page) {
-  await page.getByTestId("connect-wallet-button").click();
+  await openWalletPicker(page);
   await page.getByTestId("wallet-provider-legacy:injected").click();
+}
+
+async function openWalletPicker(page: Page) {
+  const trigger = page.getByTestId("connect-wallet-button");
+  await expect(trigger).toHaveAttribute("data-wallet-ready", "true");
+  await trigger.click();
 }
 
 async function walletMethods(page: Page) {

@@ -25,6 +25,7 @@ import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@
 export type WalletStatus = WalletControllerStatus;
 
 type WalletContextValue = {
+  ready: boolean;
   status: WalletStatus;
   address?: string;
   chainId?: number;
@@ -60,11 +61,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const controller = controllerRef.current;
   const [state, setState] = useState<WalletControllerState>(() => controller.getState());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
     const preferredProviderId = readPreferredProviderId();
     controller.start(undefined, preferredProviderId);
+    setReady(true);
     const migrationTimer = window.setTimeout(() => {
       if (preferredProviderId && !controller.getState().providers.some((provider) => provider.id === preferredProviderId)) {
         safeRemoveStorageItem(WALLET_PROVIDER_STORAGE_KEY);
@@ -107,6 +110,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<WalletContextValue>(
     () => ({
+      ready,
       ...state,
       providerAvailable: state.providers.length > 0,
       wrongNetwork: Boolean(state.address && state.chainId !== BASE_CHAIN_ID),
@@ -123,7 +127,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       openPicker,
       closePicker
     }),
-    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, readContract, readTransactionReceipt, selectProvider, sendTransaction, simulateTransaction, state, switchToBase]
+    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, readContract, readTransactionReceipt, ready, selectProvider, sendTransaction, simulateTransaction, state, switchToBase]
   );
 
   return <WalletContext.Provider value={value}>{children}<WalletPicker /></WalletContext.Provider>;
