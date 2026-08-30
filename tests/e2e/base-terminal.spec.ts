@@ -550,6 +550,8 @@ function buildVisualWallSnapshot(snapshot: MarketTerminalSnapshot): MarketTermin
   const recentIds = new Set(targets.slice(0, 4).map((item) => item.id));
   const loserIds = new Set(targets.slice(4, 8).map((item) => item.id));
   const targetByPrimary = new Map(targets.map((item) => [item.primaryMarketId, item.id]));
+  const zeroVolumes = { m5: 0, h1: 0, h6: 0, h24: 0 };
+  const zeroTransactions = { m5: { buys: 0, sells: 0 }, h1: { buys: 0, sells: 0 }, h6: { buys: 0, sells: 0 }, h24: { buys: 0, sells: 0 } };
   const baseTime = Number.isFinite(Date.parse(snapshot.generatedAt)) ? Date.parse(snapshot.generatedAt) : Date.now();
   const generatedAt = new Date(baseTime + 1_000).toISOString();
   const recentAt = new Date(baseTime - 60 * 60 * 1_000).toISOString();
@@ -571,10 +573,19 @@ function buildVisualWallSnapshot(snapshot: MarketTerminalSnapshot): MarketTermin
         priceChanges: loserIds.has(opportunityId) ? { ...pair.priceChanges, h1: -10 - targets.findIndex((item) => item.id === opportunityId) } : pair.priceChanges
       };
     }),
-    opportunities: snapshot.opportunities.map((item) => recentIds.has(item.id) ? {
-      ...item,
-      newestPoolCreatedAt: recentAt,
-      freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
-    } : item)
+    opportunities: snapshot.opportunities.map((item) => {
+      if (recentIds.has(item.id)) return {
+        ...item,
+        newestPoolCreatedAt: recentAt,
+        aggregate: { ...item.aggregate, liquidityUsd: 500, volumes: zeroVolumes, transactions: zeroTransactions },
+        freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
+      };
+      if (loserIds.has(item.id)) return {
+        ...item,
+        aggregate: { ...item.aggregate, volumes: zeroVolumes, transactions: zeroTransactions },
+        freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 }
+      };
+      return item;
+    })
   };
 }
