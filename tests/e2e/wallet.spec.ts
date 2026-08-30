@@ -110,7 +110,9 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).toContainText(/Minimum receive|Minimum alım/);
     await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
     await expect(page.getByTestId("trade-review-dialog")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
     await expect(page.getByTestId("trade-review-dialog")).toContainText(/Exact approval required|Kesin miktar approval gerekli/);
+    await expect(page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("trade-review-exact-approval-1440.png"), fullPage: true });
 
     await page.getByRole("button", { name: /Approve exactly|Tam .* onayla/ }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });

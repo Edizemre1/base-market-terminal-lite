@@ -149,6 +149,24 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
 
   useEffect(() => {
     if (!reviewOpen) return;
+    const reviewDialog = dialogRef.current;
+    const drawer = reviewDialog?.closest<HTMLElement>('[data-overlay-root="trade_drawer"]');
+    const drawerBackdrop = drawer?.parentElement;
+    const dock = reviewDialog?.closest<HTMLElement>('[data-testid="trade-dock"]');
+    const background = dock
+      ? [...dock.children].filter((child): child is HTMLElement => child instanceof HTMLElement && !child.contains(reviewDialog ?? null))
+      : [];
+    const drawerRole = drawer?.getAttribute("role");
+    const drawerAriaModal = drawer?.getAttribute("aria-modal");
+    const backdropAriaHidden = drawerBackdrop?.getAttribute("aria-hidden");
+    const drawerWasPointerLocked = drawer?.classList.contains("pointer-events-none") ?? false;
+
+    drawerBackdrop?.removeAttribute("aria-hidden");
+    drawer?.setAttribute("role", "presentation");
+    drawer?.removeAttribute("aria-modal");
+    drawer?.classList.remove("pointer-events-none");
+    background.forEach((element) => { element.inert = true; element.setAttribute("aria-hidden", "true"); });
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") { setReviewOpen(false); reviewTriggerRef.current?.focus(); return; }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -160,7 +178,17 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
     };
     document.addEventListener("keydown", handleKeyDown);
     window.setTimeout(() => dialogRef.current?.querySelector<HTMLElement>("button")?.focus(), 0);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (backdropAriaHidden == null) drawerBackdrop?.removeAttribute("aria-hidden");
+      else drawerBackdrop?.setAttribute("aria-hidden", backdropAriaHidden);
+      if (drawerRole == null) drawer?.removeAttribute("role");
+      else drawer?.setAttribute("role", drawerRole);
+      if (drawerAriaModal == null) drawer?.removeAttribute("aria-modal");
+      else drawer?.setAttribute("aria-modal", drawerAriaModal);
+      if (drawerWasPointerLocked) drawer?.classList.add("pointer-events-none");
+      background.forEach((element) => { element.inert = false; element.removeAttribute("aria-hidden"); });
+    };
   }, [reviewOpen]);
 
   useEffect(() => {
