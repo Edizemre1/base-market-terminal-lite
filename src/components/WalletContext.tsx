@@ -21,6 +21,7 @@ import {
 import type { TransactionDraft } from "@/lib/trade/types";
 import { WalletPicker } from "@/components/WalletPicker";
 import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { useOverlayManager } from "@/components/OverlayManager";
 
 export type WalletStatus = WalletControllerStatus;
 
@@ -56,11 +57,11 @@ const LEGACY_WALLET_PROVIDER_STORAGE_KEYS = ["mergen-pulse:wallet-provider:v1", 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
 export function WalletProvider({ children }: { children: ReactNode }) {
+  const overlay = useOverlayManager();
   const controllerRef = useRef<ReadOnlyWalletController | null>(null);
   if (!controllerRef.current) controllerRef.current = new ReadOnlyWalletController();
   const controller = controllerRef.current;
   const [state, setState] = useState<WalletControllerState>(() => controller.getState());
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -85,16 +86,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connectProvider = useCallback(async (providerId: string) => {
     controller.selectProvider(providerId);
     await controller.connect();
-    if (controller.getState().status === "connected") setPickerOpen(false);
-  }, [controller]);
+    if (controller.getState().status === "connected") overlay.close();
+  }, [controller, overlay]);
   const switchToBase = useCallback(() => controller.switchToBase(), [controller]);
   const disconnect = useCallback(() => controller.disconnect(), [controller]);
   const readContract = useCallback((to: string, data: string) => controller.readContract(to, data), [controller]);
   const simulateTransaction = useCallback((draft: TransactionDraft) => controller.simulateTransaction(draft), [controller]);
   const sendTransaction = useCallback((draft: TransactionDraft) => controller.sendTransaction(draft), [controller]);
   const readTransactionReceipt = useCallback((hash: string) => controller.readTransactionReceipt(hash), [controller]);
-  const openPicker = useCallback(() => setPickerOpen(true), []);
-  const closePicker = useCallback(() => setPickerOpen(false), []);
+  const pickerOpen = overlay.active.type === "wallet_picker";
+  const openPicker = useCallback(() => overlay.open("wallet_picker"), [overlay]);
+  const closePicker = useCallback(() => overlay.close(), [overlay]);
 
   useEffect(() => {
     if (state.status !== "connected" || !state.selectedProviderId) return;

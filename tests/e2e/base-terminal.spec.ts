@@ -8,40 +8,43 @@ test.describe("living Base terminal", () => {
     await expectTerminalShell(page);
   });
 
-  test("opens on the canonical terminal with tape, four lanes, matrix, inspector and trade dock", async ({ page }) => {
+  test("opens on the canonical terminal with tape, one scanner, board and explicit overlays", async ({ page }) => {
     await expect(page).toHaveURL(/\/terminal\?data=mock$/);
     await expect(page.getByTestId("live-market-tape")).toBeVisible();
-    await expect(page.locator('[data-testid^="opportunity-lane-"]')).toHaveCount(4);
+    await expect(page.getByTestId("opportunity-scanner")).toBeVisible();
+    await expect(page.locator('[data-testid^="scanner-tab-"]')).toHaveCount(6);
     await expect(page.getByTestId("market-matrix")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
-    await expect(page.getByTestId("selected-pair-panel")).toBeVisible();
+    await expect(page.getByTestId("context-inspector")).toHaveCount(0);
+    await expect(page.getByTestId("trade-dock")).toHaveCount(0);
+    await page.getByTestId("matrix-row-blob-usdc").getByRole("button", { name: /Inspect|incele/ }).click();
+    await expect(page.getByTestId("context-inspector")).toBeVisible();
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByTestId("trade-dock")).toBeVisible();
-    await expect(page.getByTestId("trade-dock")).toContainText(/Indicative context|Gösterge bağlamı/);
-    const selectedBox = await page.getByTestId("selected-pair-panel").boundingBox();
-    const dockBox = await page.getByTestId("trade-dock").boundingBox();
-    expect(selectedBox?.y).toBeLessThan(900);
-    expect(dockBox?.y).toBeLessThan(900);
+    await expect(page.getByTestId("context-inspector")).toHaveCount(0);
   });
 
   test("renders address-unique token discovery by default and preserves exact pools on demand", async ({ page }) => {
     const tapeIds = await page.getByTestId("live-market-tape").locator("[data-opportunity-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
     expect(new Set(tapeIds).size).toBe(tapeIds.length);
 
-    const laneRows = page.getByTestId("opportunity-lanes").locator("[data-opportunity-id]");
-    const laneIds = await laneRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
-    expect(new Set(laneIds).size).toBe(laneIds.length);
-    const newAges = await page.getByTestId("opportunity-lane-new").locator("[data-pool-age-minutes]").evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-pool-age-minutes"))));
-    expect(newAges.every((age) => Number.isFinite(age) && age >= 0 && age <= 7 * 24 * 60)).toBeTruthy();
+    await page.getByTestId("scanner-tab-new").click();
+    const scannerRows = page.getByTestId("scanner-list-new").locator("[data-opportunity-id]");
+    const scannerIds = await scannerRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-opportunity-id")));
+    expect(new Set(scannerIds).size).toBe(scannerIds.length);
 
     const tokenRows = page.getByTestId("market-matrix").locator('table tbody [data-focus-token-address]:not([data-focus-token-address=""])');
     const tokenAddresses = await tokenRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-focus-token-address")));
     expect(new Set(tokenAddresses).size).toBe(tokenAddresses.length);
-    await page.getByRole("button", { name: /Pools|Havuzlar/, exact: true }).click();
-    await expect(page.getByRole("button", { name: /Pools|Havuzlar/, exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByTestId("market-result-count")).toContainText("24");
-    await expect(page.getByRole("columnheader", { name: /Pool address|Havuz adresi/ })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: /Quote token|Karşı token/ })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: /Orientation|Yön/ })).toBeVisible();
+    await page.getByTestId("open-market-columns").click();
+    await page.getByTestId("market-columns-sheet").getByText(/Pools|Havuzlar/, { exact: true }).click();
+    await page.getByTestId("market-columns-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
+    await expect(page.getByRole("columnheader", { name: /Pools|Havuzlar/ })).toBeVisible();
+    await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
+    await page.getByTestId("context-inspector").getByRole("tab", { name: /Pools|Havuzlar/ }).click();
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Exact execution pool set|Kesin işlem havuzu seti/ }).click();
+    await expect(page.getByTestId("pool-drawer")).toBeVisible();
   });
 
   test("redirects legacy root parameters to canonical terminal and keeps deep-linked selection", async ({ page }) => {
@@ -57,7 +60,8 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
     await expect(page).toHaveURL(/pair=0x[0-9a-f]{40}/);
     await expect(page.getByTestId("terminal-workspace")).toBeVisible();
-    await expect(page.getByTestId("trade-dock")).toContainText("BLOB / USDC");
+    await expect(page.getByTestId("context-inspector")).toBeVisible();
+    await expect(page.getByTestId("trade-dock")).toHaveCount(0);
   });
 
   test("global search resolves token, pool, and address context", async ({ page }) => {
@@ -72,23 +76,25 @@ test.describe("living Base terminal", () => {
   test("applies filters, shows active chips, updates result count, and resets", async ({ page }) => {
     await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=markets/);
-    await page.getByPlaceholder(/Search token|Token \/ pair/).last().fill("BLOB");
+    await page.getByTestId("open-market-filters").click();
+    await page.getByTestId("market-filters-sheet").getByLabel(/Search token|Token, pair/).fill("BLOB");
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
+    await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
     await expect(page.getByTestId("active-filter-chips")).toContainText(/Search: BLOB|Arama: BLOB/);
     await expect(page.getByTestId("market-result-count")).toContainText("1");
-    await page.getByRole("button", { name: /Reset all filters|Tüm filtreleri sıfırla/ }).click();
+    await page.getByRole("button", { name: /Clear filters|Filtreleri temizle/ }).click();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
-    await page.getByRole("combobox", { name: /DEX filter|DEX filtresi/ }).selectOption({ index: 1 });
-    await expect(page.getByTestId("active-filter-chips")).toContainText("DEX:");
-    await page.getByRole("combobox", { name: /Opportunity category|Fırsat kategorisi/ }).selectOption("new");
-    await expect(page.getByTestId("active-filter-chips")).toContainText(/Category:|Kategori:/);
-    await page.getByRole("button", { name: /Reset all filters|Tüm filtreleri sıfırla/ }).click();
-    await expect(page.getByTestId("active-filter-chips")).toHaveCount(0);
+    await page.getByTestId("open-market-filters").click();
+    await page.getByTestId("market-filters-sheet").getByLabel(/Minimum liquidity|Minimum likidite/).fill("999999999");
+    await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Cancel|İptal/ }).last().click();
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
   });
 
   test("persists no more than four pinned markets and renders the shared multichart", async ({ page }) => {
     for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
       await page.getByTestId(`matrix-row-${id}`).getByRole("button", { name: new RegExp(/Pin|izle/) }).click();
     }
+    await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
     await page.reload();
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
@@ -122,7 +128,7 @@ test.describe("living Base terminal", () => {
   test("keeps the last good board visible and captures a delayed-source state", async ({ page }, testInfo) => {
     await page.route("**/api/market-snapshot?data=mock", (route) => route.abort("failed"));
     await page.getByTestId("refresh-terminal").click();
-    await expect(page.getByText(/Delayed data|Veri gecikmeli/)).toBeVisible();
+    await expect(page.getByText(/Delayed|Gecikmeli/).first()).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await page.screenshot({ path: testInfo.outputPath("terminal-delayed-source-1440.png"), fullPage: true });
   });
@@ -154,7 +160,6 @@ test.describe("living Base terminal", () => {
     await expect(row).toHaveAttribute("data-pool-count", "2");
     await expect(row).toHaveCount(1);
     expect(await page.evaluate(() => (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload)).toBe("present");
-    await expect(page.getByTestId("live-pulse-strip")).toContainText(/New pool|Yeni havuz/);
     await row.getByTestId("market-signal-group").getByRole("button").click();
     const multiPoolDetail = page.locator('[data-signal-detail="multi_pool"]');
     await expect(multiPoolDetail).toBeVisible();
@@ -162,29 +167,29 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("pool-drawer")).toBeVisible();
   });
 
-  test("keeps canonical bounded signal semantics across tape, lanes, matrix, watchlist and pair workspace", async ({ page }) => {
+  test("keeps canonical bounded signal semantics across scanner, board, watchlist and inspector", async ({ page }) => {
     const groups = page.getByTestId("market-signal-group");
     expect(await groups.count()).toBeGreaterThan(0);
     const visibleCounts = await groups.evaluateAll((nodes) => nodes.map((node) => node.querySelectorAll(":scope > button [data-signal-type]").length));
     expect(Math.max(...visibleCounts)).toBeLessThanOrEqual(3);
 
-    const selected = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group");
     const matrix = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
-    for (const surface of [selected, matrix]) {
-      await expect(surface.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
-      await expect(surface.locator('[data-signal-type="delayed"]')).toHaveCount(1);
-    }
+    await expect(matrix.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
+    await expect(matrix.locator('[data-signal-type="delayed"]')).toHaveCount(1);
+    await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
+    await page.getByTestId("context-inspector").getByRole("tab", { name: /Signals|Sinyaller/ }).click();
+    const inspectorSignals = page.getByTestId("context-inspector").getByTestId("market-signal-group");
+    await expect(inspectorSignals.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
 
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Pin|izle/ }).click();
-    const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
-    await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
     await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=watchlist/);
-    await expect(page.getByTestId("pinned-multichart").getByTestId("market-signal-group")).toBeVisible();
+    const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
+    await expect(watchlist).toBeVisible();
+    await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
 
     await page.getByRole("link", { name: /Terminal/, exact: true }).first().click();
-    await expect(page.getByTestId("opportunity-lanes").getByTestId("market-signal-group").first()).toBeVisible();
-    await expect(page.getByText(/Public data signals|Açık veri sinyalleri/)).toBeVisible();
+    await expect(page.getByTestId("opportunity-scanner").getByTestId("market-signal-group").first()).toBeVisible();
   });
 
   test("renders an Apple-like token as unverified data-only with a generic avatar", async ({ page, request }) => {
@@ -218,7 +223,7 @@ test.describe("living Base terminal", () => {
   test("opens signal evidence by keyboard and tap, closes with Escape, and honors reduced motion", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    const desktopButton = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group").getByRole("button");
+    const desktopButton = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group").getByRole("button");
     await desktopButton.focus();
     const desktopPopover = page.getByTestId("market-signal-popover");
     await expect(desktopPopover).toBeVisible();
@@ -232,7 +237,7 @@ test.describe("living Base terminal", () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/terminal?data=mock");
-    const mobileButton = page.getByTestId("live-market-tape").getByTestId("market-signal-group").first().getByRole("button");
+    const mobileButton = page.getByTestId("market-card-pepe-weth").getByTestId("market-signal-group").getByRole("button");
     await mobileButton.click();
     const mobilePopover = page.getByTestId("market-signal-popover");
     await expect(mobilePopover).toBeVisible();
@@ -245,11 +250,14 @@ test.describe("living Base terminal", () => {
 
   test("filters by signal with a translated empty state and persists the safe preference", async ({ page }) => {
     await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
-    await page.getByTestId("market-signal-legend").locator("summary").click();
-    await page.locator('[data-signal-filter="security_unknown"]').click();
+    await page.getByTestId("open-market-filters").click();
+    await page.getByTestId("market-filters-sheet").locator('[data-signal-filter="security_unknown"]').click();
+    await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await expect(page.getByTestId("active-filter-chips")).toContainText(/Security not assessed|Güvenlik değerlendirilmedi/);
-    await page.locator('[data-signal-filter="risk_flagged"]').click();
+    await page.getByTestId("open-market-filters").click();
+    await page.getByTestId("market-filters-sheet").locator('[data-signal-filter="risk_flagged"]').click();
+    await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
     await expect(page.getByTestId("market-result-count")).toContainText("0");
     await expect(page.getByText(/No qualified markets match|Uygun piyasa bulunamadı/)).toBeVisible();
     await page.reload();
@@ -257,8 +265,10 @@ test.describe("living Base terminal", () => {
 
     await page.getByRole("button", { name: "en", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.getByTestId("market-signal-legend")).toContainText("Signals");
+    await page.getByTestId("open-market-filters").click();
+    await expect(page.getByTestId("market-filters-sheet")).toContainText("Filter by verified signals");
     await page.getByRole("button", { name: /Reset all filters/ }).click();
+    await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates/ }).click();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
   });
 
@@ -274,7 +284,7 @@ test.describe("living Base terminal", () => {
     let refreshIndex = 0;
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: snapshots[Math.min(refreshIndex++, snapshots.length - 1)] }));
 
-    const selectedSignals = page.getByTestId("selected-pair-panel").getByTestId("market-signal-group");
+    const selectedSignals = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
     await page.getByTestId("refresh-terminal").click();
     await page.getByTestId("pending-market-updates").getByRole("button").click();
     await selectedSignals.getByRole("button").click();
@@ -301,6 +311,15 @@ test.describe("living Base terminal", () => {
       await page.goto("/terminal?data=mock");
       await expectTerminalShell(page);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+      if (viewport.width === 1440) {
+        const completeRows = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.filter((row) => {
+          const bounds = row.getBoundingClientRect();
+          return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+        }).length);
+        expect(completeRows).toBeGreaterThanOrEqual(10);
+        const visibleBadgeCounts = await page.getByTestId("market-board-table").locator("tbody tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("[data-signal-type], [data-testid='asset-identity-badge'], [data-testid='tradeability-badge']").length));
+        expect(Math.max(...visibleBadgeCounts)).toBeLessThanOrEqual(3);
+      }
       if (viewport.width === 390) {
         await expect(page.getByRole("navigation", { name: /Mobile terminal|Mobil terminal/ })).toBeVisible();
         await expect(page.getByRole("link", { name: /Wallet|Cüzdan/, exact: true })).toBeVisible();
@@ -312,7 +331,8 @@ test.describe("living Base terminal", () => {
   test("opens the selected market trade dock as a keyboard-closeable mobile sheet", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/terminal?data=mock");
-    await page.getByRole("button", { name: /Open trade dock|İşlem alanını aç/ }).click();
+    await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Overview|Genel Bakış/ }).click();
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
     await expect(page.getByTestId("trade-dock")).toContainText("PEPE / WETH");
     await page.keyboard.press("Escape");
@@ -328,15 +348,28 @@ test.describe("living Base terminal", () => {
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await page.screenshot({ path: testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), fullPage: true });
+        if (viewport.width === 390) {
+          await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Overview|Genel Bakış/ }).click();
+          await page.screenshot({ path: testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), fullPage: true });
+          await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
+          await page.screenshot({ path: testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), fullPage: true });
+        }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/terminal?data=mock&pair=blob-usdc");
+      await expect(page.getByTestId("context-inspector")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`inspector-${locale}-1440.png`), fullPage: true });
+      await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
+      await page.screenshot({ path: testInfo.outputPath(`trade-drawer-${locale}-1440.png`), fullPage: true });
+      await page.keyboard.press("Escape");
+      await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
       await page.screenshot({ path: testInfo.outputPath(`pair-workspace-${locale}-1440.png`), fullPage: true });
       await page.evaluate(() => localStorage.removeItem("base-terminal-lite:pinned-pairs"));
-      await page.reload();
+      await page.goto("/terminal?data=mock");
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
         await page.getByTestId(`matrix-row-${id}`).getByRole("button", { name: /Pin|izle/ }).click();
       }
+      await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
       await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
       await page.screenshot({ path: testInfo.outputPath(`multichart-${locale}-1440.png`), fullPage: true });
       await page.getByTestId("connect-wallet-button").click();
@@ -349,7 +382,7 @@ test.describe("living Base terminal", () => {
 async function expectTerminalShell(page: Page) {
   await expect(page.getByTestId("terminal-topbar")).toBeVisible();
   await expect(page.getByTestId("pulse-terminal")).toBeVisible();
-  await expect(page.getByTestId("live-pulse-strip")).toBeVisible();
+  await expect(page.getByTestId("live-market-tape")).toBeVisible();
 }
 
 function buildSignalSnapshot(snapshot: MarketTerminalSnapshot, opportunityId: string, generatedAt: string, change5m: number): MarketTerminalSnapshot {

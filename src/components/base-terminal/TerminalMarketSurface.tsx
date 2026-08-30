@@ -1,35 +1,32 @@
 "use client";
 
-import { ArrowDownUp, Eye, Filter, Layers3, RotateCcw, Settings2, Star, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Columns3, Eye, Filter, RefreshCw, RotateCcw, SlidersHorizontal, Star, X } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { useI18n } from "@/i18n/I18nProvider";
 import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
 import { getMarketInvariantAttributes, getNormalizedMarketModel } from "@/lib/base-terminal/marketModel";
-import {
-  buildTokenOpportunityLanes,
-  DEFAULT_MARKET_FILTERS,
-  filterAndSortMarkets,
-  type MarketFilters,
-  type MarketSortKey,
-  type TokenOpportunityLane
-} from "@/lib/base-terminal/terminalMarket";
+import { buildTokenOpportunityLanes, DEFAULT_MARKET_FILTERS, filterAndSortMarkets, type MarketFilters, type MarketSortKey } from "@/lib/base-terminal/terminalMarket";
 import { cx } from "@/lib/format";
 import { safeReadJson, safeSetStorageItem } from "@/lib/safeStorage";
 import type { BasePair } from "@/types/baseTerminal";
 import { PairAvatarStack } from "@/components/TokenIdentity";
 import { orientPairToOpportunity, type TokenOpportunity } from "@/lib/base-terminal/opportunityModel";
-import { MARKET_SIGNAL_OPEN_POOLS_EVENT, MarketSignalBadges, MarketSignalLegend, useMarketSignalContext } from "@/components/base-terminal/MarketSignalBadges";
+import { MARKET_SIGNAL_OPEN_POOLS_EVENT, MarketSignalBadges, useMarketSignalContext } from "@/components/base-terminal/MarketSignalBadges";
 import { AssetTradeabilityBadges } from "@/components/base-terminal/AssetTradeabilityBadges";
-import { hasMarketSignal, SIGNAL_FILTER_TYPES, type MarketSignalType } from "@/lib/base-terminal/marketSignals";
+import { hasMarketSignal, SIGNAL_FILTER_TYPES, type MarketSignalSnapshot, type MarketSignalType } from "@/lib/base-terminal/marketSignals";
+import { useOverlayManager } from "@/components/OverlayManager";
 
-const MATRIX_STORAGE_KEY = "mergen-terminal:market-matrix:v3";
-const DEFAULT_COLUMNS = ["age", "price", "change5m", "change1h", "change24h", "volume5m", "volume1h", "volume24h", "transactions", "liquidity", "fdv", "marketCap", "freshness", "tradeStatus"] as const;
-type MatrixColumn = typeof DEFAULT_COLUMNS[number];
-type MatrixPreferences = { filters: MarketFilters; density: "compact" | "comfortable"; columns: MatrixColumn[]; signalTypes: MarketSignalType[] };
+const BOARD_STORAGE_KEY = "mergen-terminal:market-board:v4";
+const SCANNER_STORAGE_KEY = "mergen-terminal:opportunity-scanner:v1";
+const ADVANCED_COLUMNS = ["transactions", "fdv", "provider", "freshness", "tradeStatus", "pools"] as const;
+type AdvancedColumn = typeof ADVANCED_COLUMNS[number];
+type BoardPreferences = { filters: MarketFilters; columns: AdvancedColumn[]; signalTypes: MarketSignalType[] };
+type ScannerTab = "new" | "moving" | "volume" | "liquidity" | "volatile" | "watchlist";
 type OpportunityRow = { opportunity: TokenOpportunity; pair: BasePair };
 
-export function LiveMarketTape({ snapshot, onSelect }: { snapshot: MarketTerminalSnapshot; onSelect: (id: string) => void }) {
+export function LiveMarketTape({ snapshot, onSelect, onRefresh, refreshing = false }: { snapshot: MarketTerminalSnapshot; onSelect: (id: string) => void; onRefresh?: () => void; refreshing?: boolean }) {
   const { t, formatPercent } = useI18n();
   const rows = useMemo(() => snapshot.opportunities
     .filter((opportunity) => opportunity.quality === "active")
@@ -39,6 +36,7 @@ export function LiveMarketTape({ snapshot, onSelect }: { snapshot: MarketTermina
     .slice(0, 15), [snapshot]);
   const previousValuesRef = useRef<Map<string, string> | undefined>(undefined);
   const [changedPairIds, setChangedPairIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     const nextValues = new Map(rows.map(({ opportunity, pair }) => [opportunity.id, `${pair.priceUsdValue ?? "missing"}:${pair.priceChanges?.m5 ?? "missing"}`]));
     const previousValues = previousValuesRef.current;
@@ -50,85 +48,78 @@ export function LiveMarketTape({ snapshot, onSelect }: { snapshot: MarketTermina
     const timer = window.setTimeout(() => setChangedPairIds(new Set()), 1_200);
     return () => window.clearTimeout(timer);
   }, [rows]);
-  return (
-    <section className="pulse-surface overflow-hidden rounded-xl" data-testid="live-market-tape" aria-label={t("terminalV3.tape")}>
-      <div className="flex min-h-10 items-center gap-2 overflow-x-auto px-2 py-1.5">
-        <span className="sticky left-0 z-10 shrink-0 rounded-full bg-base-panel px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.live")}</span>
-        {rows.map(({ opportunity, pair }) => {
-          const change = pair.priceChanges?.m5;
-          return <span key={opportunity.id} className={cx("flex shrink-0 items-center rounded-full bg-base-elevated", changedPairIds.has(opportunity.id) && "market-update-flash")} data-testid={`tape-${safeTestId(opportunity.id)}`} data-opportunity-id={opportunity.id}><button type="button" onClick={() => onSelect(opportunity.primaryMarketId)} className="flex min-h-11 items-center gap-2 rounded-l-full px-2.5 text-left outline-none hover:bg-base-mint/10 focus-visible:ring-2 focus-visible:ring-base-mint/50">
-            <span className="font-mono text-[10px] font-semibold text-base-text">{opportunity.focusTokenSymbol}</span>
-            <span className="font-mono text-[10px] text-base-muted">{displayPrice(pair)}</span>
-            <span className={cx("font-mono text-[10px]", change === undefined ? "text-base-muted" : change >= 0 ? "text-base-mint" : "text-base-rose")}>{change === undefined ? "5m N/A" : `5m ${formatPercent(change)}`}</span>
-            <span className="rounded-full bg-base-panel px-1.5 py-0.5 text-[8px] text-base-muted">{poolCountLabel(opportunity.poolCount, t)}</span>
-            <span className="text-[9px] text-base-muted">{pair.stale ? t("common.delayed") : t("terminalV3.fresh")}</span>
-          </button><span className="flex items-center pr-1"><MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={1} /><AssetTradeabilityBadges opportunity={opportunity} pair={pair} /></span></span>;
-        })}
-      </div>
-    </section>
-  );
-}
 
-export function OpportunityLanes({ snapshot, selectedPair, onSelect, onTrade, isPairPinned, onTogglePin }: {
-  snapshot: MarketTerminalSnapshot;
-  selectedPair: BasePair;
-  onSelect: (id: string) => void;
-  onTrade: (pair: BasePair, side: "buy" | "sell") => void;
-  isPairPinned: (pair: BasePair) => boolean;
-  onTogglePin: (pair: BasePair) => void;
-}) {
-  const { t } = useI18n();
-  const lanes = useMemo(() => buildTokenOpportunityLanes(snapshot), [snapshot]);
-  return <section aria-label={t("terminalV3.lanes")} data-testid="opportunity-lanes" className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-    {lanes.map((lane) => <MarketLane key={lane.id} lane={lane} snapshot={snapshot} selectedPair={selectedPair} onSelect={onSelect} onTrade={onTrade} isPairPinned={isPairPinned} onTogglePin={onTogglePin} />)}
+  return <section className="pulse-surface overflow-hidden rounded-lg" data-testid="live-market-tape" aria-label={t("terminalV3.tape")}>
+    <div className="flex h-10 items-center gap-1.5 overflow-x-auto px-2">
+      <span className="sticky left-0 z-10 shrink-0 bg-base-panel pr-2 text-[8px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.live")}</span>
+      {rows.map(({ opportunity, pair }) => {
+        const change = pair.priceChanges?.m5;
+        return <button key={opportunity.id} type="button" onClick={() => onSelect(pair.id)} className={cx("flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-base-elevated px-2 text-left outline-none hover:bg-base-mint/10 focus-visible:ring-2 focus-visible:ring-base-mint/50", changedPairIds.has(opportunity.id) && "market-update-flash")} data-testid={`tape-${safeTestId(opportunity.id)}`} data-opportunity-id={opportunity.id}>
+          <span className="font-mono text-[9px] font-semibold text-base-text">{opportunity.focusTokenSymbol}</span>
+          <span className="font-mono text-[9px] text-base-muted">{displayPrice(pair)}</span>
+          <span className={cx("font-mono text-[9px]", change === undefined ? "text-base-muted" : change >= 0 ? "text-base-mint" : "text-base-rose")}>{change === undefined ? "5m —" : formatPercent(change)}</span>
+          {pair.stale ? <span className="text-[8px] text-base-amber">{t("common.delayed")}</span> : null}
+        </button>;
+      })}
+      {onRefresh ? <button type="button" data-testid="refresh-terminal" disabled={refreshing} onClick={onRefresh} className="sticky right-0 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-base-panel text-base-muted hover:text-base-mint disabled:opacity-50" aria-label={t("common.refresh")}><RefreshCw size={12} className={cx(refreshing && "animate-spin")} /></button> : null}
+    </div>
   </section>;
 }
 
-function MarketLane({ lane, snapshot, selectedPair, onSelect, onTrade, isPairPinned, onTogglePin }: {
-  lane: TokenOpportunityLane;
+export function OpportunityScanner({ snapshot, selectedPair, onSelect, isPairPinned }: {
   snapshot: MarketTerminalSnapshot;
   selectedPair: BasePair;
   onSelect: (id: string) => void;
-  onTrade: (pair: BasePair, side: "buy" | "sell") => void;
   isPairPinned: (pair: BasePair) => boolean;
-  onTogglePin: (pair: BasePair) => void;
 }) {
   const { t, locale, formatCompactCurrency, formatPercent } = useI18n();
-  const comparisonSeconds = snapshot.comparison.previousGeneratedAt
-    ? Math.max(1, Math.round((Date.parse(snapshot.generatedAt) - Date.parse(snapshot.comparison.previousGeneratedAt)) / 1_000))
-    : undefined;
-  return <article className="pulse-surface min-w-0 overflow-hidden rounded-xl" data-testid={`opportunity-lane-${lane.id}`}>
-    <header className="flex min-h-10 items-center justify-between gap-2 border-b border-base-line/60 px-3 py-1.5">
-      <div><h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-base-text">{t(lane.id === "volume" && lane.fallback ? "terminalV3.lane.volumeLeaders" : `terminalV3.lane.${lane.id}`)}</h2>{lane.id === "volume" && !lane.fallback && comparisonSeconds ? <p className="mt-0.5 text-[8px] text-base-muted">{t("terminalV3.lane.surgeWindow", { count: comparisonSeconds })}</p> : null}</div>
-      <span className="font-mono text-[9px] text-base-muted">{lane.opportunities.length}</span>
+  const [tab, setTab] = useState<ScannerTab>("moving");
+  const lanes = useMemo(() => buildTokenOpportunityLanes(snapshot, 12), [snapshot]);
+  const baseRows = useMemo(() => snapshot.opportunities
+    .filter((opportunity) => opportunity.quality !== "expired")
+    .map((opportunity) => ({ opportunity, pair: getOpportunityPair(snapshot, opportunity) }))
+    .filter((row): row is OpportunityRow => Boolean(row.pair)), [snapshot]);
+
+  useEffect(() => {
+    const stored = safeReadJson<{ tab?: ScannerTab }>(SCANNER_STORAGE_KEY, {});
+    if (["new", "moving", "volume", "liquidity", "volatile", "watchlist"].includes(stored.tab ?? "")) setTab(stored.tab!);
+  }, []);
+  useEffect(() => { safeSetStorageItem(SCANNER_STORAGE_KEY, JSON.stringify({ tab })); }, [tab]);
+
+  const rows = useMemo(() => {
+    if (tab === "volatile") return [...baseRows].sort((left, right) => Math.abs(right.pair.priceChanges?.h1 ?? 0) - Math.abs(left.pair.priceChanges?.h1 ?? 0));
+    if (tab === "watchlist") return baseRows.filter(({ pair }) => isPairPinned(pair));
+    const ids = new Set(lanes.find((item) => item.id === tab)?.opportunities.map((item) => item.id) ?? []);
+    return baseRows.filter(({ opportunity }) => ids.has(opportunity.id));
+  }, [baseRows, isPairPinned, lanes, tab]);
+
+  const tabs: ScannerTab[] = ["new", "moving", "volume", "liquidity", "volatile", "watchlist"];
+  return <section className="pulse-surface overflow-hidden rounded-lg" data-testid="opportunity-scanner" aria-label={t("terminalV3.lanes")}>
+    <header className="flex items-center justify-between gap-2 border-b border-base-line/60 px-3 py-1.5">
+      <div className="min-w-0"><p className="text-[8px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.matrixEyebrow")}</p><h2 className="truncate text-[12px] font-semibold">{t("terminalV3.lanes")}</h2></div>
+      <span className="flex shrink-0 items-center gap-2 font-mono text-[9px] text-base-muted"><span>{t("common.results", { count: rows.length })} · {snapshot.freshness === "fresh" ? t("terminalV3.fresh") : t("common.delayed")}</span><Link href={`/terminal?view=markets&data=${snapshot.mode}`} className="inline-flex min-h-9 items-center rounded-sm px-2 font-sans font-semibold text-base-mint">{t("nav.markets")}</Link></span>
     </header>
-    {lane.fallback ? <p className="border-b border-base-amber/20 bg-base-amber/5 px-3 py-1.5 text-[9px] leading-4 text-base-amber">{t(`terminalV3.lane.${lane.id}Fallback`)}</p> : null}
-    <div className="divide-y divide-base-line/50">
-      {lane.opportunities.map((opportunity) => {
-        const pair = getOpportunityPair(snapshot, opportunity);
-        if (!pair) return null;
+    <div className="flex overflow-x-auto border-b border-base-line/60 px-1" role="tablist">
+      {tabs.map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)} className={cx("min-h-9 shrink-0 border-b-2 px-2.5 text-[9px] font-semibold", tab === item ? "border-base-mint text-base-mint" : "border-transparent text-base-muted hover:text-base-text")} data-testid={`scanner-tab-${item}`}>{scannerLabel(item, t)}</button>)}
+    </div>
+    <div className="divide-y divide-base-line/50" data-testid={`scanner-list-${tab}`}>
+      {rows.slice(0, 2).map(({ opportunity, pair }) => {
         const model = getNormalizedMarketModel(pair);
-        const change = lane.id === "moving" ? model.change1h : model.change24h;
-        return <div key={opportunity.id} {...getMarketInvariantAttributes(pair)} data-opportunity-id={opportunity.id} data-focus-token-address={opportunity.focusTokenAddress} data-pool-count={opportunity.poolCount} data-pool-age-minutes={model.ageMinutes} data-quality={opportunity.quality} className={cx("grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2", opportunity.poolMarketIds.includes(selectedPair.id) && "bg-base-mint/5")}>
-          <button type="button" onClick={() => onSelect(opportunity.primaryMarketId)} className="flex min-h-11 min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/50">
-            <PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={pair.baseTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity.focusTokenName} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" />
-            <span className="min-w-0">
-              <span className="block truncate font-mono text-[11px] font-semibold text-base-text">{opportunity.focusTokenSymbol}</span>
-              <span className="block truncate text-[9px] text-base-muted">{pair.dexName ?? pair.dex} · {poolCountLabel(opportunity.poolCount, t)} · {model.ageMinutes === undefined ? t("common.noData") : localizeAgeLabel(pair.age, locale)}{lane.id === "new" && opportunity.categoryEligibility.justLaunched ? ` · ${t("terminalV3.justLaunched")}` : ""}{opportunity.quality === "thin" ? ` · ${t("terminalV3.thinLiquidity")}` : ""}</span>
-              <span className="mt-0.5 grid grid-cols-3 gap-1 font-mono text-[8px] text-base-muted"><span title={t("terminalV3.metric.price")}>P {displayPrice(pair)}</span><span title={t("terminalV3.metric.change")}>Δ {change === undefined ? t("common.noData") : formatPercent(change)}</span><span title={t("terminalV3.metric.liquidity")}>L {opportunity.aggregate.liquidityUsd === undefined ? t("common.noData") : formatCompactCurrency(opportunity.aggregate.liquidityUsd)}</span></span>
-            </span>
-          </button>
-          <span className="flex items-center gap-1">
-            <MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={1} />
-            <AssetTradeabilityBadges opportunity={opportunity} pair={pair} />
-            <button type="button" onClick={() => onTogglePin(pair)} className={cx("grid h-8 w-8 place-items-center rounded-sm text-base-muted hover:bg-base-elevated hover:text-base-mint", isPairPinned(pair) && "text-base-mint")} aria-label={t(isPairPinned(pair) ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })}><Star size={12} fill={isPairPinned(pair) ? "currentColor" : "none"} /></button>
-            <button type="button" onClick={() => onTrade(pair, "buy")} className="h-8 rounded-sm bg-base-mint/10 px-2 text-[9px] font-bold text-base-mint hover:bg-base-mint/20">{t("trade.buy")}</button>
-          </span>
+        return <div key={opportunity.id} className={cx("grid min-h-10 w-full grid-cols-[minmax(150px,1.4fr)_repeat(3,minmax(72px,.7fr))_auto] items-center gap-2 px-2.5 text-left hover:bg-base-mint/5 max-md:grid-cols-[minmax(0,1fr)_auto]", opportunity.poolMarketIds.includes(selectedPair.id) && "bg-base-mint/5")} data-opportunity-id={opportunity.id}>
+          <button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-10 min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-base-mint/50"><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity.focusTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity.focusTokenName} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" /><span className="min-w-0"><strong className="block truncate font-mono text-[10px]">{opportunity.focusTokenSymbol}</strong><small className="block truncate text-[8px] text-base-muted">{pair.dexName ?? pair.dex} · {poolCountLabel(opportunity.poolCount, t)} · {model.ageMinutes === undefined ? t("common.noData") : localizeAgeLabel(pair.age, locale)}</small></span></button>
+          <span className="font-mono text-[9px] max-md:hidden">{displayPrice(pair)}</span>
+          <span className={cx("font-mono text-[9px] max-md:hidden", (model.change1h ?? 0) >= 0 ? "text-base-mint" : "text-base-rose")}>{model.change1h === undefined ? "—" : formatPercent(model.change1h)}</span>
+          <span className="font-mono text-[9px] text-base-muted max-md:hidden">{model.volume24hUsd === undefined ? "—" : formatCompactCurrency(model.volume24hUsd)}</span>
+          <span className="flex items-center"><MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={1} presentation="rowPrimary" /><AssetTradeabilityBadges opportunity={opportunity} pair={pair} presentation="rowCritical" /></span>
         </div>;
       })}
-      {lane.opportunities.length === 0 ? <p className="p-4 text-[10px] leading-5 text-base-muted">{t("terminalV3.noVerifiedMarkets")}</p> : null}
+      {rows.length === 0 ? <p className="px-3 py-4 text-[10px] text-base-muted">{t("terminalV3.noVerifiedMarkets")}</p> : null}
     </div>
-  </article>;
+  </section>;
+}
+
+export function OpportunityLanes(props: Parameters<typeof OpportunityScanner>[0]) {
+  return <OpportunityScanner {...props} />;
 }
 
 export function MarketMatrix({ snapshot, selectedPair, onSelect, onTrade, isPairPinned, onTogglePin, onInteractionChange, watchlistOnly = false }: {
@@ -142,253 +133,107 @@ export function MarketMatrix({ snapshot, selectedPair, onSelect, onTrade, isPair
   watchlistOnly?: boolean;
 }) {
   const { t, locale, formatCompactCurrency, formatPercent } = useI18n();
-  const [preferences, setPreferences] = useState<MatrixPreferences>(() => ({ filters: DEFAULT_MARKET_FILTERS, density: "compact", columns: [...DEFAULT_COLUMNS], signalTypes: [] }));
+  const overlay = useOverlayManager();
+  const [preferences, setPreferences] = useState<BoardPreferences>(() => ({ filters: DEFAULT_MARKET_FILTERS, columns: [], signalTypes: [] }));
+  const [draft, setDraft] = useState<BoardPreferences>(preferences);
   const [loaded, setLoaded] = useState(false);
-  const [matrixView, setMatrixView] = useState<"tokens" | "pools">("tokens");
   const [visibleLimit, setVisibleLimit] = useState(80);
-  const [openOpportunityId, setOpenOpportunityId] = useState<string>();
   const { signals: signalSnapshot } = useMarketSignalContext();
+
+  useEffect(() => { setPreferences(normalizePreferences(safeReadJson<Partial<BoardPreferences>>(BOARD_STORAGE_KEY, {}))); setLoaded(true); }, []);
+  useEffect(() => { if (loaded) safeSetStorageItem(BOARD_STORAGE_KEY, JSON.stringify(preferences)); }, [loaded, preferences]);
+  useEffect(() => { if (overlay.active.type === "filters" || overlay.active.type === "columns") setDraft(preferences); }, [overlay.active.type, preferences]);
   useEffect(() => {
     const openPoolDetails = (event: Event) => {
       const opportunityId = (event as CustomEvent<{ opportunityId?: string }>).detail?.opportunityId;
-      if (opportunityId && snapshot.opportunities.some((opportunity) => opportunity.id === opportunityId)) setOpenOpportunityId(opportunityId);
+      if (opportunityId && snapshot.opportunities.some((opportunity) => opportunity.id === opportunityId)) overlay.open("pool_drawer", { opportunityId });
     };
     window.addEventListener(MARKET_SIGNAL_OPEN_POOLS_EVENT, openPoolDetails);
     return () => window.removeEventListener(MARKET_SIGNAL_OPEN_POOLS_EVENT, openPoolDetails);
-  }, [snapshot.opportunities]);
-  useEffect(() => {
-    const saved = safeReadJson<Partial<MatrixPreferences>>(MATRIX_STORAGE_KEY, {});
-    setPreferences(normalizePreferences(saved));
-    setLoaded(true);
-  }, []);
-  useEffect(() => { if (loaded) safeSetStorageItem(MATRIX_STORAGE_KEY, JSON.stringify(preferences)); }, [loaded, preferences]);
+  }, [overlay, snapshot.opportunities]);
+
   const opportunityRows = useMemo(() => buildOpportunityMatrixPairs(snapshot), [snapshot]);
-  const dexOptions = useMemo(() => [...new Map(snapshot.allPairs.flatMap((pair) => {
-    const value = (pair.dexId ?? pair.dexName ?? pair.dex).trim().toLocaleLowerCase("en-US");
-    const label = pair.dexName ?? pair.dex;
-    return value ? [[value, label] as const] : [];
-  })).entries()].sort((left, right) => left[1].localeCompare(right[1])), [snapshot.allPairs]);
-  const quoteOptions = useMemo(() => {
-    const entries = [...new Map(snapshot.allPairs.flatMap((pair) => {
-      const address = pair.quoteTokenAddress?.trim().toLocaleLowerCase("en-US");
-      return address ? [[address, pair.quoteToken] as const] : [];
-    })).entries()];
-    const symbolCounts = new Map<string, number>();
-    for (const [, symbol] of entries) symbolCounts.set(symbol, (symbolCounts.get(symbol) ?? 0) + 1);
-    return entries
-      .map(([address, symbol]) => [address, (symbolCounts.get(symbol) ?? 0) > 1 ? `${symbol} · ${shortAddress(address)}` : symbol] as const)
-      .sort((left, right) => left[1].localeCompare(right[1]));
-  }, [snapshot.allPairs]);
-  const source = useMemo(() => {
-    const rows = matrixView === "tokens" ? opportunityRows : snapshot.allPairs;
-    return watchlistOnly ? rows.filter(isPairPinned) : rows;
-  }, [isPairPinned, matrixView, opportunityRows, snapshot.allPairs, watchlistOnly]);
+  const source = useMemo(() => watchlistOnly ? opportunityRows.filter(isPairPinned) : opportunityRows, [isPairPinned, opportunityRows, watchlistOnly]);
   const rows = useMemo(() => {
     const query = preferences.filters.query.trim().toLocaleLowerCase("en-US");
-    const scoped = source
-      .filter((pair) => matchesMarketContext(pair, snapshot, preferences.filters, matrixView))
-      .filter((pair) => hasMarketSignal(matrixView === "tokens" && pair.opportunityId ? signalSnapshot.byOpportunityId[pair.opportunityId] : signalSnapshot.byPoolId[pair.id], preferences.signalTypes))
-      .filter((pair) => matrixView !== "tokens" || !query || opportunitySearchText(pair, snapshot).includes(query));
-    return filterAndSortMarkets(scoped, {
-      ...preferences.filters,
-      query: matrixView === "tokens" && query ? "" : preferences.filters.query,
-      dex: "",
-      quoteTokenAddress: "",
-      category: "all"
-    });
-  }, [matrixView, preferences.filters, preferences.signalTypes, signalSnapshot, snapshot, source]);
-  const openOpportunity = snapshot.opportunities.find((opportunity) => opportunity.id === openOpportunityId);
-  const filters = preferences.filters;
-  const activeFilters = [filters.query && t("terminalV3.filter.search", { value: filters.query }), filters.minimumLiquidity !== undefined && t("terminalV3.filter.liquidity", { value: formatCompactCurrency(filters.minimumLiquidity) }), filters.minimumVolume24h !== undefined && t("terminalV3.filter.volume", { value: formatCompactCurrency(filters.minimumVolume24h) }), filters.maximumAgeMinutes !== undefined && t("terminalV3.filter.age", { value: filters.maximumAgeMinutes }), filters.change !== "all" && t(`terminalV3.filter.${filters.change}`), filters.dex && t("terminalV3.filter.dexValue", { value: dexOptions.find(([value]) => value === filters.dex)?.[1] ?? filters.dex }), filters.quoteTokenAddress && t("terminalV3.filter.quoteValue", { value: quoteOptions.find(([value]) => value === filters.quoteTokenAddress)?.[1] ?? shortAddress(filters.quoteTokenAddress) }), filters.category && filters.category !== "all" && t("terminalV3.filter.categoryValue", { value: t(`terminalV3.filter.category.${filters.category}`) }), ...preferences.signalTypes.map((type) => t(`marketSignal.${type}`))].filter((value): value is string => Boolean(value));
+    const scoped = source.filter((pair) => matchesMarketContext(pair, snapshot, preferences.filters)).filter((pair) => hasMarketSignal(pair.opportunityId ? signalSnapshot.byOpportunityId[pair.opportunityId] : signalSnapshot.byPoolId[pair.id], preferences.signalTypes)).filter((pair) => !query || opportunitySearchText(pair, snapshot).includes(query));
+    return filterAndSortMarkets(scoped, { ...preferences.filters, query: "", dex: "", quoteTokenAddress: "", category: "all" });
+  }, [preferences.filters, preferences.signalTypes, signalSnapshot, snapshot, source]);
+  const activeFilterCount = countActiveFilters(preferences);
+  const openOpportunity = overlay.active.type === "pool_drawer" ? snapshot.opportunities.find((item) => item.id === overlay.active.payload?.opportunityId) : undefined;
+  const activeFilters = describeActiveFilters(preferences, t, formatCompactCurrency);
 
-  const patchFilters = (patch: Partial<MarketFilters>) => setPreferences((current) => ({ ...current, filters: { ...current.filters, ...patch } }));
-  const toggleColumn = (column: MatrixColumn) => setPreferences((current) => ({ ...current, columns: current.columns.includes(column) ? current.columns.filter((item) => item !== column) : [...current.columns, column] }));
-  return <section className="pulse-surface min-w-0 overflow-hidden rounded-xl" data-testid="market-matrix" onMouseEnter={() => onInteractionChange(true)} onMouseLeave={() => onInteractionChange(false)} onFocusCapture={() => onInteractionChange(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractionChange(false); }}>
+  return <section className="pulse-surface min-w-0 overflow-hidden rounded-lg" data-testid="market-matrix" onMouseEnter={() => onInteractionChange(true)} onMouseLeave={() => onInteractionChange(false)} onFocusCapture={() => onInteractionChange(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onInteractionChange(false); }}>
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-base-line/60 px-3 py-2">
-      <div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.matrixEyebrow")}</p><h2 className="text-[14px] font-semibold text-base-text">{watchlistOnly ? t("nav.watchlist") : t("terminalV3.matrix")}</h2></div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="rounded-full bg-base-elevated px-2 py-1 font-mono text-[10px] text-base-muted" data-testid="market-result-count">{t("common.results", { count: rows.length })}</span>
-        <span className="inline-flex rounded-sm bg-base-elevated p-0.5" data-testid="market-view-toggle"><button type="button" aria-pressed={matrixView === "tokens"} onClick={() => { setMatrixView("tokens"); setVisibleLimit(80); }} className={cx("min-h-8 rounded-sm px-2 text-[10px]", matrixView === "tokens" ? "bg-base-mint/15 text-base-mint" : "text-base-muted")}>{t("terminalV3.tokensView")}</button><button type="button" aria-pressed={matrixView === "pools"} onClick={() => { setMatrixView("pools"); setVisibleLimit(80); }} className={cx("min-h-8 rounded-sm px-2 text-[10px]", matrixView === "pools" ? "bg-base-mint/15 text-base-mint" : "text-base-muted")}>{t("terminalV3.poolsView")}</button></span>
-        <MarketSignalLegend selected={preferences.signalTypes} onChange={(signalTypes) => setPreferences((current) => ({ ...current, signalTypes }))} />
-        <button type="button" onClick={() => setPreferences((current) => ({ ...current, density: current.density === "compact" ? "comfortable" : "compact" }))} className="inline-flex min-h-9 items-center gap-1 rounded-sm bg-base-elevated px-2 text-[10px] text-base-muted"><ArrowDownUp size={12} />{t(`terminalV3.density.${preferences.density}`)}</button>
-        <details className="relative"><summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-sm bg-base-elevated px-2 text-[10px] text-base-muted"><Settings2 size={12} />{t("terminalV3.columns")}</summary><div className="absolute right-0 top-10 z-30 grid w-48 gap-1 rounded-lg border border-base-line bg-base-panel p-2 shadow-xl">{DEFAULT_COLUMNS.map((column) => <label key={column} className="flex min-h-8 items-center gap-2 text-[10px] text-base-muted"><input type="checkbox" checked={preferences.columns.includes(column)} onChange={() => toggleColumn(column)} />{t(`terminalV3.column.${column}`)}</label>)}</div></details>
-      </div>
+      <div><p className="text-[8px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.matrixEyebrow")}</p><h2 className="text-[13px] font-semibold text-base-text">{watchlistOnly ? t("nav.watchlist") : t("terminalV3.matrix")}</h2></div>
+      <div className="flex items-center gap-1.5"><span className="rounded-full bg-base-elevated px-2 py-1 font-mono text-[9px] text-base-muted" data-testid="market-result-count">{t("common.results", { count: rows.length })}</span><button type="button" onClick={() => overlay.open("filters")} className="inline-flex min-h-9 items-center gap-1 rounded-sm bg-base-elevated px-2 text-[9px] text-base-muted" data-testid="open-market-filters"><SlidersHorizontal size={12} />{t("market.filters")}{activeFilterCount ? <span className="rounded-full bg-base-mint/10 px-1.5 text-base-mint">{activeFilterCount}</span> : null}</button><button type="button" onClick={() => overlay.open("columns")} className="inline-flex min-h-9 items-center gap-1 rounded-sm bg-base-elevated px-2 text-[9px] text-base-muted" data-testid="open-market-columns"><Columns3 size={12} />{t("terminalV3.columns")}</button></div>
     </header>
-    <div className="grid gap-2 border-b border-base-line/60 bg-base-elevated/40 p-2 sm:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-10">
-      <label className="xl:col-span-2"><span className="sr-only">{t("header.search")}</span><input value={filters.query} onChange={(event) => patchFilters({ query: event.target.value })} placeholder={t("header.searchPlaceholder")} className="h-10 w-full rounded-sm border border-base-line bg-base-panel px-2 text-[11px] outline-none focus:border-base-mint" /></label>
-      <NumberBox label={t("market.advanced.minLiquidity")} value={filters.minimumLiquidity} onChange={(minimumLiquidity) => patchFilters({ minimumLiquidity })} />
-      <NumberBox label={t("market.advanced.minVolume")} value={filters.minimumVolume24h} onChange={(minimumVolume24h) => patchFilters({ minimumVolume24h })} />
-      <select aria-label={t("terminalV3.changeFilter")} value={filters.change} onChange={(event) => patchFilters({ change: event.target.value as MarketFilters["change"] })} className="h-10 rounded-sm border border-base-line bg-base-panel px-2 text-[11px]"><option value="all">{t("terminalV3.filter.all")}</option><option value="gainers">{t("terminalV3.filter.gainers")}</option><option value="losers">{t("terminalV3.filter.losers")}</option></select>
-      <select aria-label={t("terminalV3.filter.dex")} value={filters.dex ?? ""} onChange={(event) => patchFilters({ dex: event.target.value })} className="h-10 rounded-sm border border-base-line bg-base-panel px-2 text-[11px]"><option value="">{t("terminalV3.filter.allDexes")}</option>{dexOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <select aria-label={t("terminalV3.filter.quote")} value={filters.quoteTokenAddress ?? ""} onChange={(event) => patchFilters({ quoteTokenAddress: event.target.value })} className="h-10 rounded-sm border border-base-line bg-base-panel px-2 text-[11px]"><option value="">{t("terminalV3.filter.allQuotes")}</option>{quoteOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <select aria-label={t("terminalV3.filter.category")} value={filters.category ?? "all"} onChange={(event) => patchFilters({ category: event.target.value as MarketFilters["category"] })} className="h-10 rounded-sm border border-base-line bg-base-panel px-2 text-[11px]"><option value="all">{t("terminalV3.filter.category.all")}</option>{(["new", "moving", "volume", "liquidity"] as const).map((category) => <option key={category} value={category}>{t(`terminalV3.filter.category.${category}`)}</option>)}</select>
-      <button type="button" onClick={() => setPreferences((current) => ({ ...current, filters: DEFAULT_MARKET_FILTERS, signalTypes: [] }))} className="inline-flex min-h-10 items-center justify-center gap-1 rounded-sm border border-base-line bg-base-panel px-2 text-[10px] text-base-muted hover:text-base-text"><RotateCcw size={12} />{t("market.advanced.reset")}</button>
-    </div>
-    {activeFilters.length ? <div className="flex flex-wrap gap-1 border-b border-base-line/60 px-3 py-2" data-testid="active-filter-chips"><Filter size={12} className="text-base-mint" />{activeFilters.map((filter) => <span key={filter} className="rounded-full bg-base-mint/10 px-2 py-0.5 text-[9px] text-base-mint">{filter}</span>)}</div> : null}
-    <div className="hidden max-h-[620px] overflow-auto lg:block">
-      <table className={cx("w-full border-collapse text-left", matrixView === "pools" ? "min-w-[1520px]" : "min-w-[1180px]")}>
-        <thead className="sticky top-0 z-10 bg-base-elevated text-[9px] uppercase tracking-[0.08em] text-base-muted"><tr><th className="px-2 py-2">{t("market.market")}</th><th className="px-2 py-2">{t("terminalV3.dex")}</th><th className="px-2 py-2">{t("terminalV3.dataProvider")}</th>{matrixView === "pools" ? <><th className="px-2 py-2">{t("terminalV3.poolAddress")}</th><th className="px-2 py-2">{t("terminalV3.quoteToken")}</th><th className="px-2 py-2">{t("terminalV3.orientation")}</th></> : null}{preferences.columns.map((column) => <th key={column} className="px-2 py-2 text-right"><SortButton column={column} filters={filters} patchFilters={patchFilters} /></th>)}<th className="px-2 py-2 text-right">{t("terminalV3.actions")}</th></tr></thead>
-        <tbody>{rows.slice(0, visibleLimit).map((pair) => <MatrixRow key={`${matrixView}:${pair.id}`} pair={pair} opportunity={matrixView === "tokens" ? snapshot.opportunities.find((item) => item.id === pair.opportunityId) : undefined} matrixView={matrixView} columns={preferences.columns} density={preferences.density} selected={matrixView === "tokens" ? pair.opportunityId === selectedPair.opportunityId : pair.id === selectedPair.id} onSelect={onSelect} onTrade={onTrade} onInspectPools={setOpenOpportunityId} isPinned={isPairPinned(pair)} onTogglePin={onTogglePin} locale={locale} formatCompactCurrency={formatCompactCurrency} formatPercent={formatPercent} />)}</tbody>
-      </table>
-    </div>
-    <div className="divide-y divide-base-line/60 lg:hidden">{rows.slice(0, Math.min(visibleLimit, 60)).map((pair) => <MobileMarketCard key={`${matrixView}:${pair.id}`} pair={pair} opportunity={matrixView === "tokens" ? snapshot.opportunities.find((item) => item.id === pair.opportunityId) : undefined} selected={matrixView === "tokens" ? pair.opportunityId === selectedPair.opportunityId : pair.id === selectedPair.id} onSelect={onSelect} onTrade={onTrade} onInspectPools={setOpenOpportunityId} isPinned={isPairPinned(pair)} onTogglePin={onTogglePin} />)}</div>
-    {rows.length > visibleLimit ? <div className="border-t border-base-line/60 p-3 text-center"><button type="button" onClick={() => setVisibleLimit((current) => Math.min(rows.length, current + 80))} className="min-h-10 rounded-sm bg-base-elevated px-4 text-[10px] font-semibold text-base-muted hover:text-base-text">{t("terminalV3.loadMore", { count: Math.min(80, rows.length - visibleLimit) })}</button></div> : null}
-    {rows.length === 0 ? <div className="p-8 text-center text-[11px] text-base-muted"><p className="font-semibold text-base-text">{t("market.noMatches")}</p><p className="mt-1">{t("market.noMatchesBody")}</p></div> : null}
-    {openOpportunity ? <PoolDrawer opportunity={openOpportunity} pairs={snapshot.allPairs.filter((pair) => openOpportunity.poolMarketIds.includes(pair.id))} onClose={() => setOpenOpportunityId(undefined)} onSelect={onSelect} onTrade={onTrade} /> : null}
+    {activeFilters.length ? <div className="flex flex-wrap items-center gap-1 border-b border-base-line/60 px-3 py-1.5" data-testid="active-filter-chips"><Filter size={11} className="text-base-mint" />{activeFilters.map((label) => <span key={label} className="rounded-full bg-base-mint/10 px-2 py-0.5 text-[8px] text-base-mint">{label}</span>)}<button type="button" onClick={() => setPreferences((current) => ({ ...current, filters: DEFAULT_MARKET_FILTERS, signalTypes: [] }))} className="ml-auto min-h-8 px-2 text-[8px] text-base-muted">{t("market.clearFilters")}</button></div> : null}
+    <div className="hidden max-h-[610px] overflow-auto md:block"><table className="w-full min-w-[1040px] border-collapse text-left" data-testid="market-board-table"><thead className="sticky top-0 z-10 bg-base-elevated text-[8px] uppercase tracking-[0.08em] text-base-muted"><tr>
+      {([ [t("market.market"), "pair", false], [t("terminalV3.column.price"), "price", true], ["5m", "change5m", true], ["1h", "change1h", true], [t("terminalV3.column.volume24h"), "volume24h", true], [t("terminalV3.column.liquidity"), "liquidity", true], [t("terminalV3.column.age"), "age", true] ] as const).map(([label, sort, alignRight]) => <BoardHead key={sort} label={label} sort={sort} alignRight={alignRight} filters={preferences.filters} onSort={(sortBy, sortDirection) => setPreferences((current) => ({ ...current, filters: { ...current.filters, sortBy, sortDirection } }))} />)}
+      <th className="px-2 py-2 text-right">{t("marketSignal.legend")}</th>{preferences.columns.map((column) => <th key={column} className="px-2 py-2 text-right">{columnLabel(column, t)}</th>)}<th className="px-2 py-2 text-right">{t("terminalV3.actions")}</th>
+    </tr></thead><tbody>{rows.slice(0, visibleLimit).map((pair) => <BoardRow key={pair.opportunityId ?? pair.id} pair={pair} opportunity={snapshot.opportunities.find((item) => item.id === pair.opportunityId)} columns={preferences.columns} selected={pair.opportunityId === selectedPair.opportunityId} onSelect={onSelect} isPinned={isPairPinned(pair)} onTogglePin={onTogglePin} locale={locale} formatCompactCurrency={formatCompactCurrency} formatPercent={formatPercent} />)}</tbody></table></div>
+    <div className="divide-y divide-base-line/60 md:hidden">{rows.slice(0, Math.min(visibleLimit, 60)).map((pair) => <MobileMarketCard key={pair.opportunityId ?? pair.id} pair={pair} opportunity={snapshot.opportunities.find((item) => item.id === pair.opportunityId)} selected={pair.opportunityId === selectedPair.opportunityId} onSelect={onSelect} isPinned={isPairPinned(pair)} onTogglePin={onTogglePin} />)}</div>
+    {rows.length > visibleLimit ? <div className="border-t border-base-line/60 p-3 text-center"><button type="button" onClick={() => setVisibleLimit((current) => Math.min(rows.length, current + 80))} className="min-h-10 rounded-sm bg-base-elevated px-4 text-[9px] text-base-muted">{t("terminalV3.loadMore", { count: Math.min(80, rows.length - visibleLimit) })}</button></div> : null}
+    {rows.length === 0 ? <div className="p-8 text-center text-[10px] text-base-muted"><p className="font-semibold text-base-text">{t("market.noMatches")}</p><p className="mt-1">{t("market.noMatchesBody")}</p></div> : null}
+    {(overlay.active.type === "filters" || overlay.active.type === "columns") ? <BoardSettingsSheet mode={overlay.active.type} draft={draft} setDraft={setDraft} resultCount={previewResultCount(source, snapshot, draft, signalSnapshot)} onClear={() => setDraft((current) => ({ ...current, filters: DEFAULT_MARKET_FILTERS, signalTypes: [] }))} onCancel={overlay.close} onApply={() => { setPreferences(draft); overlay.close(); }} /> : null}
+    {openOpportunity ? <PoolDrawer opportunity={openOpportunity} pairs={snapshot.allPairs.filter((pair) => openOpportunity.poolMarketIds.includes(pair.id))} onClose={overlay.close} onSelect={onSelect} onTrade={onTrade} /> : null}
   </section>;
 }
 
-function MatrixRow({ pair, opportunity, matrixView, columns, density, selected, onSelect, onTrade, onInspectPools, isPinned, onTogglePin, locale, formatCompactCurrency, formatPercent }: {
-  pair: BasePair; opportunity?: TokenOpportunity; matrixView: "tokens" | "pools"; columns: MatrixColumn[]; density: MatrixPreferences["density"]; selected: boolean; onSelect: (id: string) => void; onTrade: (pair: BasePair, side: "buy" | "sell") => void; onInspectPools: (id: string) => void; isPinned: boolean; onTogglePin: (pair: BasePair) => void; locale: "tr" | "en"; formatCompactCurrency: (value: number) => string; formatPercent: (value: number) => string;
-}) {
-  const { t } = useI18n();
-  const model = getNormalizedMarketModel(pair);
-  return <tr {...getMarketInvariantAttributes(pair)} className={cx("border-t border-base-line/50 hover:bg-base-mint/5", selected && "bg-base-mint/10")} data-testid={`matrix-row-${pair.id}`} data-opportunity-id={opportunity?.id} data-focus-token-address={opportunity?.focusTokenAddress} data-pool-count={opportunity?.poolCount}>
-    <td className="p-0"><div className="flex min-w-[220px] items-center"><button type="button" onClick={() => onSelect(pair.id)} className={cx("flex min-w-0 flex-1 items-center gap-2 px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-base-mint/50", density === "compact" ? "min-h-11" : "min-h-14")}><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity?.focusTokenAddress ?? pair.baseTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity?.focusTokenName ?? pair.project} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" /><span className="min-w-0"><span className="block truncate font-mono text-[11px] font-semibold">{opportunity?.focusTokenSymbol ?? pair.pair}</span><span className="block truncate text-[9px] text-base-muted">{opportunity ? `${opportunity.focusTokenName} · ${poolCountLabel(opportunity.poolCount, t)}` : `${pair.project} · ${shortAddress(pair.pairAddress)}`}</span></span></button><MarketSignalBadges opportunity={opportunity} pair={pair} scope={matrixView === "pools" ? "pool" : "opportunity"} maximumMarketBadges={1} className="pr-1" /></div></td>
-    <td className="px-2 text-[9px] text-base-muted">{pair.dexName ?? pair.dex}{pair.isPrimaryMarket ? <span className="ml-1 rounded-full bg-base-mint/10 px-1.5 py-0.5 text-[8px] text-base-mint">{t("terminalV3.primary")}</span> : null}</td>
-    <td className="px-2 font-mono text-[9px] text-base-muted">{opportunity ? opportunity.sourceProviders.join(" + ") : (pair.dataProviders ?? [pair.dataSource]).filter(Boolean).join(" + ") || t("common.unknown")}</td>
-    {matrixView === "pools" ? <><td className="px-2 font-mono text-[9px] text-base-muted" title={pair.pairAddress}>{shortAddress(pair.pairAddress)}</td><td className="px-2 text-[9px] text-base-muted">{pair.quoteToken}</td><td className="px-2 text-[9px] text-base-muted">{pair.poolOrientation ?? "pair"}</td></> : null}
-    {columns.map((column) => <td key={column} className="px-2 text-right font-mono text-[10px] text-base-text">{column === "tradeStatus" ? <span className="flex justify-end"><AssetTradeabilityBadges pair={pair} opportunity={opportunity} /></span> : formatMatrixValue(column, pair, model, locale, formatCompactCurrency, formatPercent, t)}</td>)}
-    <td className="px-2"><span className="flex justify-end gap-1"><button type="button" onClick={() => onTogglePin(pair)} className={cx("grid h-8 w-8 place-items-center rounded-sm bg-base-elevated text-base-muted", isPinned && "text-base-mint")} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })}><Star size={12} fill={isPinned ? "currentColor" : "none"} /></button><button type="button" onClick={() => opportunity ? onInspectPools(opportunity.id) : onSelect(pair.id)} className="grid h-8 w-8 place-items-center rounded-sm bg-base-elevated text-base-muted" aria-label={t("terminalV3.inspect", { pair: pair.pair })}>{opportunity ? <Layers3 size={12} /> : <Eye size={12} />}</button><button type="button" onClick={() => onTrade(pair, "buy")} className="h-8 rounded-sm bg-base-mint/10 px-2 text-[9px] font-bold text-base-mint">{t("trade.buy")}</button><button type="button" onClick={() => onTrade(pair, "sell")} className="h-8 rounded-sm bg-base-rose/10 px-2 text-[9px] font-bold text-base-rose">{t("trade.sell")}</button></span></td>
+function BoardRow({ pair, opportunity, columns, selected, onSelect, isPinned, onTogglePin, locale, formatCompactCurrency, formatPercent }: { pair: BasePair; opportunity?: TokenOpportunity; columns: AdvancedColumn[]; selected: boolean; onSelect: (id: string) => void; isPinned: boolean; onTogglePin: (pair: BasePair) => void; locale: "tr" | "en"; formatCompactCurrency: (value: number) => string; formatPercent: (value: number) => string }) {
+  const { t } = useI18n(); const model = getNormalizedMarketModel(pair);
+  return <tr {...getMarketInvariantAttributes(pair)} className={cx("h-11 border-t border-base-line/50 hover:bg-base-mint/5", selected && "bg-base-mint/10")} data-testid={`matrix-row-${pair.id}`} data-opportunity-id={opportunity?.id} data-focus-token-address={opportunity?.focusTokenAddress} data-pool-count={opportunity?.poolCount}>
+    <td className="p-0"><div className="flex min-w-[190px] items-center"><button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-base-mint/50"><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity?.focusTokenAddress ?? pair.baseTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity?.focusTokenName ?? pair.project} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" /><span className="min-w-0"><strong className="block truncate font-mono text-[10px]">{opportunity?.focusTokenSymbol ?? pair.pair}</strong><small className="block truncate text-[8px] text-base-muted">{pair.dexName ?? pair.dex} · {opportunity ? poolCountLabel(opportunity.poolCount, t) : shortAddress(pair.pairAddress)}</small></span></button><AssetTradeabilityBadges pair={pair} opportunity={opportunity} presentation="rowCritical" /></div></td>
+    <MetricCell value={displayPrice(pair)} /><ChangeCell value={model.change5m} format={formatPercent} /><ChangeCell value={model.change1h} format={formatPercent} /><MetricCell value={model.volume24hUsd === undefined ? "—" : formatCompactCurrency(model.volume24hUsd)} /><MetricCell value={model.liquidityUsd === undefined ? "—" : formatCompactCurrency(model.liquidityUsd)} /><MetricCell value={model.ageMinutes === undefined ? "—" : localizeAgeLabel(pair.age, locale)} />
+    <td className="px-2"><span className="flex justify-end"><MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={2} presentation="rowPrimary" /></span></td>{columns.map((column) => <td key={column} className="px-2 text-right font-mono text-[9px] text-base-muted">{formatAdvancedColumn(column, pair, opportunity, model, t, formatCompactCurrency)}</td>)}
+    <td className="px-2"><span className="flex justify-end gap-1"><button type="button" onClick={() => onTogglePin(pair)} className={cx("grid h-8 w-8 place-items-center rounded-sm bg-base-elevated text-base-muted", isPinned && "text-base-mint")} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })}><Star size={12} fill={isPinned ? "currentColor" : "none"} /></button><button type="button" onClick={() => onSelect(pair.id)} className="inline-flex h-8 items-center gap-1 rounded-sm bg-base-mint/10 px-2 text-[9px] font-bold text-base-mint" aria-label={t("terminalV3.inspect", { pair: pair.pair })}><Eye size={12} />{t("details.overview")}</button></span></td>
   </tr>;
 }
 
-function MobileMarketCard({ pair, opportunity, selected, onSelect, onTrade, onInspectPools, isPinned, onTogglePin }: { pair: BasePair; opportunity?: TokenOpportunity; selected: boolean; onSelect: (id: string) => void; onTrade: (pair: BasePair, side: "buy" | "sell") => void; onInspectPools: (id: string) => void; isPinned: boolean; onTogglePin: (pair: BasePair) => void }) {
-  const { t, formatCompactCurrency, formatPercent } = useI18n();
-  const model = getNormalizedMarketModel(pair);
-  return <article className={cx("p-3", selected && "bg-base-mint/10")} data-testid={`market-card-${pair.id}`} data-opportunity-id={opportunity?.id} data-focus-token-address={opportunity?.focusTokenAddress} data-pool-count={opportunity?.poolCount}><div className="flex items-center gap-2"><button type="button" onClick={() => onSelect(pair.id)} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity?.focusTokenAddress ?? pair.baseTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity?.focusTokenName ?? pair.project} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="md" /><span className="min-w-0"><span className="block truncate font-mono text-[12px] font-semibold">{opportunity?.focusTokenSymbol ?? pair.pair}</span><span className="block truncate text-[10px] text-base-muted">{pair.dexName ?? pair.dex} · {opportunity ? poolCountLabel(opportunity.poolCount, t) : shortAddress(pair.pairAddress)} · {displayPrice(pair)}</span></span></button><button type="button" onClick={() => onTogglePin(pair)} className={cx("grid h-11 w-11 place-items-center rounded-sm bg-base-elevated text-base-muted", isPinned && "text-base-mint")}><Star size={14} fill={isPinned ? "currentColor" : "none"} /></button>{opportunity ? <button type="button" onClick={() => onInspectPools(opportunity.id)} className="grid h-11 w-11 place-items-center rounded-sm bg-base-elevated text-base-muted" aria-label={t("terminalV3.inspect", { pair: opportunity.focusTokenSymbol })}><Layers3 size={14} /></button> : null}</div><div className="mt-1 flex flex-wrap justify-end gap-1"><MarketSignalBadges opportunity={opportunity} pair={pair} scope={opportunity ? "opportunity" : "pool"} /><AssetTradeabilityBadges opportunity={opportunity} pair={pair} compact={false} /></div><div className="mt-2 grid grid-cols-3 gap-1 text-center font-mono text-[9px]"><span className="rounded-sm bg-base-elevated p-2"><b className={model.change24h === undefined ? "text-base-muted" : model.change24h >= 0 ? "text-base-mint" : "text-base-rose"}>{model.change24h === undefined ? "N/A" : formatPercent(model.change24h)}</b><small className="mt-1 block text-base-muted">24h</small></span><span className="rounded-sm bg-base-elevated p-2"><b>{model.volume24hUsd === undefined ? "N/A" : formatCompactCurrency(model.volume24hUsd)}</b><small className="mt-1 block text-base-muted">{t("market.volume24h")}</small></span><span className="rounded-sm bg-base-elevated p-2"><b>{model.liquidityUsd === undefined ? "N/A" : formatCompactCurrency(model.liquidityUsd)}</b><small className="mt-1 block text-base-muted">{t("market.liquidity")}</small></span></div><div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={() => onTrade(pair, "buy")} className="min-h-11 rounded-sm bg-base-mint/10 text-[11px] font-bold text-base-mint">{t("trade.buy")}</button><button type="button" onClick={() => onTrade(pair, "sell")} className="min-h-11 rounded-sm bg-base-rose/10 text-[11px] font-bold text-base-rose">{t("trade.sell")}</button></div></article>;
+function MobileMarketCard({ pair, opportunity, selected, onSelect, isPinned, onTogglePin }: { pair: BasePair; opportunity?: TokenOpportunity; selected: boolean; onSelect: (id: string) => void; isPinned: boolean; onTogglePin: (pair: BasePair) => void }) {
+  const { t, locale, formatCompactCurrency, formatPercent } = useI18n(); const model = getNormalizedMarketModel(pair);
+  return <article className={cx("p-3", selected && "bg-base-mint/10")} data-testid={`market-card-${pair.id}`} data-opportunity-id={opportunity?.id}><div className="flex min-w-0 items-center gap-2"><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity?.focusTokenAddress ?? pair.baseTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity?.focusTokenName ?? pair.project} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="md" /><span className="min-w-0 flex-1"><strong className="block truncate font-mono text-[11px]">{opportunity?.focusTokenSymbol ?? pair.pair}</strong><small className="block truncate text-[9px] text-base-muted">{pair.dexName ?? pair.dex} · {displayPrice(pair)} · {model.ageMinutes === undefined ? "—" : localizeAgeLabel(pair.age, locale)}</small></span><AssetTradeabilityBadges pair={pair} opportunity={opportunity} presentation="rowCritical" /><button type="button" onClick={() => onTogglePin(pair)} className={cx("grid h-11 w-11 place-items-center rounded-sm bg-base-elevated text-base-muted", isPinned && "text-base-mint")} aria-label={t(isPinned ? "a11y.unpin" : "a11y.pin", { pair: pair.pair })}><Star size={14} fill={isPinned ? "currentColor" : "none"} /></button></div><div className="mt-2 grid grid-cols-3 gap-1 font-mono text-[9px]"><MiniFact label="1h" value={model.change1h === undefined ? "—" : formatPercent(model.change1h)} tone={(model.change1h ?? 0) >= 0 ? "mint" : "rose"} /><MiniFact label={t("terminalV3.column.volume24h")} value={model.volume24hUsd === undefined ? "—" : formatCompactCurrency(model.volume24hUsd)} /><MiniFact label={t("terminalV3.column.liquidity")} value={model.liquidityUsd === undefined ? "—" : formatCompactCurrency(model.liquidityUsd)} /></div><div className="mt-2 flex min-h-11 items-center justify-between gap-2"><MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={2} presentation="rowPrimary" /><button type="button" onClick={() => onSelect(pair.id)} className="min-h-11 rounded-sm bg-base-mint/10 px-4 text-[10px] font-bold text-base-mint">{t("details.overview")}</button></div></article>;
+}
+
+function BoardSettingsSheet({ mode, draft, setDraft, resultCount, onClear, onCancel, onApply }: { mode: "filters" | "columns"; draft: BoardPreferences; setDraft: (value: BoardPreferences | ((current: BoardPreferences) => BoardPreferences)) => void; resultCount: number; onClear: () => void; onCancel: () => void; onApply: () => void }) {
+  const { t } = useI18n(); const patchFilters = (patch: Partial<MarketFilters>) => setDraft((current) => ({ ...current, filters: { ...current.filters, ...patch } }));
+  return <div className="fixed inset-0 z-[85] flex items-end justify-end bg-black/70 lg:bg-black/25" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><aside role="dialog" aria-modal="true" aria-label={mode === "filters" ? t("market.filters") : t("terminalV3.columns")} className="max-h-[88dvh] w-full overflow-y-auto rounded-t-2xl border border-base-line bg-base-panel p-4 shadow-2xl sm:max-w-md sm:rounded-l-2xl sm:rounded-tr-none" data-testid={`market-${mode}-sheet`} data-overlay-root={mode}><header className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.matrixEyebrow")}</p><h2 className="text-base font-semibold">{mode === "filters" ? t("market.filters") : t("terminalV3.columns")}</h2></div><button type="button" onClick={onCancel} className="grid h-11 w-11 place-items-center rounded-full bg-base-elevated" aria-label={t("trade.cancel")}><X size={16} /></button></header>
+    {mode === "filters" ? <div className="mt-4 grid gap-3"><label className="text-[9px] text-base-muted">{t("header.search")}<input value={draft.filters.query} onChange={(event) => patchFilters({ query: event.target.value })} className="mt-1 h-11 w-full rounded-sm border border-base-line bg-base-elevated px-3 text-[11px] outline-none focus:border-base-mint" /></label><div className="grid grid-cols-2 gap-2"><NumberBox label={t("market.advanced.minLiquidity")} value={draft.filters.minimumLiquidity} onChange={(minimumLiquidity) => patchFilters({ minimumLiquidity })} /><NumberBox label={t("market.advanced.minVolume")} value={draft.filters.minimumVolume24h} onChange={(minimumVolume24h) => patchFilters({ minimumVolume24h })} /></div><label className="text-[9px] text-base-muted">{t("terminalV3.changeFilter")}<select value={draft.filters.change} onChange={(event) => patchFilters({ change: event.target.value as MarketFilters["change"] })} className="mt-1 h-11 w-full rounded-sm border border-base-line bg-base-elevated px-3 text-[11px]"><option value="all">{t("terminalV3.filter.all")}</option><option value="gainers">{t("terminalV3.filter.gainers")}</option><option value="losers">{t("terminalV3.filter.losers")}</option></select></label><div><p className="text-[9px] text-base-muted">{t("marketSignal.filterTitle")}</p><div className="mt-1 grid grid-cols-2 gap-1">{SIGNAL_FILTER_TYPES.map((type) => { const active = draft.signalTypes.includes(type); return <button key={type} type="button" aria-pressed={active} onClick={() => setDraft((current) => ({ ...current, signalTypes: active ? current.signalTypes.filter((item) => item !== type) : [...current.signalTypes, type] }))} className={cx("min-h-10 rounded-sm border px-2 text-left text-[8px]", active ? "border-base-mint/50 bg-base-mint/10 text-base-mint" : "border-base-line bg-base-elevated text-base-muted")} data-signal-filter={type}>{t(`marketSignal.${type}`)}</button>; })}</div></div></div> : <div className="mt-4 grid gap-1">{ADVANCED_COLUMNS.map((column) => { const active = draft.columns.includes(column); return <label key={column} className="flex min-h-11 items-center gap-3 rounded-sm bg-base-elevated px-3 text-[10px] text-base-muted"><input type="checkbox" checked={active} onChange={() => setDraft((current) => ({ ...current, columns: active ? current.columns.filter((item) => item !== column) : [...current.columns, column] }))} />{columnLabel(column, t)}</label>; })}<p className="mt-2 text-[9px] leading-4 text-base-muted">{t("settings.body")}</p></div>}
+    <footer className="sticky bottom-0 mt-4 grid grid-cols-[auto_1fr_1fr] gap-2 border-t border-base-line bg-base-panel pt-3"><button type="button" onClick={onClear} className="grid min-h-11 place-items-center rounded-sm bg-base-elevated px-3 text-base-muted" aria-label={t("market.advanced.reset")}><RotateCcw size={14} /></button><button type="button" onClick={onCancel} className="min-h-11 rounded-sm bg-base-elevated text-[10px] text-base-muted">{t("trade.cancel")}</button><button type="button" onClick={onApply} className="min-h-11 rounded-sm bg-base-mint text-[10px] font-bold text-[#031411]">{t("terminalV3.applyUpdates")} · {resultCount}</button></footer></aside></div>;
 }
 
 export function PinnedMarketGrid({ pairs, onSelect, onUnpin }: { pairs: BasePair[]; onSelect: (id: string) => void; onUnpin: (pair: BasePair) => void }) {
   const { t, formatPercent } = useI18n();
-  return <section className="pulse-surface overflow-hidden rounded-xl" data-testid="pinned-multichart"><header className="flex items-center justify-between border-b border-base-line/60 px-3 py-2"><div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.multichart")}</p><h2 className="text-[14px] font-semibold">{t("terminalV3.pinnedMarkets")}</h2></div><span className="font-mono text-[10px] text-base-muted">{pairs.length}/4</span></header>{pairs.length ? <div className="grid gap-px bg-base-line/60 sm:grid-cols-2">{pairs.slice(0, 4).map((pair) => { const candles = pair.chartSource === "geckoterminal" ? pair.chartCandles ?? [] : []; const path = sparkPath(candles.map((candle) => candle.close)); return <article key={pair.id} className="bg-base-panel p-3"><div className="flex items-center justify-between gap-2"><button type="button" onClick={() => onSelect(pair.id)} className="font-mono text-[11px] font-semibold hover:text-base-mint">{pair.pair}</button><span className="flex items-center"><MarketSignalBadges pair={pair} maximumMarketBadges={1} /><AssetTradeabilityBadges pair={pair} /><button type="button" onClick={() => onUnpin(pair)} className="min-h-8 px-2 text-[9px] text-base-muted">{t("terminalV3.unpin")}</button></span></div><div className="mt-1 flex items-center justify-between text-[9px] text-base-muted"><span>{pair.dexName ?? pair.dex}</span><span className={pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"}>{formatPercent(pair.change24h)}</span></div>{path ? <svg viewBox="0 0 280 90" className="mt-2 h-24 w-full" role="img" aria-label={t("terminalV3.miniChart", { pair: pair.pair })}><path d={path} fill="none" stroke="rgb(var(--color-mint))" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-2 grid h-24 place-items-center rounded-sm bg-base-elevated text-center text-[10px] leading-5 text-base-muted">{t("chart.unavailableBody")}</div>}</article>; })}</div> : <div className="p-6 text-center text-[11px] leading-5 text-base-muted">{t("terminalV3.pinEmpty")}</div>}</section>;
+  return <section className="pulse-surface overflow-hidden rounded-lg" data-testid="pinned-multichart"><header className="flex items-center justify-between border-b border-base-line/60 px-3 py-2"><div><p className="text-[8px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.multichart")}</p><h2 className="text-[13px] font-semibold">{t("terminalV3.pinnedMarkets")}</h2></div><span className="font-mono text-[9px] text-base-muted">{pairs.length}/4</span></header>{pairs.length ? <div className="grid gap-px bg-base-line/60 sm:grid-cols-2">{pairs.slice(0, 4).map((pair) => { const path = sparkPath((pair.chartSource === "geckoterminal" ? pair.chartCandles ?? [] : []).map((candle) => candle.close)); return <article key={pair.id} className="bg-base-panel p-3"><div className="flex items-center justify-between gap-2"><button type="button" onClick={() => onSelect(pair.id)} className="font-mono text-[10px] font-semibold hover:text-base-mint">{pair.pair}</button><span className="flex items-center"><MarketSignalBadges pair={pair} maximumMarketBadges={1} presentation="rowPrimary" /><button type="button" onClick={() => onUnpin(pair)} className="min-h-8 px-2 text-[8px] text-base-muted">{t("terminalV3.unpin")}</button></span></div><div className="mt-1 flex items-center justify-between text-[8px] text-base-muted"><span>{pair.dexName ?? pair.dex}</span><span className={pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"}>{formatPercent(pair.change24h)}</span></div>{path ? <svg viewBox="0 0 280 90" className="mt-2 h-24 w-full" role="img" aria-label={t("terminalV3.miniChart", { pair: pair.pair })}><path d={path} fill="none" stroke="rgb(var(--color-mint))" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-2 grid h-24 place-items-center rounded-sm bg-base-elevated text-center text-[9px] text-base-muted">{t("chart.unavailableBody")}</div>}</article>; })}</div> : <div className="p-6 text-center text-[10px] text-base-muted">{t("terminalV3.pinEmpty")}</div>}</section>;
 }
 
-function PoolDrawer({ opportunity, pairs, onClose, onSelect, onTrade }: { opportunity: TokenOpportunity; pairs: BasePair[]; onClose: () => void; onSelect: (id: string) => void; onTrade: (pair: BasePair, side: "buy" | "sell") => void }) {
+export function PoolDrawer({ opportunity, pairs, onClose, onSelect, onTrade }: { opportunity: TokenOpportunity; pairs: BasePair[]; onClose: () => void; onSelect: (id: string) => void; onTrade: (pair: BasePair, side: "buy" | "sell") => void }) {
   const { t, locale, formatCompactCurrency } = useI18n();
-  return <div className="fixed inset-0 z-[95] flex items-end justify-end bg-black/70" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside role="dialog" aria-modal="true" aria-label={t("terminalV3.poolDrawer", { token: opportunity.focusTokenSymbol })} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border border-base-line bg-base-panel p-4 shadow-2xl sm:max-w-xl sm:rounded-l-2xl sm:rounded-tr-none" data-testid="pool-drawer"><header className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.executionPools")}</p><h2 className="mt-1 text-lg font-semibold">{opportunity.focusTokenSymbol} · {poolCountLabel(opportunity.poolCount, t)}</h2><p className="mt-1 break-all font-mono text-[9px] text-base-muted">{opportunity.focusTokenAddress}</p><div className="mt-1 flex flex-wrap gap-1"><MarketSignalBadges opportunity={opportunity} /><AssetTradeabilityBadges opportunity={opportunity} pair={pairs[0]} compact={false} /></div></div><button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full bg-base-elevated text-base-muted" aria-label={t("terminalV3.closePools")}><X size={16} /></button></header><div className="mt-4 space-y-2">{pairs.map((pair) => { const model = getNormalizedMarketModel(pair); return <article key={pair.id} className="rounded-lg border border-base-line bg-base-elevated/55 p-3" data-testid={`pool-detail-${pair.id}`}><div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[11px] font-semibold">{pair.pair}</p><p className="mt-1 text-[9px] text-base-muted">{pair.dexName ?? pair.dex} · {(pair.dataProviders ?? [pair.dataSource]).filter(Boolean).join(" + ")} {pair.isPrimaryMarket ? `· ${t("terminalV3.primary")}` : ""}</p><div className="flex flex-wrap gap-1"><MarketSignalBadges pair={pair} scope="pool" maximumMarketBadges={1} /><AssetTradeabilityBadges pair={pair} /></div></div><span className="rounded-full bg-base-panel px-2 py-1 text-[8px] uppercase text-base-muted">{pair.poolOrientation ?? "pair"}</span></div><dl className="mt-3 grid grid-cols-2 gap-2 text-[9px] sm:grid-cols-3"><PoolFact label={t("terminalV3.dex")} value={pair.dexName ?? pair.dex} /><PoolFact label={t("terminalV3.dataProvider")} value={(pair.dataProviders ?? [pair.dataSource]).filter(Boolean).join(" + ") || t("common.unknown")} /><PoolFact label={t("terminalV3.metric.price")} value={displayPrice(pair)} /><PoolFact label={t("market.age")} value={model.ageMinutes === undefined ? "N/A" : localizeAgeLabel(pair.age, locale)} /><PoolFact label={t("market.liquidity")} value={model.liquidityUsd === undefined ? "N/A" : formatCompactCurrency(model.liquidityUsd)} /><PoolFact label={t("market.volume24h")} value={model.volume24hUsd === undefined ? "N/A" : formatCompactCurrency(model.volume24hUsd)} /><PoolFact label={t("terminalV3.quoteToken")} value={pair.quoteToken} /><PoolFact label={t("terminalV3.orientation")} value={pair.poolOrientation ?? "pair"} /><PoolFact label={t("terminalV3.primary")} value={pair.isPrimaryMarket ? t("terminalV3.primary") : "—"} /><PoolFact label={t("details.source")} value={pair.stale ? t("common.delayed") : t("terminalV3.fresh")} /><PoolFact label={t("terminalV3.poolAddress")} value={shortAddress(pair.pairAddress)} /></dl><p className="mt-2 break-all font-mono text-[8px] text-base-muted">{pair.pairAddress}</p><div className="mt-3 grid grid-cols-3 gap-2"><button type="button" onClick={() => { onSelect(pair.id); onClose(); }} className="min-h-9 rounded-sm bg-base-panel text-[9px] font-semibold text-base-muted">{t("terminalV3.inspect", { pair: pair.pair })}</button><button type="button" onClick={() => { onTrade(pair, "buy"); onClose(); }} className="min-h-9 rounded-sm bg-base-mint/10 text-[9px] font-bold text-base-mint">{t("trade.buy")}</button><button type="button" onClick={() => { onTrade(pair, "sell"); onClose(); }} className="min-h-9 rounded-sm bg-base-rose/10 text-[9px] font-bold text-base-rose">{t("trade.sell")}</button></div></article>; })}</div></aside></div>;
+  return <div className="fixed inset-0 z-[88] flex items-end justify-end bg-black/70 lg:bg-black/25" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside role="dialog" aria-modal="true" aria-label={t("terminalV3.poolDrawer", { token: opportunity.focusTokenSymbol })} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border border-base-line bg-base-panel p-4 shadow-2xl sm:max-w-xl sm:rounded-l-2xl sm:rounded-tr-none" data-testid="pool-drawer" data-overlay-root="pool_drawer"><header className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-base-mint">{t("terminalV3.executionPools")}</p><h2 className="mt-1 text-lg font-semibold">{opportunity.focusTokenSymbol} · {poolCountLabel(opportunity.poolCount, t)}</h2><p className="mt-1 break-all font-mono text-[8px] text-base-muted">{opportunity.focusTokenAddress}</p><div className="mt-1 flex flex-wrap gap-1"><MarketSignalBadges opportunity={opportunity} presentation="inspectorDetails" /><AssetTradeabilityBadges opportunity={opportunity} pair={pairs[0]} compact={false} presentation="inspectorDetails" /></div></div><button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full bg-base-elevated text-base-muted" aria-label={t("terminalV3.closePools")}><X size={16} /></button></header><div className="mt-4 space-y-2">{pairs.map((pair) => { const model = getNormalizedMarketModel(pair); return <article key={pair.id} className="rounded-lg border border-base-line bg-base-elevated/55 p-3" data-testid={`pool-detail-${pair.id}`}><div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[10px] font-semibold">{pair.pair}</p><p className="mt-1 text-[8px] text-base-muted">{pair.dexName ?? pair.dex} · {(pair.dataProviders ?? [pair.dataSource]).filter(Boolean).join(" + ")}</p></div><span className="rounded-full bg-base-panel px-2 py-1 text-[8px] uppercase text-base-muted">{pair.poolOrientation ?? "pair"}</span></div><dl className="mt-3 grid grid-cols-2 gap-2 text-[8px] sm:grid-cols-3"><PoolFact label={t("terminalV3.metric.price")} value={displayPrice(pair)} /><PoolFact label={t("market.age")} value={model.ageMinutes === undefined ? "—" : localizeAgeLabel(pair.age, locale)} /><PoolFact label={t("market.liquidity")} value={model.liquidityUsd === undefined ? "—" : formatCompactCurrency(model.liquidityUsd)} /><PoolFact label={t("market.volume24h")} value={model.volume24hUsd === undefined ? "—" : formatCompactCurrency(model.volume24hUsd)} /><PoolFact label={t("terminalV3.quoteToken")} value={pair.quoteToken} /><PoolFact label={t("terminalV3.poolAddress")} value={shortAddress(pair.pairAddress)} /></dl><div className="mt-3 grid grid-cols-3 gap-2"><button type="button" onClick={() => onSelect(pair.id)} className="min-h-11 rounded-sm bg-base-panel text-[9px] text-base-muted">{t("details.overview")}</button><button type="button" onClick={() => onTrade(pair, "buy")} className="min-h-11 rounded-sm bg-base-mint/10 text-[9px] font-bold text-base-mint">{t("trade.buy")}</button><button type="button" onClick={() => onTrade(pair, "sell")} className="min-h-11 rounded-sm bg-base-rose/10 text-[9px] font-bold text-base-rose">{t("trade.sell")}</button></div></article>; })}</div></aside></div>;
 }
 
-function PoolFact({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-sm bg-base-panel p-2"><dt className="uppercase tracking-[0.08em] text-base-muted">{label}</dt><dd className="mt-1 truncate font-mono text-base-text">{value}</dd></div>;
-}
+function BoardHead({ label, sort, filters, onSort, alignRight = false }: { label: string; sort: MarketSortKey; filters: MarketFilters; onSort: (sortBy: MarketSortKey, sortDirection: "asc" | "desc") => void; alignRight?: boolean }) { return <th className={cx("px-2 py-2", alignRight && "text-right")}><button type="button" onClick={() => onSort(sort, filters.sortBy === sort && filters.sortDirection === "desc" ? "asc" : "desc")} className="inline-flex items-center gap-1">{label}{filters.sortBy === sort ? (filters.sortDirection === "asc" ? "↑" : "↓") : null}</button></th>; }
+function MetricCell({ value }: { value: string }) { return <td className="px-2 text-right font-mono text-[9px] text-base-text">{value}</td>; }
+function ChangeCell({ value, format }: { value?: number; format: (value: number) => string }) { return <td className={cx("px-2 text-right font-mono text-[9px]", value === undefined ? "text-base-muted" : value >= 0 ? "text-base-mint" : "text-base-rose")}>{value === undefined ? "—" : format(value)}</td>; }
+function MiniFact({ label, value, tone }: { label: string; value: string; tone?: "mint" | "rose" }) { return <span className="rounded-sm bg-base-elevated p-2 text-center"><b className={tone === "mint" ? "text-base-mint" : tone === "rose" ? "text-base-rose" : "text-base-text"}>{value}</b><small className="mt-1 block truncate text-[8px] text-base-muted">{label}</small></span>; }
+function NumberBox({ label, value, onChange }: { label: string; value?: number; onChange: (value?: number) => void }) { return <label className="text-[9px] text-base-muted">{label}<input type="number" min="0" value={value ?? ""} onChange={(event) => { const parsed = Number(event.target.value); onChange(event.target.value !== "" && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined); }} className="mt-1 h-11 w-full rounded-sm border border-base-line bg-base-elevated px-2 font-mono text-[10px] outline-none focus:border-base-mint" /></label>; }
+function PoolFact({ label, value }: { label: string; value: string }) { return <div className="rounded-sm bg-base-panel p-2"><dt className="uppercase tracking-[0.08em] text-base-muted">{label}</dt><dd className="mt-1 truncate font-mono text-base-text">{value}</dd></div>; }
 
-function buildOpportunityMatrixPairs(snapshot: MarketTerminalSnapshot) {
-  const rows: BasePair[] = [];
-  for (const opportunity of snapshot.opportunities) {
-    if (opportunity.quality === "expired") continue;
-    const pair = getOpportunityPair(snapshot, opportunity);
-    if (!pair) continue;
-    rows.push({
-        ...pair,
-        pair: opportunity.focusTokenSymbol,
-        project: opportunity.focusTokenName,
-        baseTokenAddress: opportunity.focusTokenAddress,
-        tokenLogoUrl: opportunity.focusTokenLogoUrl ?? pair.tokenLogoUrl,
-        liquidityUsd: opportunity.aggregate.liquidityUsd,
-        volumes: opportunity.aggregate.volumes,
-        txns: opportunity.aggregate.transactions,
-        poolCount: opportunity.poolCount,
-        opportunityId: opportunity.id,
-        isPrimaryMarket: true
-      });
-  }
-  return rows;
-}
-
-function getOpportunityPair(snapshot: MarketTerminalSnapshot, opportunity: TokenOpportunity) {
-  const pair = snapshot.allPairs.find((item) => item.id === opportunity.primaryMarketId);
-  return pair ? orientPairToOpportunity(pair, opportunity) : undefined;
-}
-
-function opportunitySearchText(pair: BasePair, snapshot: MarketTerminalSnapshot) {
-  const opportunity = snapshot.opportunities.find((item) => item.id === pair.opportunityId);
-  const pools = opportunity ? snapshot.allPairs.filter((item) => opportunity.poolMarketIds.includes(item.id)) : [];
-  return [pair.pair, pair.project, pair.baseToken, pair.quoteToken, opportunity?.focusTokenAddress, ...pools.flatMap((pool) => [pool.pairAddress, pool.baseTokenAddress, pool.quoteTokenAddress, pool.dexName, pool.dex])]
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase("en-US");
-}
-
-function matchesMarketContext(pair: BasePair, snapshot: MarketTerminalSnapshot, filters: MarketFilters, matrixView: "tokens" | "pools") {
-  const opportunity = pair.opportunityId ? snapshot.opportunities.find((item) => item.id === pair.opportunityId) : undefined;
-  const pools = matrixView === "tokens" && opportunity
-    ? snapshot.allPairs.filter((item) => opportunity.poolMarketIds.includes(item.id))
-    : [pair];
-  if (filters.dex && !pools.some((pool) => [pool.dexId, pool.dexName, pool.dex].some((value) => value?.trim().toLocaleLowerCase("en-US") === filters.dex))) return false;
-  if (filters.quoteTokenAddress && !pools.some((pool) => pool.quoteTokenAddress?.trim().toLocaleLowerCase("en-US") === filters.quoteTokenAddress)) return false;
-  if (!filters.category || filters.category === "all") return true;
-  if (!opportunity) return false;
-  if (filters.category === "new") return opportunity.categoryEligibility.newlyCreated;
-  if (filters.category === "moving") return opportunity.categoryEligibility.moving;
-  if (filters.category === "liquidity") return opportunity.categoryEligibility.liquidity;
-  const current = opportunity.aggregate.volumes?.h1;
-  const previous = snapshot.comparison.opportunityVolume1h[opportunity.id];
-  return snapshot.comparison.status === "ready" && current !== undefined && previous !== undefined && previous > 0 && current / previous >= 1.8;
-}
-
-function SortButton({ column, filters, patchFilters }: { column: MatrixColumn; filters: MarketFilters; patchFilters: (patch: Partial<MarketFilters>) => void }) {
-  const { t } = useI18n();
-  if (column === "tradeStatus") return <span>{t("terminalV3.column.tradeStatus")}</span>;
-  const sortKey = column as MarketSortKey;
-  return <button type="button" onClick={() => patchFilters({ sortBy: sortKey, sortDirection: filters.sortBy === sortKey && filters.sortDirection === "desc" ? "asc" : "desc" })} className="inline-flex items-center gap-1">{t(`terminalV3.column.${column}`)}{filters.sortBy === sortKey ? (filters.sortDirection === "asc" ? "↑" : "↓") : null}</button>;
-}
-
-function NumberBox({ label, value, onChange }: { label: string; value?: number; onChange: (value?: number) => void }) { return <label className="relative"><span className="sr-only">{label}</span><input type="number" min="0" value={value ?? ""} onChange={(event) => { const parsed = Number(event.target.value); onChange(event.target.value !== "" && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined); }} placeholder={label} className="h-10 w-full rounded-sm border border-base-line bg-base-panel px-2 font-mono text-[10px] outline-none focus:border-base-mint" /></label>; }
-
-function formatMatrixValue(column: MatrixColumn, pair: BasePair, model: ReturnType<typeof getNormalizedMarketModel>, locale: "tr" | "en", currency: (value: number) => string, percent: (value: number) => string, t: (key: never, values?: never) => string) {
-  if (column === "age") return model.ageMinutes === undefined ? "N/A" : localizeAgeLabel(pair.age, locale);
-  if (column === "price") return displayPrice(pair);
-  if (column === "change5m") return model.change5m === undefined ? "N/A" : percent(model.change5m);
-  if (column === "change1h") return model.change1h === undefined ? "N/A" : percent(model.change1h);
-  if (column === "change24h") return model.change24h === undefined ? "N/A" : percent(model.change24h);
-  if (column === "volume5m") return model.volume5mUsd === undefined ? "N/A" : currency(model.volume5mUsd);
-  if (column === "volume1h") return model.volume1hUsd === undefined ? "N/A" : currency(model.volume1hUsd);
-  if (column === "volume24h") return model.volume24hUsd === undefined ? "N/A" : currency(model.volume24hUsd);
-  if (column === "liquidity") return model.liquidityUsd === undefined ? "N/A" : currency(model.liquidityUsd);
-  if (column === "fdv") return pair.fdv === undefined ? "N/A" : currency(pair.fdv);
-  if (column === "marketCap") return pair.marketCap === undefined ? "N/A" : currency(pair.marketCap);
-  if (column === "transactions") { const tx = pair.txns?.h24; return tx ? String(tx.buys + tx.sells) : "N/A"; }
-  return pair.stale ? String(t("common.delayed" as never)) : String(t("terminalV3.fresh" as never));
-}
-
-function normalizePreferences(value: Partial<MatrixPreferences>): MatrixPreferences {
-  const savedFilters = value.filters && typeof value.filters === "object" ? value.filters as Partial<MarketFilters> : {};
-  const filters: MarketFilters = {
-    query: typeof savedFilters.query === "string" ? savedFilters.query.slice(0, 160) : "",
-    minimumLiquidity: validOptionalFilterNumber(savedFilters.minimumLiquidity),
-    minimumVolume24h: validOptionalFilterNumber(savedFilters.minimumVolume24h),
-    maximumAgeMinutes: validOptionalFilterNumber(savedFilters.maximumAgeMinutes),
-    change: savedFilters.change === "gainers" || savedFilters.change === "losers" ? savedFilters.change : "all",
-    dex: typeof savedFilters.dex === "string" ? savedFilters.dex.slice(0, 100).trim().toLocaleLowerCase("en-US") : "",
-    quoteTokenAddress: typeof savedFilters.quoteTokenAddress === "string" && /^0x[0-9a-f]{40}$/i.test(savedFilters.quoteTokenAddress) ? savedFilters.quoteTokenAddress.toLocaleLowerCase("en-US") : "",
-    category: savedFilters.category === "new" || savedFilters.category === "moving" || savedFilters.category === "volume" || savedFilters.category === "liquidity" ? savedFilters.category : "all",
-    sortBy: (["pair", "age", "price", "change5m", "change1h", "change24h", "volume5m", "volume1h", "volume24h", "liquidity", "fdv", "marketCap", "transactions", "freshness"] as MarketSortKey[]).includes(savedFilters.sortBy as MarketSortKey) ? savedFilters.sortBy as MarketSortKey : DEFAULT_MARKET_FILTERS.sortBy,
-    sortDirection: savedFilters.sortDirection === "asc" ? "asc" : "desc"
-  };
-  const columns = Array.isArray(value.columns) ? value.columns.filter((column): column is MatrixColumn => DEFAULT_COLUMNS.includes(column as MatrixColumn)) : [...DEFAULT_COLUMNS];
-  const signalTypes = Array.isArray(value.signalTypes) ? value.signalTypes.filter((type): type is MarketSignalType => SIGNAL_FILTER_TYPES.includes(type as typeof SIGNAL_FILTER_TYPES[number])) : [];
-  return { filters, density: value.density === "comfortable" ? "comfortable" : "compact", columns: columns.length ? [...new Set(columns)] : [...DEFAULT_COLUMNS], signalTypes: [...new Set(signalTypes)] };
-}
-
+function buildOpportunityMatrixPairs(snapshot: MarketTerminalSnapshot) { const rows: BasePair[] = []; for (const opportunity of snapshot.opportunities) { if (opportunity.quality === "expired") continue; const pair = getOpportunityPair(snapshot, opportunity); if (!pair) continue; rows.push({ ...pair, pair: opportunity.focusTokenSymbol, project: opportunity.focusTokenName, baseTokenAddress: opportunity.focusTokenAddress, tokenLogoUrl: opportunity.focusTokenLogoUrl ?? pair.tokenLogoUrl, liquidityUsd: opportunity.aggregate.liquidityUsd, volumes: opportunity.aggregate.volumes, txns: opportunity.aggregate.transactions, poolCount: opportunity.poolCount, opportunityId: opportunity.id, isPrimaryMarket: true }); } return rows; }
+function getOpportunityPair(snapshot: MarketTerminalSnapshot, opportunity: TokenOpportunity) { const pair = snapshot.allPairs.find((item) => item.id === opportunity.primaryMarketId); return pair ? orientPairToOpportunity(pair, opportunity) : undefined; }
+function opportunitySearchText(pair: BasePair, snapshot: MarketTerminalSnapshot) { const opportunity = snapshot.opportunities.find((item) => item.id === pair.opportunityId); const pools = opportunity ? snapshot.allPairs.filter((item) => opportunity.poolMarketIds.includes(item.id)) : []; return [pair.pair, pair.project, pair.baseToken, pair.quoteToken, opportunity?.focusTokenAddress, ...pools.flatMap((pool) => [pool.pairAddress, pool.baseTokenAddress, pool.quoteTokenAddress, pool.dexName, pool.dex])].filter(Boolean).join(" ").toLocaleLowerCase("en-US"); }
+function matchesMarketContext(pair: BasePair, snapshot: MarketTerminalSnapshot, filters: MarketFilters) { const opportunity = pair.opportunityId ? snapshot.opportunities.find((item) => item.id === pair.opportunityId) : undefined; const pools = opportunity ? snapshot.allPairs.filter((item) => opportunity.poolMarketIds.includes(item.id)) : [pair]; if (filters.dex && !pools.some((pool) => [pool.dexId, pool.dexName, pool.dex].some((value) => value?.trim().toLocaleLowerCase("en-US") === filters.dex))) return false; if (filters.quoteTokenAddress && !pools.some((pool) => pool.quoteTokenAddress?.trim().toLocaleLowerCase("en-US") === filters.quoteTokenAddress)) return false; if (!filters.category || filters.category === "all") return true; if (!opportunity) return false; if (filters.category === "new") return opportunity.categoryEligibility.newlyCreated; if (filters.category === "moving") return opportunity.categoryEligibility.moving; if (filters.category === "liquidity") return opportunity.categoryEligibility.liquidity; const current = opportunity.aggregate.volumes?.h1; const previous = snapshot.comparison.opportunityVolume1h[opportunity.id]; return snapshot.comparison.status === "ready" && current !== undefined && previous !== undefined && previous > 0 && current / previous >= 1.8; }
+function previewResultCount(source: BasePair[], snapshot: MarketTerminalSnapshot, preferences: BoardPreferences, signalSnapshot: MarketSignalSnapshot) { const query = preferences.filters.query.trim().toLocaleLowerCase("en-US"); const rows = source.filter((pair) => matchesMarketContext(pair, snapshot, preferences.filters)).filter((pair) => hasMarketSignal(pair.opportunityId ? signalSnapshot.byOpportunityId[pair.opportunityId] : signalSnapshot.byPoolId[pair.id], preferences.signalTypes)).filter((pair) => !query || opportunitySearchText(pair, snapshot).includes(query)); return filterAndSortMarkets(rows, { ...preferences.filters, query: "", dex: "", quoteTokenAddress: "", category: "all" }).length; }
+function describeActiveFilters(preferences: BoardPreferences, t: (key: TranslationKey, values?: Record<string, string | number>) => string, currency: (value: number) => string) { const filters = preferences.filters; return [filters.query && t("terminalV3.filter.search", { value: filters.query }), filters.minimumLiquidity !== undefined && t("terminalV3.filter.liquidity", { value: currency(filters.minimumLiquidity) }), filters.minimumVolume24h !== undefined && t("terminalV3.filter.volume", { value: currency(filters.minimumVolume24h) }), filters.maximumAgeMinutes !== undefined && t("terminalV3.filter.age", { value: filters.maximumAgeMinutes }), filters.change !== "all" && t(`terminalV3.filter.${filters.change}`), ...preferences.signalTypes.map((type) => t(`marketSignal.${type}`))].filter((value): value is string => Boolean(value)); }
+function countActiveFilters(preferences: BoardPreferences) { const filters = preferences.filters; return [filters.query, filters.minimumLiquidity !== undefined, filters.minimumVolume24h !== undefined, filters.maximumAgeMinutes !== undefined, filters.change !== "all", filters.dex, filters.quoteTokenAddress, filters.category !== "all", ...preferences.signalTypes].filter(Boolean).length; }
+function normalizePreferences(value: Partial<BoardPreferences>): BoardPreferences { const saved = value.filters && typeof value.filters === "object" ? value.filters as Partial<MarketFilters> : {}; const filters: MarketFilters = { query: typeof saved.query === "string" ? saved.query.slice(0, 160) : "", minimumLiquidity: validOptionalFilterNumber(saved.minimumLiquidity), minimumVolume24h: validOptionalFilterNumber(saved.minimumVolume24h), maximumAgeMinutes: validOptionalFilterNumber(saved.maximumAgeMinutes), change: saved.change === "gainers" || saved.change === "losers" ? saved.change : "all", dex: typeof saved.dex === "string" ? saved.dex.slice(0, 100).trim().toLocaleLowerCase("en-US") : "", quoteTokenAddress: typeof saved.quoteTokenAddress === "string" && /^0x[0-9a-f]{40}$/i.test(saved.quoteTokenAddress) ? saved.quoteTokenAddress.toLocaleLowerCase("en-US") : "", category: saved.category === "new" || saved.category === "moving" || saved.category === "volume" || saved.category === "liquidity" ? saved.category : "all", sortBy: (["pair", "age", "price", "change5m", "change1h", "change24h", "volume5m", "volume1h", "volume24h", "liquidity", "fdv", "marketCap", "transactions", "freshness"] as MarketSortKey[]).includes(saved.sortBy as MarketSortKey) ? saved.sortBy as MarketSortKey : DEFAULT_MARKET_FILTERS.sortBy, sortDirection: saved.sortDirection === "asc" ? "asc" : "desc" }; const columns = Array.isArray(value.columns) ? value.columns.filter((column): column is AdvancedColumn => ADVANCED_COLUMNS.includes(column as AdvancedColumn)) : []; const signalTypes = Array.isArray(value.signalTypes) ? value.signalTypes.filter((type): type is MarketSignalType => SIGNAL_FILTER_TYPES.includes(type as typeof SIGNAL_FILTER_TYPES[number])) : []; return { filters, columns: [...new Set(columns)], signalTypes: [...new Set(signalTypes)] }; }
+function formatAdvancedColumn(column: AdvancedColumn, pair: BasePair, opportunity: TokenOpportunity | undefined, model: ReturnType<typeof getNormalizedMarketModel>, t: (key: TranslationKey, values?: Record<string, string | number>) => string, currency: (value: number) => string): ReactNode { if (column === "transactions") { const tx = pair.txns?.h24; return tx ? String(tx.buys + tx.sells) : "—"; } if (column === "fdv") return pair.fdv === undefined ? "—" : currency(pair.fdv); if (column === "provider") return opportunity ? opportunity.sourceProviders.join(" + ") : (pair.dataProviders ?? [pair.dataSource]).filter(Boolean).join(" + ") || t("common.unknown"); if (column === "freshness") return pair.stale ? t("common.delayed") : t("terminalV3.fresh"); if (column === "tradeStatus") return <AssetTradeabilityBadges pair={pair} opportunity={opportunity} compact={false} presentation="inspectorDetails" />; if (column === "pools") return opportunity ? poolCountLabel(opportunity.poolCount, t) : "—"; return model.key; }
+function columnLabel(column: AdvancedColumn, t: (key: TranslationKey, values?: Record<string, string | number>) => string) { if (column === "provider") return t("terminalV3.dataProvider"); if (column === "pools") return t("terminalV3.poolsView"); return t(`terminalV3.column.${column}`); }
+function scannerLabel(tab: ScannerTab, t: (key: TranslationKey, values?: Record<string, string | number>) => string) { if (tab === "volatile") return t("market.category.volatile"); if (tab === "watchlist") return t("market.category.watchlist"); return t(`terminalV3.lane.${tab}`); }
 function validOptionalFilterNumber(value: unknown) { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined; }
-
 function displayPrice(pair: BasePair) { return typeof pair.priceUsdValue === "number" && Number.isFinite(pair.priceUsdValue) && pair.priceUsdValue > 0 ? pair.priceUsd : "N/A"; }
-
-function sparkPath(values: number[]) {
-  if (values.length < 2 || values.some((value) => !Number.isFinite(value))) return undefined;
-  const min = Math.min(...values); const max = Math.max(...values); const spread = max - min || 1;
-  return values.map((value, index) => `${index === 0 ? "M" : "L"} ${(index / (values.length - 1) * 280).toFixed(1)} ${(86 - ((value - min) / spread) * 80).toFixed(1)}`).join(" ");
-}
-
-function shortAddress(value: string | undefined) {
-  return value && value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value ?? "N/A";
-}
-
-function safeTestId(value: string) {
-  return value.replace(/[^a-z0-9_-]/gi, "-");
-}
-
-function poolCountLabel(count: number, t: (key: TranslationKey, values?: Record<string, string | number>) => string) {
-  return count === 1 ? t("terminalV3.onePool") : t("terminalV3.poolCount", { count });
-}
+function shortAddress(value: string | undefined) { return value && value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value ?? "N/A"; }
+function safeTestId(value: string) { return value.replace(/[^a-z0-9_-]/gi, "-"); }
+function poolCountLabel(count: number, t: (key: TranslationKey, values?: Record<string, string | number>) => string) { return count === 1 ? t("terminalV3.onePool") : t("terminalV3.poolCount", { count }); }
+function sparkPath(values: number[]) { if (values.length < 2 || values.some((value) => !Number.isFinite(value))) return undefined; const min = Math.min(...values); const max = Math.max(...values); const spread = max - min || 1; return values.map((value, index) => `${index === 0 ? "M" : "L"} ${(index / (values.length - 1) * 280).toFixed(1)} ${(86 - ((value - min) / spread) * 80).toFixed(1)}`).join(" "); }

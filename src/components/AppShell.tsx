@@ -22,6 +22,7 @@ import type { BasePair } from "@/types/baseTerminal";
 import { APP_VERSION } from "@/lib/appInfo";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
+import { OverlayProvider } from "@/components/OverlayManager";
 
 const navItems = [
   { href: "/terminal", labelKey: "nav.terminal", view: "terminal", icon: PanelsTopLeft },
@@ -34,6 +35,7 @@ const navItems = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
+    <OverlayProvider>
     <WalletProvider>
       <TerminalSearchProvider>
       <div className="min-h-screen overflow-x-hidden bg-base-black text-base-text">
@@ -98,6 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       </TerminalSearchProvider>
     </WalletProvider>
+    </OverlayProvider>
   );
 }
 

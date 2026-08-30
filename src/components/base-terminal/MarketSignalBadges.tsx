@@ -88,14 +88,27 @@ export function useMarketSignals({ opportunity, pair, scope = "opportunity" }: {
   return opportunityId ? signals.byOpportunityId[opportunityId] ?? [] : pair ? signals.byPoolId[pair.id] ?? [] : [];
 }
 
-export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", maximumMarketBadges = 2, className }: {
+export type MarketSignalPresentation = "rowCritical" | "rowPrimary" | "inspectorDetails" | "hiddenNeutral";
+
+export function presentMarketSignals(badges: readonly MarketSignalBadge[], presentation: MarketSignalPresentation) {
+  if (presentation === "hiddenNeutral") return [];
+  if (presentation === "inspectorDetails") return [...badges];
+  const excluded = presentation === "rowCritical"
+    ? new Set<MarketSignalType>(["contract_verified", "security_unknown", "multi_pool", "deep_liquidity", "high_volume", "most_traded"])
+    : new Set<MarketSignalType>(["contract_verified", "security_unknown"]);
+  return badges.filter((badge) => !excluded.has(badge.type));
+}
+
+export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", maximumMarketBadges = 2, className, presentation = "inspectorDetails" }: {
   opportunity?: TokenOpportunity;
   pair?: BasePair;
   scope?: "opportunity" | "pool";
   maximumMarketBadges?: number;
   className?: string;
+  presentation?: MarketSignalPresentation;
 }) {
-  const badges = useMarketSignals({ opportunity, pair, scope });
+  const allBadges = useMarketSignals({ opportunity, pair, scope });
+  const badges = presentMarketSignals(allBadges, presentation);
   const selection = selectVisibleMarketSignals(badges, maximumMarketBadges);
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);

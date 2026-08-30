@@ -18,13 +18,15 @@ test.describe("terminal quality regression", () => {
     const row = page.getByTestId("matrix-row-blob-usdc");
     const key = await row.getAttribute("data-market-key");
     await row.getByRole("button").first().click();
-    await expect(page.getByTestId("selected-pair-panel")).toHaveAttribute("data-market-key", key!);
+    await expect(page.getByTestId("context-inspector")).toHaveAttribute("data-market-key", key!);
+    await expect(page.getByTestId("trade-dock")).toHaveCount(0);
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByTestId("trade-dock")).toContainText("BLOB / USDC");
   });
 
   test("recovers from corrupt storage without a hydration or console error", async ({ page }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("mergen-terminal:market-matrix:v3", "{bad");
+      localStorage.setItem("mergen-terminal:market-board:v4", "{bad");
       localStorage.setItem("base-terminal-lite:pinned-pairs", "not-json");
     });
     const errors: string[] = [];

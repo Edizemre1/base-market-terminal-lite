@@ -37,9 +37,10 @@ test.describe("explicit wallet and transaction lifecycle", () => {
   test("switches to Base only after the manual action", async ({ page }) => {
     await mockEnabledTradeServer(page);
     await installVerifiedWalletStub(page, { chainId: "0x1" });
-    await page.goto("/terminal?data=mock&view=portfolio");
+    await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
+    await openTradeDrawer(page);
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wrong_network");
     expect(await walletMethods(page)).not.toContain("wallet_switchEthereumChain");
     await page.getByRole("button", { name: /Switch to Base|Base ağına geç/ }).click();
@@ -78,6 +79,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.getByRole("button", { name: /Get fresh quote|Güncel teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_required");
 
     await page.evaluate(() => (window as Window & { __walletHarness?: { disconnect: () => void } }).__walletHarness?.disconnect());
@@ -90,6 +92,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
+    await openTradeDrawer(page);
     await expect(page.getByTestId("wallet-picker-error")).toContainText(/cancelled|iptal edildi/);
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
@@ -152,6 +155,13 @@ async function mockFailedTradeServer(page: Page, code: "no-route" | "timeout") {
 async function connectWallet(page: Page) {
   await openWalletPicker(page);
   await page.getByTestId("wallet-provider-legacy:injected").click();
+  await openTradeDrawer(page);
+}
+
+async function openTradeDrawer(page: Page) {
+  await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
+  await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
+  await expect(page.getByTestId("trade-dock")).toBeVisible();
 }
 
 async function openWalletPicker(page: Page) {

@@ -54,7 +54,7 @@ export function WalletPicker() {
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-3 backdrop-blur-sm" data-testid="wallet-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) wallet.closePicker(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("wallet.pickerTitle")} data-testid="wallet-picker" className="max-h-[min(720px,92vh)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-base-line bg-base-panel p-4 shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("wallet.pickerTitle")} data-testid="wallet-picker" data-overlay-root="wallet_picker" className="max-h-[min(720px,92vh)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-base-line bg-base-panel p-4 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-base-mint">Mergen Wallet</p>

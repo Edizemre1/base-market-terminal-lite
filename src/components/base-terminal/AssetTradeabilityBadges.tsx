@@ -103,11 +103,28 @@ export function useDerivedTradeability(input: TradeabilityInput) {
   return useMemo(() => deriveTradeabilityAssessment(input), [input]);
 }
 
-export function AssetTradeabilityBadges({ pair, opportunity, compact = true, className }: {
+export type AssetBadgePresentation = "rowCritical" | "rowPrimary" | "inspectorDetails" | "hiddenNeutral";
+
+export function shouldPresentAssetBadges(identity: Pick<AssetIdentityAssessment, "status" | "resemblesKnownBrand">, tradeability: Pick<TradeabilityAssessment, "status">, presentation: AssetBadgePresentation) {
+  if (presentation === "hiddenNeutral") return false;
+  if (presentation === "inspectorDetails") return true;
+  return isCriticalIdentity(identity) || isCriticalTradeStatus(tradeability.status);
+}
+
+function isCriticalIdentity(identity: Pick<AssetIdentityAssessment, "status" | "resemblesKnownBrand">) {
+  return identity.status === "conflicting" || identity.resemblesKnownBrand;
+}
+
+function isCriticalTradeStatus(status: TradeabilityStatus) {
+  return (["no_route", "token_metadata_invalid", "provider_unavailable", "quote_available", "execution_disabled"] as TradeabilityStatus[]).includes(status);
+}
+
+export function AssetTradeabilityBadges({ pair, opportunity, compact = true, className, presentation = "inspectorDetails" }: {
   pair: BasePair;
   opportunity?: TokenOpportunity;
   compact?: boolean;
   className?: string;
+  presentation?: AssetBadgePresentation;
 }) {
   const { t } = useI18n();
   const identity = useMemo(() => {
@@ -130,6 +147,10 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 72, left: 12 });
+
+  const visible = shouldPresentAssetBadges(identity, tradeability, presentation);
+  const compactPriority = presentation === "rowCritical" || presentation === "rowPrimary";
+  const showIdentityOnly = compactPriority && isCriticalIdentity(identity);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -160,6 +181,7 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
     };
   }, [open]);
 
+  if (!visible) return null;
   const subject = `${identity.displaySymbol} · ${t(`identity.status.${identity.status}` as TranslationKey)} · ${t(`tradeability.status.${tradeability.status}` as TranslationKey)}`;
   return <>
     <button
@@ -172,10 +194,10 @@ export function AssetTradeabilityBadges({ pair, opportunity, compact = true, cla
       data-testid="asset-tradeability-group"
       data-identity-status={identity.status}
       data-tradeability-status={tradeability.status}
+      data-visible-badge-count={compactPriority ? 1 : 2}
       title={subject}
     >
-      <AssetIdentityBadge assessment={identity} compact={compact} />
-      <TradeabilityBadge assessment={tradeability} compact={compact} />
+      {compactPriority ? showIdentityOnly ? <AssetIdentityBadge assessment={identity} compact={compact} /> : <TradeabilityBadge assessment={tradeability} compact={compact} /> : <><AssetIdentityBadge assessment={identity} compact={compact} /><TradeabilityBadge assessment={tradeability} compact={compact} /></>}
     </button>
     {mounted && open ? createPortal(<AssetTradeabilityPopover dialogRef={dialogRef} pair={pair} identity={identity} tradeability={tradeability} position={position} />, document.body) : null}
   </>;
@@ -186,7 +208,7 @@ export function AssetIdentityBadge({ assessment, compact = false }: { assessment
   const Icon = IDENTITY_ICONS[assessment.status];
   return <span className={cx("inline-flex items-center gap-1 rounded-full border px-1.5 py-1 font-mono text-[8px] font-semibold", identityTone(assessment.status))} data-testid="asset-identity-badge">
     <Icon size={11} aria-hidden="true" />
-    {!compact || assessment.status !== "verified" ? t(`identity.status.${assessment.status}` as TranslationKey) : null}
+    {!compact ? t(`identity.status.${assessment.status}` as TranslationKey) : null}
   </span>;
 }
 
@@ -195,7 +217,7 @@ export function TradeabilityBadge({ assessment, compact = false }: { assessment:
   const Icon = TRADEABILITY_ICONS[assessment.status];
   return <span className={cx("inline-flex items-center gap-1 rounded-full border px-1.5 py-1 font-mono text-[8px] font-semibold", tradeTone(assessment.status))} data-testid="tradeability-badge">
     <Icon size={11} className={assessment.status === "quote_loading" ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden="true" />
-    {!compact || !["market_data_only", "quote_required"].includes(assessment.status) ? t(`tradeability.status.${assessment.status}` as TranslationKey) : null}
+    {!compact ? t(`tradeability.status.${assessment.status}` as TranslationKey) : null}
   </span>;
 }
 
