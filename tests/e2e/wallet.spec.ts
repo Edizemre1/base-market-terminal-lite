@@ -82,7 +82,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
 
   test("invalidates a fresh quote on pair or wallet context changes", async ({ page }) => {
     await installVerifiedWalletStub(page);
-    await mockEnabledTradeServer(page);
+    await mockEnabledTradeServer(page, { delayMs: 450 });
     await page.goto("/terminal?data=mock");
     await connectWallet(page);
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
