@@ -70,16 +70,16 @@ test.describe("explicit wallet and transaction lifecycle", () => {
   });
 
   test("expires and invalidates a quote on pair or wallet context changes", async ({ page }, testInfo) => {
-    await page.clock.install();
     await installVerifiedWalletStub(page);
-    await mockEnabledTradeServer(page, { expiryMs: 10_000 });
+    await mockEnabledTradeServer(page, { expiryMs: 60_000 });
     await page.goto("/terminal?data=mock");
     await connectWallet(page);
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
-    await page.clock.fastForward(11_000);
+    await page.clock.setFixedTime(Date.now() + 120_000);
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_expired");
     await page.screenshot({ path: testInfo.outputPath("trade-quote-expired-1440.png"), fullPage: false });
+    await page.clock.setFixedTime(Date.now());
 
     await page.unroute("**/api/quote");
     await mockEnabledTradeServer(page);
