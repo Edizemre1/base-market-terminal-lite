@@ -135,7 +135,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   }, [amount, pair.baseTokenAddress, pair.focusTokenAddress, pair.id, pair.quoteTokenAddress, side, slippageBps, spendToken, wallet.address, wallet.chainId]);
 
   useEffect(() => {
-    if (!quote) return;
+    if (!quote || !capabilities) return;
     const provider = capabilities?.providers.find((candidate) => candidate.name === quote.provider);
     if (capabilities?.quoteRequestEnabled && provider?.status === "enabled") return;
     setQuote(undefined); setQuoteStatus("error"); setReviewOpen(false); setSimulationPassed(false); setQuoteFailureCode("provider-unavailable"); setQuoteError(t("trade.error.providerChanged"));
