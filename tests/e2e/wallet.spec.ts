@@ -179,6 +179,7 @@ async function mockFailedTradeServer(page: Page, code: "no-route" | "timeout") {
 async function connectWallet(page: Page) {
   await openWalletPicker(page);
   await page.getByTestId("wallet-provider-legacy:injected").click();
+  await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
   await openTradeDrawer(page);
 }
 
