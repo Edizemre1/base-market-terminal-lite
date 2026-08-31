@@ -149,13 +149,13 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
       const freshPairs = allPairs.filter(isFreshPair);
       const source = freshProfilePairs.length > 0 ? freshProfilePairs : freshPairs;
       return [...source]
-        .sort((left, right) => left.ageMinutes - right.ageMinutes || right.volume24h - left.volume24h || left.id.localeCompare(right.id))
+        .sort((left, right) => (left.ageMinutes ?? Number.POSITIVE_INFINITY) - (right.ageMinutes ?? Number.POSITIVE_INFINITY) || (right.volume24h ?? 0) - (left.volume24h ?? 0) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT);
     },
     getVolumeInflows: () =>
       [...allPairs]
         .filter((pair) => hasMinimumMarketQuality(pair, MIN_VOLUME_INFLOW_24H_USD))
-        .sort((left, right) => right.volume24h - left.volume24h || left.id.localeCompare(right.id))
+        .sort((left, right) => (right.volume24h ?? 0) - (left.volume24h ?? 0) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT),
     getMomentumPairs: () =>
       [...allPairs]
@@ -658,12 +658,12 @@ function getMomentumScore({
 }
 
 function getMomentumRank(pair: BasePair) {
-  const priceSignal = clamp(pair.change24h, -35, 85);
-  const volumeSignal = clamp(Math.log10(Math.max(pair.volume24h, 0) + 1) * 6, 0, 45);
-  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(pair.volume24h, pair.liquidity), 0) + 1) * 3, 0, 24);
-  const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity, 1)) * 3, 0, 18);
+  const priceSignal = clamp(pair.change24h ?? 0, -35, 85);
+  const volumeSignal = clamp(Math.log10(Math.max(pair.volume24h ?? 0, 0) + 1) * 6, 0, 45);
+  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(pair.volume24h ?? 0, pair.liquidity ?? 0), 0) + 1) * 3, 0, 24);
+  const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity ?? 0, 1)) * 3, 0, 18);
 
-  return priceSignal + volumeSignal + matchedActivitySignal + liquiditySignal + pair.momentumScore * 0.2;
+  return priceSignal + volumeSignal + matchedActivitySignal + liquiditySignal + (pair.momentumScore ?? 0) * 0.2;
 }
 
 function dedupeDexPairs(pairs: DexPair[]) {
@@ -698,11 +698,11 @@ function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
 }
 
 function hasMinimumMarketQuality(pair: BasePair, minVolume24h = MIN_VOLUME_24H_USD) {
-  return pair.liquidity >= MIN_LIQUIDITY_USD && pair.volume24h >= minVolume24h;
+  return (pair.liquidity ?? Number.NEGATIVE_INFINITY) >= MIN_LIQUIDITY_USD && (pair.volume24h ?? Number.NEGATIVE_INFINITY) >= minVolume24h;
 }
 
 function isFreshPair(pair: BasePair) {
-  return pair.ageMinutes >= 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
+  return pair.ageMinutes !== undefined && pair.ageMinutes >= 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
 }
 
 function getDexPairQualityScore(pair: DexPair) {
@@ -714,7 +714,7 @@ function getDexPairQualityScore(pair: DexPair) {
 }
 
 function getBasePairQualityScore(pair: BasePair) {
-  return pair.volume24h * 2 + pair.liquidity + Math.abs(pair.change24h) * 1_000;
+  return (pair.volume24h ?? 0) * 2 + (pair.liquidity ?? 0) + Math.abs(pair.change24h ?? 0) * 1_000;
 }
 
 function getAgeMinutes(pairCreatedAt: number | null | undefined) {

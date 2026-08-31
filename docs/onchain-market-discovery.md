@@ -1,0 +1,65 @@
+# On-chain Base market discovery
+
+Base Terminal separates the raw pool universe from its contract-first user view. A single supervised Node process owns the collector store; web requests only read its integrity-checked snapshot and relay the bounded confirmed-event ring over SSE. The collector never signs, approves, builds calldata, or submits transactions.
+
+## Data path
+
+1. An optional Base WebSocket subscription provides provisional low-latency wake-ups.
+2. Bounded `eth_getLogs` polling, two-block confirmation, and a 16-block overlap are the source of truth.
+3. Pool code and available token/pool/factory getters are checked at the event block. Metadata failures degrade to partial or unavailable.
+4. One writer commits the event, pool, cursor, reconciliation record, and derived token opportunities through a fsynced WAL plus atomic state-file rename.
+5. The web process verifies the state digest, merges exact pool identities with provider data, and exposes confirmed events through `/api/opportunity-stream`.
+6. Browser snapshot refresh remains the enrichment/reconciliation path. `Last-Event-ID`, the bounded ring, and the normal snapshot poll close reconnect gaps.
+
+Without a WebSocket URL the collector remains healthy in `confirmed_polling` mode. Provisional events never enter confirmed opportunities or the SSE confirmed-event stream.
+
+## Factory registry
+
+All addresses, event signatures/topics, creation blocks, confirmation settings, provenance, and adapter versions live in `collector/factory-registry.mjs`. Creation transactions were read from the contract-creator record on BaseScan and their blocks were verified with Base RPC by `collector/tools/resolve-deployment-blocks.mjs`.
+
+| Registry id | Address | Event | Creation block |
+| --- | --- | --- | ---: |
+| aerodrome-classic | `0x420dd381b31aef6683db6b902084cb0ffece40da` | `PoolCreated(address,address,bool,address,uint256)` | 3,200,559 |
+| aerodrome-slipstream-v1 | `0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a` | `PoolCreated(address,address,int24,address)` | 13,843,704 |
+| aerodrome-slipstream-v2 | `0xade65c38cd4849adba595a4323a8c7ddfe89716a` | `PoolCreated(address,address,int24,address)` | 36,953,918 |
+| aerodrome-slipstream-v3 | `0xf8f2eb4940cfe7d13603dddd87f123820fc061ef` | `PoolCreated(address,address,int24,address)` | 44,394,724 |
+| uniswap-v2 | `0x8909dc15e40173ff4699343b6eb8132c65e18ec6` | `PairCreated(address,address,address,uint256)` | 6,601,915 |
+| uniswap-v3 | `0x33128a8fc17869897dce68ed026d694621f6fdfd` | `PoolCreated(address,address,uint24,int24,address)` | 1,371,680 |
+| uniswap-v4 | `0x498581ff718922c3f8e6a244956af099b2652b2b` | `Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)` | 25,350,988 |
+| pancakeswap-v2 | `0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e` | `PairCreated(address,address,address,uint256)` | 2,910,387 |
+| pancakeswap-v3 | `0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865` | `PoolCreated(address,address,uint24,int24,address)` | 2,912,007 |
+| pancakeswap-infinity-cl | `0xa0ffb9c1ce1fe56963b0321b32e7a0302114058b` | `Initialize(bytes32,address,address,address,uint24,bytes32,uint160,int24)` | 30,544,106 |
+| pancakeswap-infinity-bin | `0xc697d2898e0d09264376196696c51d7abbbaa4a9` | `Initialize(bytes32,address,address,address,uint24,bytes32,uint24)` | 30,544,163 |
+
+No launchpad adapter is enabled: this pass did not validate an exact official factory plus event contract for Clanker, Virtuals, or another launchpad to the same provenance standard. No inferred or community-maintained address is accepted.
+
+## Identity and canonical price
+
+Raw pools retain exact pool/PoolId, factory, DEX version, token orientation, quote asset, event transaction, block, and log index. A user-facing opportunity is keyed only by `8453:token:<lowercase exact contract>`. Symbol and name are display metadata, never identity or an official/safety claim.
+
+Canonical pricing uses exact Base USDC `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`:
+
+- Tier A: direct verified TOKEN/USDC.
+- Tier B: TOKEN/WETH multiplied by a fresh verified WETH/USDC anchor. Exact WETH is `0x4200000000000000000000000000000000000006`.
+- Tier C: another verified conversion path, bounded to three hops.
+- UNPRICED: no trustworthy path.
+
+Every result carries direct/converted kind, source pool keys, anchor, observation time, block, freshness, tier, and reason code. Cycles, future or stale timestamps, non-positive/non-finite rates, incomplete decimals, and liquidity below the dust threshold are rejected. Missing aggregate inputs remain missing; they are not replaced with zero. This analytical price is never treated as an executable LI.FI quote.
+
+## Store and limits
+
+The dependency-free schema-v1 store contains factory cursors, canonical events, pools, metadata snapshots, token opportunities, price-anchor and market-snapshot slots, reconciliation history, replay evidence, and a bounded relay ring. It uses a single-owner lock, prepare/commit WAL records, file and directory fsync where supported, atomic rename, SHA-256 integrity, deterministic schema rejection, retention caps, and clean signal shutdown.
+
+Default limits include 250 blocks per log query, 2,000 bootstrap blocks, four chunks per pass, 2,000 pools, 5,000 canonical events, 256 relay events, 512 history records, 128 reconciliation records, 256 metadata jobs, and 64 SSE clients.
+
+## Staging operations
+
+Runtime entrypoints in the exact Actions artifact are `server.js` and `collector/run.mjs`. Use one unprivileged staging collector unit with a protected environment file and a writable staging-only `ONCHAIN_STORE_PATH`. The web and collector must use the same path. Do not put RPC values in a unit, repository, log, manifest, or evidence file.
+
+Health is ready only when the integrity check is OK and the confirmed cursor is within the allowed lag. The health payload reports mode, heads/cursor, lag, last confirmed event, per-factory state, reconnect/reorg/duplicate/malformed counters, metadata depth, SSE clients, schema, and collector version.
+
+Historical acceptance uses `node collector/run.mjs --replay --block <exact-block> [--tx <exact-hash> --log-index <n>]`. It reuses the production decoder and binding checks but marks evidence as replay, emits no live SSE event, and does not advance the live cursor or add replay pools to the browser universe.
+
+## Rollback
+
+Before switching releases, retain the current release symlink target, web/collector unit hashes, protected-env hash, nginx hash, and a copy of the schema-v1 store. To roll back, stop only the staging web and collector units, atomically restore the prior release and its matching store snapshot, then start the staging collector followed by the staging web unit. Verify the deploy SHA, store digest/schema, collector cursor, web health, Basic Auth boundary, and both unit journals. Schema v1 is unchanged by this release; no production service or data path participates.

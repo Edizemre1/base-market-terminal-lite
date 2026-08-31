@@ -20,13 +20,13 @@ export type PairTxnWindow = {
 };
 
 export type BasePair = {
-  dataSource?: "mock" | "dexscreener" | "geckoterminal";
-  dataProviders?: Array<"mock" | "dexscreener" | "geckoterminal">;
+  dataSource?: "mock" | "dexscreener" | "geckoterminal" | "onchain";
+  dataProviders?: Array<"mock" | "dexscreener" | "geckoterminal" | "onchain">;
   sourceUpdatedAt?: string;
   firstSeenAt?: string;
   qualityTier?: "active" | "thin" | "incomplete" | "expired";
   opportunityId?: string;
-  opportunityKind?: "token" | "pair";
+  opportunityKind?: "token";
   focusTokenAddress?: string;
   focusTokenSymbol?: string;
   focusTokenName?: string;
@@ -34,6 +34,16 @@ export type BasePair = {
   poolCount?: number;
   isPrimaryMarket?: boolean;
   poolOrientation?: "direct" | "inverted" | "pair";
+  metadataStatus?: "complete" | "partial" | "unavailable";
+  blockNumber?: number;
+  onchainProvenance?: {
+    factoryId: string;
+    factoryAddress: string;
+    protocolVersion: string;
+    transactionHash: string;
+    logIndex: number;
+    confirmedAt: string;
+  };
   stale?: boolean;
   staleReason?: string;
   pairAddress?: string;
@@ -64,15 +74,15 @@ export type BasePair = {
   route: string;
   dex: string;
   age: string;
-  ageMinutes: number;
+  ageMinutes?: number;
   price: string;
   priceUsd: string;
-  change24h: number;
-  volume24h: number;
-  liquidity: number;
-  inflow24h: number;
-  momentumScore: number;
-  volumeMultiple: number;
+  change24h?: number;
+  volume24h?: number;
+  liquidity?: number;
+  inflow24h?: number;
+  momentumScore?: number;
+  volumeMultiple?: number;
   riskScore?: number;
   riskLabel?: string;
   chart: number[];

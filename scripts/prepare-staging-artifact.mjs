@@ -25,6 +25,10 @@ await cp(path.join(workspace, ".next", "static"), path.join(payload, ".next", "s
   recursive: true,
   dereference: true
 });
+await cp(path.join(workspace, "collector"), path.join(payload, "collector"), {
+  recursive: true,
+  dereference: true
+});
 await writeFile(path.join(payload, ".deploy-sha"), `${sourceSha}\n`, "utf8");
 
 const files = await collectFiles(payload);
@@ -46,6 +50,10 @@ const manifest = {
   sourceSha,
   runtimeContract: ">=20.0.0 <25",
   buildNode: process.version,
+  runtimeEntrypoints: {
+    web: "server.js",
+    onchainCollector: "collector/run.mjs"
+  },
   files: manifestFiles
 };
 

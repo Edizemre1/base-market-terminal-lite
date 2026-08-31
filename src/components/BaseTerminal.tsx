@@ -211,7 +211,7 @@ export function BaseTerminal({
     setProviderHealth(buildProviderHealth(next, "idle"));
   }, []);
 
-  const refreshProviderSnapshot = useCallback(async () => {
+  const refreshProviderSnapshot = useCallback(async (forceOnchain = false) => {
     if (snapshotRefreshInFlightRef.current) return;
 
     const requestId = snapshotRefreshRequestIdRef.current + 1;
@@ -226,7 +226,7 @@ export function BaseTerminal({
 
     try {
       const mode = snapshotRef.current.mode === "dexscreener" ? "dexscreener" : "mock";
-      const response = await fetch(`/api/market-snapshot?data=${mode}`, {
+      const response = await fetch(`/api/market-snapshot?data=${mode}${forceOnchain ? "&onchain=1" : ""}`, {
         cache: "no-store",
         signal: abortController.signal
       });
@@ -268,6 +268,17 @@ export function BaseTerminal({
       if (snapshotRefreshRequestIdRef.current === requestId) snapshotRefreshInFlightRef.current = false;
     }
   }, [applySnapshot]);
+
+  useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") return;
+    const source = new EventSource("/api/opportunity-stream");
+    const handleConfirmedPool = () => void refreshProviderSnapshot(true);
+    source.addEventListener("pool_confirmed", handleConfirmedPool);
+    return () => {
+      source.removeEventListener("pool_confirmed", handleConfirmedPool);
+      source.close();
+    };
+  }, [refreshProviderSnapshot, snapshotData.mode]);
 
   useEffect(() => {
     if (!pendingSnapshot || !shouldAutoApplyPendingUpdate({ interactionLocked, overlayOpen: overlay.active.type !== "none", quietForMs: UPDATE_AUTO_APPLY_QUIET_MS })) return;

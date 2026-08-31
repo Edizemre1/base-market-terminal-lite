@@ -158,7 +158,7 @@ function withVerifiedWindows(
     priceUsd: `$${price}`,
     liquidity,
     liquidityUsd: liquidity,
-    volume24h: Math.max(pair.volume24h, 50_000),
+    volume24h: Math.max(pair.volume24h ?? 0, 50_000),
     volumes: { ...pair.volumes, m5: m5Volume, h24: Math.max(pair.volumes?.h24 ?? 0, 50_000) },
     priceChanges: { ...pair.priceChanges, h24: pair.priceChanges?.h24 ?? 4 },
     txns: { ...pair.txns, h24: pair.txns?.h24 ?? { buys: 100, sells: 80 } }

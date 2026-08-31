@@ -1,5 +1,6 @@
 import type { BasePair, PairTxnWindow } from "@/types/baseTerminal";
 import { calculateReverseChangePercent, invertPositiveValue, reverseOhlcvCandle } from "@/lib/marketMath";
+import { calculateOpportunityUsdcPrice, type CanonicalPrice } from "@/lib/base-terminal/canonicalPricing";
 
 export const BASE_DISCOVERY_CHAIN_ID = 8453 as const;
 export const NEW_POOL_MAX_AGE_MINUTES = 7 * 24 * 60;
@@ -7,7 +8,7 @@ export const JUST_LAUNCHED_MAX_AGE_MINUTES = 24 * 60;
 export const DISCOVERY_RESERVOIR_CAPACITY = 1_000;
 export const DISCOVERY_OPPORTUNITY_CAPACITY = 600;
 
-export type MarketProviderId = "mock" | "dexscreener" | "geckoterminal";
+export type MarketProviderId = "mock" | "dexscreener" | "geckoterminal" | "onchain";
 export type PoolQualityTier = "active" | "thin" | "incomplete" | "expired";
 export type PoolOrientation = "direct" | "inverted" | "pair";
 
@@ -29,6 +30,14 @@ export type PoolMarket = {
   priceUsd?: number;
   fdvUsd?: number;
   verifiedMarketCapUsd?: number;
+  blockNumber?: number;
+  factoryId?: string;
+  factoryAddress?: string;
+  protocolVersion?: string;
+  transactionHash?: string;
+  logIndex?: number;
+  confirmedAt?: string;
+  metadataStatus?: "complete" | "partial" | "unavailable";
   sourceProviders: MarketProviderId[];
   quality: PoolQualityTier;
 };
@@ -43,7 +52,7 @@ export type OpportunityAggregate = {
 export type TokenOpportunity = {
   id: string;
   chainId: typeof BASE_DISCOVERY_CHAIN_ID;
-  kind: "token" | "pair";
+  kind: "token";
   focusTokenAddress: string;
   focusTokenSymbol: string;
   focusTokenName: string;
@@ -52,11 +61,19 @@ export type TokenOpportunity = {
   poolMarketIds: string[];
   poolCount: number;
   primaryMarketId: string;
+  primarySelection: {
+    code: "highest_quality" | "unchanged" | "hysteresis_retained" | "previous_invalid" | "material_quality_improvement";
+    previousMarketId?: string;
+    challengerMarketId?: string;
+  };
   executionCandidates: string[];
   aggregate: OpportunityAggregate;
   newestPoolCreatedAt?: string;
   oldestPoolCreatedAt?: string;
   sourceProviders: MarketProviderId[];
+  canonicalPrice: CanonicalPrice;
+  metadataStatus: "complete" | "partial" | "unavailable";
+  tradeability: "market_data_only" | "wallet_required" | "quote_required" | "quote_loading" | "quote_available" | "no_route" | "provider_unavailable" | "wrong_network" | "approval_required" | "simulation_required" | "review_ready" | "transaction_ready" | "expired";
   freshness: {
     newestSourceAt: string;
     oldestSourceAt: string;
@@ -104,10 +121,12 @@ type FocusIdentity = {
 
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
 const VERIFIED_QUOTE_TOKENS = new Map([
-  ["0x4200000000000000000000000000000000000006", { symbol: "WETH", priority: 1 }],
-  ["0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", { symbol: "USDC", priority: 2 }],
-  ["0xd9aa321b86b65d86f6a7b5b1b0c42ffa531710b6ca", { symbol: "USDbC", priority: 3 }],
-  ["0x50c5725949a6f0c72e6c4a641f24049a917db0cb", { symbol: "DAI", priority: 4 }]
+  ["0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", { symbol: "USDC", priority: 1 }],
+  ["0x4200000000000000000000000000000000000006", { symbol: "WETH", priority: 2 }],
+  ["0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", { symbol: "cbBTC", priority: 3 }],
+  ["0x940181a94a35a4569e4529a3cdfb74e38fd98631", { symbol: "AERO", priority: 4 }],
+  ["0xd9aa321b86b65d86f6a7b5b1b0c42ffa531710b6ca", { symbol: "USDbC", priority: 5 }],
+  ["0x50c5725949a6f0c72e6c4a641f24049a917db0cb", { symbol: "DAI", priority: 6 }]
 ] as const);
 
 export function buildDiscoveryUniverse(
@@ -125,6 +144,7 @@ export function buildDiscoveryUniverse(
 
   for (const pair of uniquePairs) {
     const focus = resolveFocusIdentity(pair);
+    if (!focus) continue;
     const group = groups.get(focus.id) ?? { focus, pairs: [] };
     group.pairs.push(pair);
     groups.set(focus.id, group);
@@ -139,6 +159,7 @@ export function buildDiscoveryUniverse(
   const opportunitiesById = new Map(opportunities.map((opportunity) => [opportunity.id, opportunity]));
   const annotatedPairs = uniquePairs.map((pair) => {
     const focus = resolveFocusIdentity(pair);
+    if (!focus) return pair;
     const opportunity = opportunitiesById.get(focus.id);
     const pool = poolsById.get(pair.id);
     return {
@@ -179,7 +200,9 @@ export function getOpportunityForPair(pair: BasePair, opportunities: TokenOpport
 }
 
 export function orientPairToOpportunity(pair: BasePair, opportunity: TokenOpportunity | undefined): BasePair {
-  if (!opportunity || opportunity.kind !== "token" || pair.poolOrientation !== "inverted") return pair;
+  const focusAddress = normalizeAddress(opportunity?.focusTokenAddress);
+  const quoteAddress = normalizeAddress(pair.quoteTokenAddress);
+  if (!opportunity || !focusAddress || focusAddress !== quoteAddress) return pair;
   const nativePrice = Number(pair.priceNative);
   const invertedNative = invertPositiveValue(Number.isFinite(nativePrice) ? nativePrice : undefined);
   const focusPriceUsd = invertedNative && pair.priceUsdValue ? invertedNative * pair.priceUsdValue : undefined;
@@ -259,6 +282,9 @@ function buildTokenOpportunity(
   const quality = getOpportunityQuality(pools);
   const newestPoolCreatedAt = timestamps.at(-1);
   const newestAgeMinutes = getPoolAgeMinutes(newestPoolCreatedAt, nowMs);
+  const primarySelection = explainPrimarySelection(uniquePairs, primary, previous?.primaryMarketId);
+  const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, uniquePairs, new Date(nowMs));
+  const metadataStatus = metadataQuality(uniquePairs);
   return {
     id: focus.id,
     chainId: BASE_DISCOVERY_CHAIN_ID,
@@ -271,6 +297,7 @@ function buildTokenOpportunity(
     poolMarketIds: pools.map((pool) => pool.id).sort(),
     poolCount: pools.length,
     primaryMarketId: primary.id,
+    primarySelection,
     executionCandidates: [...uniquePairs]
       .filter((pair) => classifyPoolQuality(pair) === "active")
       .sort((left, right) => marketQualityScore(right) - marketQualityScore(left) || comparePoolAddress(left, right))
@@ -279,6 +306,9 @@ function buildTokenOpportunity(
     newestPoolCreatedAt,
     oldestPoolCreatedAt: timestamps[0],
     sourceProviders: uniqueProviders(pools.flatMap((pool) => pool.sourceProviders)),
+    canonicalPrice,
+    metadataStatus,
+    tradeability: "market_data_only",
     freshness: {
       newestSourceAt: sourceTimes.at(-1) ?? new Date(nowMs).toISOString(),
       oldestSourceAt: sourceTimes[0] ?? new Date(nowMs).toISOString(),
@@ -303,7 +333,7 @@ function toPoolMarket(pair: BasePair, fallbackTime: string, nowMs: number): Pool
     dex: pair.dexId ?? pair.dexName ?? pair.dex,
     baseTokenAddress: normalizeAddress(pair.baseTokenAddress) ?? "",
     quoteTokenAddress: normalizeAddress(pair.quoteTokenAddress) ?? "",
-    orientation: focus.orientation,
+    orientation: focus?.orientation ?? "pair",
     poolCreatedAt: getPoolAgeMinutes(pair.pairCreatedAt, nowMs) === undefined ? undefined : pair.pairCreatedAt,
     firstSeenAt: isValidDateString(pair.firstSeenAt) ? pair.firstSeenAt! : fallbackTime,
     sourceUpdatedAt: isValidDateString(pair.sourceUpdatedAt) ? pair.sourceUpdatedAt! : fallbackTime,
@@ -314,12 +344,20 @@ function toPoolMarket(pair: BasePair, fallbackTime: string, nowMs: number): Pool
     priceUsd: readPositive(pair.priceUsdValue),
     fdvUsd: readPositive(pair.fdv),
     verifiedMarketCapUsd: readPositive(pair.marketCap),
+    blockNumber: pair.blockNumber,
+    factoryId: pair.onchainProvenance?.factoryId,
+    factoryAddress: pair.onchainProvenance?.factoryAddress,
+    protocolVersion: pair.onchainProvenance?.protocolVersion,
+    transactionHash: pair.onchainProvenance?.transactionHash,
+    logIndex: pair.onchainProvenance?.logIndex,
+    confirmedAt: pair.onchainProvenance?.confirmedAt,
+    metadataStatus: pair.metadataStatus,
     sourceProviders: getPairProviders(pair),
     quality: classifyPoolQuality(pair)
   };
 }
 
-function resolveFocusIdentity(pair: BasePair): FocusIdentity {
+function resolveFocusIdentity(pair: BasePair): FocusIdentity | undefined {
   const baseAddress = normalizeAddress(pair.baseTokenAddress);
   const quoteAddress = normalizeAddress(pair.quoteTokenAddress);
   const baseQuote = baseAddress ? VERIFIED_QUOTE_TOKENS.get(baseAddress as never) : undefined;
@@ -340,19 +378,19 @@ function resolveFocusIdentity(pair: BasePair): FocusIdentity {
     };
   }
 
-  const sortedAddresses = [baseAddress, quoteAddress].filter((value): value is string => Boolean(value)).sort();
-  const fallbackKey = sortedAddresses.length === 2 ? sortedAddresses.join(":") : pair.id.toLowerCase();
+  if (!baseAddress && !quoteAddress) return undefined;
   const bothQuotes = Boolean(baseQuote && quoteQuote);
-  const canonicalBase = bothQuotes && baseQuote!.priority > quoteQuote!.priority;
+  const focusBase = !quoteAddress || Boolean(baseAddress && (!bothQuotes || baseQuote!.priority > quoteQuote!.priority));
+  const address = focusBase ? baseAddress! : quoteAddress;
   return {
-    id: `${BASE_DISCOVERY_CHAIN_ID}:pair:${fallbackKey}`,
-    kind: "pair",
-    address: sortedAddresses[0] ?? pair.id.toLowerCase(),
-    symbol: canonicalBase ? `${pair.quoteToken}/${pair.baseToken}` : `${pair.baseToken}/${pair.quoteToken}`,
-    name: canonicalBase ? `${pair.quoteToken} / ${pair.baseToken}` : pair.pair,
-    logoUrl: canonicalBase ? pair.quoteTokenLogoUrl : pair.tokenLogoUrl,
-    orientation: "pair",
-    ambiguousPair: !bothQuotes
+    id: `${BASE_DISCOVERY_CHAIN_ID}:token:${address}`,
+    kind: "token",
+    address,
+    symbol: focusBase ? pair.baseToken : pair.quoteToken,
+    name: focusBase ? pair.project : `${pair.quoteToken} on Base`,
+    logoUrl: focusBase ? pair.tokenLogoUrl : pair.quoteTokenLogoUrl,
+    orientation: focusBase ? "direct" : "inverted",
+    ambiguousPair: false
   };
 }
 
@@ -407,7 +445,7 @@ function getOpportunityQuality(pools: PoolMarket[]): PoolQualityTier {
 function summarizeUniverse(pools: PoolMarket[], opportunities: TokenOpportunity[], nowMs: number): DiscoveryUniverse {
   const qualityCounts = { active: 0, thin: 0, incomplete: 0, expired: 0 } satisfies Record<PoolQualityTier, number>;
   for (const opportunity of opportunities) qualityCounts[opportunity.quality] += 1;
-  const providerCoverage = (["geckoterminal", "dexscreener", "mock"] as const)
+  const providerCoverage = (["onchain", "geckoterminal", "dexscreener", "mock"] as const)
     .map((provider) => ({
       provider,
       poolCount: pools.filter((pool) => pool.sourceProviders.includes(provider)).length,
@@ -464,7 +502,7 @@ function uniqueProviders(providers: MarketProviderId[]) {
 }
 
 function isProvider(value: string): value is MarketProviderId {
-  return value === "mock" || value === "dexscreener" || value === "geckoterminal";
+  return value === "mock" || value === "dexscreener" || value === "geckoterminal" || value === "onchain";
 }
 
 function hasExactPoolBinding(pair: BasePair) {
@@ -479,6 +517,28 @@ function marketQualityScore(pair: BasePair) {
   const quoteBonus = normalizeAddress(pair.baseTokenAddress) && VERIFIED_QUOTE_TOKENS.has(normalizeAddress(pair.baseTokenAddress)! as never)
     || normalizeAddress(pair.quoteTokenAddress) && VERIFIED_QUOTE_TOKENS.has(normalizeAddress(pair.quoteTokenAddress)! as never) ? 20 : 0;
   return (pair.stale ? -10_000 : 0) + Math.log1p(liquidity) * 100 + Math.log1p(volume) * 55 + completeness * 20 + quoteBonus;
+}
+
+function explainPrimarySelection(pairs: BasePair[], selected: BasePair, previousMarketId?: string): TokenOpportunity["primarySelection"] {
+  if (!previousMarketId) return { code: "highest_quality" };
+  const previous = pairs.find((pair) => pair.id === previousMarketId);
+  if (!previous || previous.stale || !hasExactPoolBinding(previous)) {
+    return { code: "previous_invalid", previousMarketId };
+  }
+  if (selected.id === previousMarketId) {
+    const challenger = [...pairs].filter((pair) => pair.id !== previousMarketId).sort((left, right) => marketQualityScore(right) - marketQualityScore(left) || comparePoolAddress(left, right))[0];
+    return challenger && marketQualityScore(challenger) > marketQualityScore(previous)
+      ? { code: "hysteresis_retained", previousMarketId, challengerMarketId: challenger.id }
+      : { code: "unchanged", previousMarketId };
+  }
+  return { code: "material_quality_improvement", previousMarketId, challengerMarketId: selected.id };
+}
+
+function metadataQuality(pairs: BasePair[]): TokenOpportunity["metadataStatus"] {
+  const states = pairs.map((pair) => pair.metadataStatus).filter(Boolean);
+  if (states.length === pairs.length && states.every((state) => state === "complete")) return "complete";
+  if (states.length > 0) return "partial";
+  return "unavailable";
 }
 
 function getMovingInputs(pair: BasePair) {

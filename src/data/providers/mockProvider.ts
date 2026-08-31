@@ -7,15 +7,15 @@ function findPair(id: string) {
 }
 
 function byNewPoolAge(left: BasePair, right: BasePair) {
-  return left.ageMinutes - right.ageMinutes;
+  return (left.ageMinutes ?? Number.POSITIVE_INFINITY) - (right.ageMinutes ?? Number.POSITIVE_INFINITY);
 }
 
 function byVolumeInflow(left: BasePair, right: BasePair) {
-  return right.inflow24h - left.inflow24h;
+  return (right.inflow24h ?? 0) - (left.inflow24h ?? 0);
 }
 
 function byMomentum(left: BasePair, right: BasePair) {
-  return right.momentumScore - left.momentumScore;
+  return (right.momentumScore ?? 0) - (left.momentumScore ?? 0);
 }
 
 function getRiskDetails(pair: BasePair): PairRiskDetails {

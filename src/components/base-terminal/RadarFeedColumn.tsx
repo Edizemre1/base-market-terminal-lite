@@ -83,11 +83,11 @@ export function PinnedPairsPanel({
               </button>
               <span className="text-right font-mono text-meta">
                 <span className="block text-content-primary">{pair.price}</span>
-                <span className={pair.change24h >= 0 ? "text-market-positive" : "text-market-negative"}>
-                  {formatPercent(pair.change24h)}
+                <span className={(pair.change24h ?? 0) >= 0 ? "text-market-positive" : "text-market-negative"}>
+                  {pair.change24h === undefined ? "N/A" : formatPercent(pair.change24h)}
                 </span>
                 <span className="block text-meta text-content-secondary">
-                  L {formatCompactCurrency(pair.liquidity || pair.volume24h)}
+                  L {pair.liquidity === undefined && pair.volume24h === undefined ? "N/A" : formatCompactCurrency(pair.liquidity ?? pair.volume24h ?? 0)}
                 </span>
               </span>
               <button
@@ -283,24 +283,24 @@ function FeedRow({
         </span>
         <span className="font-mono text-meta text-content-secondary">{pair.age}</span>
         <span className="text-right font-mono text-meta text-content-primary">
-          {formatCompactCurrency(pair.liquidity)}
+          {pair.liquidity === undefined ? "N/A" : formatCompactCurrency(pair.liquidity)}
         </span>
         <span className="text-right font-mono text-meta text-content-primary">
-          {formatCompactCurrency(pair.volume24h)}
+          {pair.volume24h === undefined ? "N/A" : formatCompactCurrency(pair.volume24h)}
         </span>
         <span
           className={cx(
             "justify-self-end border px-1 py-1 text-right font-mono text-meta",
-            pair.change24h >= 0
+            (pair.change24h ?? 0) >= 0
               ? "border-brand-accent/35 bg-brand-accent/10 text-brand-accent"
               : "border-market-negative/35 bg-market-negative/10 text-market-negative"
           )}
         >
           {kind === "momentum"
-            ? pair.momentumScore
+            ? pair.momentumScore ?? "N/A"
             : kind === "inflow"
-              ? `+${formatCompactCurrency(pair.inflow24h)}`
-              : formatPercent(pair.change24h)}
+              ? pair.inflow24h === undefined ? "N/A" : `+${formatCompactCurrency(pair.inflow24h)}`
+              : pair.change24h === undefined ? "N/A" : formatPercent(pair.change24h)}
         </span>
       </button>
       <button

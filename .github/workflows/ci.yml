@@ -63,6 +63,9 @@ jobs:
       - name: Design-language component contracts
         run: npm run test:design
 
+      - name: On-chain discovery contracts
+        run: npm run test:onchain
+
       - name: Lint
         run: npm run lint
 

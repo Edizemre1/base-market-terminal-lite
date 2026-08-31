@@ -206,9 +206,9 @@ function TerminalSearchBox() {
                 </button>
                 <span className="text-right font-mono text-meta text-content-secondary">
                   <span className="block text-content-primary">
-                    {formatCompactCurrency(pair.liquidity)}
+                    {pair.liquidity === undefined ? "N/A" : formatCompactCurrency(pair.liquidity)}
                   </span>
-                  <span>{formatCompactCurrency(pair.volume24h)}</span>
+                  <span>{pair.volume24h === undefined ? "N/A" : formatCompactCurrency(pair.volume24h)}</span>
                 </span>
                 <button
                   type="button"

@@ -246,7 +246,8 @@ export function pairMatchesRadarState(
     return false;
   }
 
-  if (pair.liquidity < state.minLiquidityUsd || pair.volume24h < state.minVolume24hUsd) {
+  if ((state.minLiquidityUsd > 0 && (pair.liquidity === undefined || pair.liquidity < state.minLiquidityUsd)) ||
+      (state.minVolume24hUsd > 0 && (pair.volume24h === undefined || pair.volume24h < state.minVolume24hUsd))) {
     return false;
   }
 
@@ -254,11 +255,11 @@ export function pairMatchesRadarState(
     return false;
   }
 
-  if (state.minChange24h !== undefined && pair.change24h < state.minChange24h) {
+  if (state.minChange24h !== undefined && (pair.change24h === undefined || pair.change24h < state.minChange24h)) {
     return false;
   }
 
-  if (state.maxChange24h !== undefined && pair.change24h > state.maxChange24h) {
+  if (state.maxChange24h !== undefined && (pair.change24h === undefined || pair.change24h > state.maxChange24h)) {
     return false;
   }
 
@@ -270,15 +271,16 @@ export function pinnedPairMatchesRadarState(pair: PinnedPair, state: RadarState)
     return false;
   }
 
-  if (pair.liquidity < state.minLiquidityUsd || pair.volume24h < state.minVolume24hUsd) {
+  if ((state.minLiquidityUsd > 0 && (pair.liquidity === undefined || pair.liquidity < state.minLiquidityUsd)) ||
+      (state.minVolume24hUsd > 0 && (pair.volume24h === undefined || pair.volume24h < state.minVolume24hUsd))) {
     return false;
   }
 
-  if (state.minChange24h !== undefined && pair.change24h < state.minChange24h) {
+  if (state.minChange24h !== undefined && (pair.change24h === undefined || pair.change24h < state.minChange24h)) {
     return false;
   }
 
-  if (state.maxChange24h !== undefined && pair.change24h > state.maxChange24h) {
+  if (state.maxChange24h !== undefined && (pair.change24h === undefined || pair.change24h > state.maxChange24h)) {
     return false;
   }
 
@@ -333,19 +335,19 @@ export function getRadarOptionLabel(value: number) {
 
 function compareRadarPairs(left: BasePair, right: BasePair, sort: RadarSort) {
   if (sort === "liquidity-desc") {
-    return right.liquidity - left.liquidity;
+    return compareOptionalNumber(left.liquidity, right.liquidity, "desc");
   }
 
   if (sort === "volume-desc") {
-    return right.volume24h - left.volume24h;
+    return compareOptionalNumber(left.volume24h, right.volume24h, "desc");
   }
 
   if (sort === "change-desc") {
-    return right.change24h - left.change24h;
+    return compareOptionalNumber(left.change24h, right.change24h, "desc");
   }
 
   if (sort === "change-asc") {
-    return left.change24h - right.change24h;
+    return compareOptionalNumber(left.change24h, right.change24h, "asc");
   }
 
   if (sort === "newest") {
@@ -361,19 +363,19 @@ function compareRadarPairs(left: BasePair, right: BasePair, sort: RadarSort) {
 
 function comparePinnedPairs(left: PinnedPair, right: PinnedPair, sort: RadarSort) {
   if (sort === "liquidity-desc") {
-    return right.liquidity - left.liquidity;
+    return compareOptionalNumber(left.liquidity, right.liquidity, "desc");
   }
 
   if (sort === "volume-desc") {
-    return right.volume24h - left.volume24h;
+    return compareOptionalNumber(left.volume24h, right.volume24h, "desc");
   }
 
   if (sort === "change-desc") {
-    return right.change24h - left.change24h;
+    return compareOptionalNumber(left.change24h, right.change24h, "desc");
   }
 
   if (sort === "change-asc") {
-    return left.change24h - right.change24h;
+    return compareOptionalNumber(left.change24h, right.change24h, "asc");
   }
 
   return 0;
@@ -384,8 +386,14 @@ function pairHasMaxAge(pair: BasePair, maxAgeMinutes: number) {
   return Number.isFinite(age) && age <= maxAgeMinutes;
 }
 
+function compareOptionalNumber(left: number | undefined, right: number | undefined, direction: "asc" | "desc") {
+  if (left === undefined) return right === undefined ? 0 : 1;
+  if (right === undefined) return -1;
+  return direction === "asc" ? left - right : right - left;
+}
+
 function getSortableAge(pair: BasePair) {
-  if (pair.ageMinutes > 0 && pair.ageMinutes < 999_999) {
+  if (pair.ageMinutes !== undefined && pair.ageMinutes > 0 && pair.ageMinutes < 999_999) {
     return pair.ageMinutes;
   }
 

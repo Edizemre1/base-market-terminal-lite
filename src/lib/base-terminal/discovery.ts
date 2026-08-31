@@ -155,7 +155,7 @@ export function getChange24h(pair: BasePair) {
     return pair.priceChanges.h24;
   }
 
-  return pair.dataSource === "mock" && Number.isFinite(pair.change24h)
+  return pair.dataSource === "mock" && typeof pair.change24h === "number" && Number.isFinite(pair.change24h)
     ? pair.change24h
     : undefined;
 }
@@ -165,7 +165,7 @@ export function getVolume24h(pair: BasePair) {
     return pair.volumes.h24;
   }
 
-  return pair.dataSource === "mock" && Number.isFinite(pair.volume24h) && pair.volume24h >= 0 ? pair.volume24h : undefined;
+  return pair.dataSource === "mock" && typeof pair.volume24h === "number" && Number.isFinite(pair.volume24h) && pair.volume24h >= 0 ? pair.volume24h : undefined;
 }
 
 export function getLiquidityUsd(pair: BasePair) {
@@ -173,15 +173,15 @@ export function getLiquidityUsd(pair: BasePair) {
     return pair.liquidityUsd;
   }
 
-  return pair.dataSource === "mock" && Number.isFinite(pair.liquidity) && pair.liquidity >= 0 ? pair.liquidity : undefined;
+  return pair.dataSource === "mock" && typeof pair.liquidity === "number" && Number.isFinite(pair.liquidity) && pair.liquidity >= 0 ? pair.liquidity : undefined;
 }
 
 export function getPairAgeMinutes(pair: BasePair) {
-  if (pair.pairCreatedAtMs && pair.pairCreatedAtMs > 0 && pair.pairCreatedAtMs <= Date.now() + 60_000 && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0) {
+  if (pair.pairCreatedAtMs && pair.pairCreatedAtMs > 0 && pair.pairCreatedAtMs <= Date.now() + 60_000 && typeof pair.ageMinutes === "number" && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0) {
     return pair.ageMinutes;
   }
 
-  return pair.dataSource === "mock" && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0 && pair.ageMinutes < 999_999
+  return pair.dataSource === "mock" && typeof pair.ageMinutes === "number" && Number.isFinite(pair.ageMinutes) && pair.ageMinutes >= 0 && pair.ageMinutes < 999_999
     ? pair.ageMinutes
     : undefined;
 }

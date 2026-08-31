@@ -46,10 +46,10 @@ export type PinnedPair = {
   dex: string;
   price: string;
   priceUsd: string;
-  change24h: number;
-  volume24h: number;
-  liquidity: number;
-  dataSource?: "mock" | "dexscreener" | "geckoterminal";
+  change24h?: number;
+  volume24h?: number;
+  liquidity?: number;
+  dataSource?: "mock" | "dexscreener" | "geckoterminal" | "onchain";
   stale: boolean;
 };
 

@@ -351,14 +351,14 @@ export const mockBasePairs: BasePair[] = [
     quoteTokenAddress: mockAddress(index + 201),
     priceUsdValue: readMockUsdPrice(pair.priceUsd),
     liquidityUsd: pair.liquidity,
-    ...buildMockWindows(pair.volume24h, pair.change24h, index)
+    ...buildMockWindows(pair.volume24h ?? 0, pair.change24h ?? 0, index)
   })),
   ...Array.from({ length: 18 }, (_, index) => {
     const source = seedMockPairs[index % seedMockPairs.length];
     const number = index + 1;
     const factor = 1 + number / 20;
     const symbol = `LAB${number}`;
-    const volume24h = Math.round(source.volume24h * factor);
+    const volume24h = Math.round((source.volume24h ?? 0) * factor);
     return {
       ...source,
       dataSource: "mock" as const,
@@ -377,12 +377,12 @@ export const mockBasePairs: BasePair[] = [
       ageMinutes: (number + 1) * 60,
       poolAge: `${number + 1}h`,
       volume24h,
-      liquidity: Math.round(source.liquidity * (0.8 + number / 40)),
-      liquidityUsd: Math.round(source.liquidity * (0.8 + number / 40)),
-      inflow24h: Math.round(source.inflow24h * (0.7 + number / 35)),
-      momentumScore: Math.max(1, Math.min(100, source.momentumScore - number)),
+      liquidity: Math.round((source.liquidity ?? 0) * (0.8 + number / 40)),
+      liquidityUsd: Math.round((source.liquidity ?? 0) * (0.8 + number / 40)),
+      inflow24h: Math.round((source.inflow24h ?? 0) * (0.7 + number / 35)),
+      momentumScore: Math.max(1, Math.min(100, (source.momentumScore ?? 0) - number)),
       chart: source.chart.map((value, chartIndex) => Number((value * (1 + ((number + chartIndex) % 5) / 100)).toFixed(6))),
-      ...buildMockWindows(volume24h, source.change24h, number)
+      ...buildMockWindows(volume24h, source.change24h ?? 0, number)
     };
   })
 ];
@@ -425,15 +425,15 @@ export function getDefaultPair() {
 }
 
 export function getNewPairs() {
-  return [...mockBasePairs].sort((left, right) => left.ageMinutes - right.ageMinutes);
+  return [...mockBasePairs].sort((left, right) => (left.ageMinutes ?? Number.POSITIVE_INFINITY) - (right.ageMinutes ?? Number.POSITIVE_INFINITY));
 }
 
 export function getVolumeInflowPairs() {
-  return [...mockBasePairs].sort((left, right) => right.inflow24h - left.inflow24h);
+  return [...mockBasePairs].sort((left, right) => (right.inflow24h ?? 0) - (left.inflow24h ?? 0));
 }
 
 export function getMomentumPairs() {
   return [...mockBasePairs].sort(
-    (left, right) => right.momentumScore - left.momentumScore
+    (left, right) => (right.momentumScore ?? 0) - (left.momentumScore ?? 0)
   );
 }

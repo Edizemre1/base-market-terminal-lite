@@ -1,5 +1,6 @@
 import type { BasePair } from "@/types/baseTerminal";
 import { buildDiscoveryUniverse, mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
+import { mergeOnchainPoolsIntoPairs } from "@/lib/base-terminal/onchainDiscovery";
 import { recordDiscoveryHistory } from "@/lib/base-terminal/discoveryHistory";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
@@ -84,7 +85,8 @@ export async function getMarketDataProvider(
 }
 
 export async function getMarketTerminalSnapshot(
-  mode: MarketDataMode = resolveMarketDataMode()
+  mode: MarketDataMode = resolveMarketDataMode(),
+  options: { force?: boolean } = {}
 ): Promise<MarketTerminalSnapshot> {
   if (mode === "mock") {
     return buildMarketTerminalSnapshot(mockMarketDataProvider);
@@ -92,13 +94,13 @@ export async function getMarketTerminalSnapshot(
 
   const now = Date.now();
   const entry = snapshotCache.get(mode) ?? {};
-  if (entry.snapshot && entry.cachedAt && now - entry.cachedAt < SNAPSHOT_CACHE_TTL_MS) {
+  if (!options.force && entry.snapshot && entry.cachedAt && now - entry.cachedAt < SNAPSHOT_CACHE_TTL_MS) {
     return entry.snapshot;
   }
-  if (entry.inFlight) {
+  if (!options.force && entry.inFlight) {
     return entry.inFlight;
   }
-  if (entry.snapshot && entry.retryAfter && now < entry.retryAfter) {
+  if (!options.force && entry.snapshot && entry.retryAfter && now < entry.retryAfter) {
     return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
   }
 
@@ -150,7 +152,7 @@ async function buildMarketTerminalSnapshot(
     provider,
     dedupePairs([...allPairInputs, ...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
   );
-  const discoveryInput = mergeWithPreviousReservoir(hydratedPairs, previous, receivedAt);
+  const discoveryInput = mergeWithPreviousReservoir(mergeOnchainPoolsIntoPairs(hydratedPairs), previous, receivedAt);
   const discovery = buildDiscoveryUniverse(
     discoveryInput.map((pair) => ({
       ...pair,
@@ -354,7 +356,7 @@ function getHighestQualityPair(pairs: BasePair[]) {
 }
 
 function getPairQualityScore(pair: BasePair) {
-  return pair.liquidity * 0.65 + pair.volume24h * 0.35;
+  return (pair.liquidity ?? 0) * 0.65 + (pair.volume24h ?? 0) * 0.35;
 }
 
 function normalizePairToken(symbol: string) {

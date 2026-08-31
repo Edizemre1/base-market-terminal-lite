@@ -31,6 +31,11 @@ import { useOverlayManager } from "@/components/OverlayManager";
 const LAST_TRANSACTION_KEY = "mergen-terminal:last-transaction:v1";
 type QuoteStatus = "idle" | "loading" | "ready" | "error";
 type TransactionStatus = "idle" | "simulating" | "awaiting-wallet" | "submitted" | "pending" | "confirmed" | "rejected" | "failed" | "replaced";
+type SpendTokenKey = "USDC" | "WETH";
+const SPEND_TOKENS: Record<SpendTokenKey, Omit<TradeToken, "decimals">> = {
+  USDC: { address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", symbol: "USDC" },
+  WETH: { address: "0x4200000000000000000000000000000000000006", symbol: "WETH" }
+};
 
 export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, onSideChange, onInteractionChange }: {
   pair: BasePair;
@@ -58,6 +63,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   const [balanceRaw, setBalanceRaw] = useState<string>();
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [spendToken, setSpendToken] = useState<SpendTokenKey>("USDC");
   const requestIdRef = useRef(0);
   const quoteInFlightRef = useRef(false);
   const transactionInFlightRef = useRef(false);
@@ -65,7 +71,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   const reviewTriggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
-  const tokens = useMemo(() => getTradeTokens(pair, side), [pair, side]);
+  const tokens = useMemo(() => getTradeTokens(pair, side, spendToken), [pair, side, spendToken]);
   const market = getNormalizedMarketModel(pair);
   const walletConnected = wallet.status === "connected" && Boolean(wallet.address);
   const connected = walletConnected && wallet.chainId === BASE_CHAIN_ID;
@@ -126,7 +132,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
     setSimulationPassed(false);
     if (!transactionInFlightRef.current) setTransactionStatus("idle");
     setBalanceRaw(undefined);
-  }, [amount, pair.baseTokenAddress, pair.id, pair.quoteTokenAddress, side, slippageBps, wallet.address, wallet.chainId]);
+  }, [amount, pair.baseTokenAddress, pair.focusTokenAddress, pair.id, pair.quoteTokenAddress, side, slippageBps, spendToken, wallet.address, wallet.chainId]);
 
   useEffect(() => {
     if (!quote) return;
@@ -339,8 +345,9 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
     <TradeLifecycle connected={connected} hasAmount={Boolean(amount.trim())} quoteStatus={quoteStatus} quoteAvailable={Boolean(quote)} quoteExpired={quoteExpired} approvalRequired={approvalRequired} simulationPassed={simulationPassed} reviewOpen={reviewOpen} transactionStatus={transactionStatus} />
     <div className="space-y-3 p-3">
       <div className="grid grid-cols-2 rounded-control bg-surface-interactive p-1" role="tablist" aria-label={t("trade.side")}><button type="button" role="tab" aria-selected={side === "buy"} onClick={() => onSideChange("buy")} className={cx("min-h-10 rounded-control text-meta font-bold", side === "buy" ? "bg-surface-selected text-content-primary" : "text-content-secondary")}>{t("trade.buy")}</button><button type="button" role="tab" aria-selected={side === "sell"} onClick={() => onSideChange("sell")} className={cx("min-h-10 rounded-control text-meta font-bold", side === "sell" ? "bg-market-negative/15 text-market-negative" : "text-content-secondary")}>{t("trade.sell")}</button></div>
+      <label className="flex items-center justify-between rounded-control bg-surface-interactive px-2 py-2 text-meta text-content-secondary"><span>{t("trade.spendToken")}</span><select data-testid="trade-spend-token" value={spendToken} onChange={(event) => setSpendToken(event.target.value as SpendTokenKey)} className="h-8 rounded-control bg-surface-panel px-2 font-mono text-meta"><option value="USDC">USDC</option><option value="WETH">WETH</option></select></label>
       <div className="rounded-card border border-border-subtle bg-surface-panel p-3"><div className="flex items-center justify-between text-meta text-content-secondary"><span>{t("wallet.from")}</span><button type="button" disabled={!connected || balanceLoading || !tokens.from?.address} onClick={() => void loadBalance()} className="min-h-8 underline disabled:no-underline disabled:opacity-50">{balanceLoading ? t("common.checking") : balance ? t("trade.balance", { value: balance }) : t("trade.loadBalance")}</button></div><div className="mt-1 grid grid-cols-[minmax(0,1fr)_94px] items-center gap-2"><input aria-label={t("wallet.amountLabel", { label: t("wallet.from") })} inputMode="decimal" value={amount} onChange={(event) => onAmountChange(event.target.value)} className="min-w-0 bg-transparent font-mono text-display outline-none" /><span className="truncate rounded-pill bg-surface-interactive px-2 py-1 text-right font-mono text-meta">{tokens.from?.symbol ?? "N/A"}</span></div>{balanceRaw && quote?.fromToken ? <div className="mt-2 grid grid-cols-4 gap-1">{[25, 50, 75, 100].map((percent) => <button key={percent} type="button" onClick={() => onAmountChange(formatPercentOfBalance(balanceRaw, quote.fromToken.decimals, percent))} className="min-h-8 rounded-control bg-surface-interactive text-meta text-content-secondary">{percent === 100 ? t("trade.max") : `${percent}%`}</button>)}</div> : null}</div>
-      <div className="rounded-card border border-border-subtle bg-surface-panel p-3"><p className="text-meta text-content-secondary">{quote ? t("trade.expected") : t("trade.indicative")}</p><div className="mt-1 flex items-center justify-between"><span className="font-mono text-title">{output ?? "—"}</span><span className="rounded-pill bg-surface-interactive px-2 py-1 font-mono text-meta">{tokens.to?.symbol ?? "N/A"}</span></div><p className="mt-2 text-meta text-content-secondary">{t("trade.marketContext", { price: pair.priceUsd, liquidity: formatCompactCurrency(pair.liquidity) })}</p></div>
+      <div className="rounded-card border border-border-subtle bg-surface-panel p-3"><p className="text-meta text-content-secondary">{quote ? t("trade.expected") : t("trade.indicative")}</p><div className="mt-1 flex items-center justify-between"><span className="font-mono text-title">{output ?? "—"}</span><span className="rounded-pill bg-surface-interactive px-2 py-1 font-mono text-meta">{tokens.to?.symbol ?? "N/A"}</span></div><p className="mt-2 text-meta text-content-secondary">{t("trade.marketContext", { price: pair.priceUsd, liquidity: pair.liquidityUsd === undefined && pair.liquidity === undefined ? t("common.unavailable") : formatCompactCurrency(pair.liquidityUsd ?? pair.liquidity!) })}</p><p className="mt-1 text-meta text-content-secondary">{t("trade.marketPriceNotQuote")}</p></div>
       <label className="flex items-center justify-between rounded-control bg-surface-interactive px-2 py-2 text-meta text-content-secondary"><span>{t("trade.slippage")}</span><select value={slippageBps} onChange={(event) => setSlippageBps(Number(event.target.value))} className="h-8 rounded-control bg-surface-panel px-2 font-mono text-meta"><option value={25}>0.25%</option><option value={50}>0.50%</option><option value={100}>1.00%</option></select></label>
       {quote ? <div className="space-y-1 rounded-card bg-surface-interactive/60 p-3 text-meta"><QuoteLine label={t("trade.provider")} value={`${quote.provider} · ${quote.route}`} /><QuoteLine label={t("trade.minimum")} value={`${minimum ?? "N/A"} ${quote.toToken.symbol}`} critical /><QuoteLine label={t("trade.priceImpact")} value={quote.priceImpactPercent === undefined ? t("common.unavailable") : `${quote.priceImpactPercent}%`} /><QuoteLine label={t("trade.gasEstimate")} value={formatGasEstimate(quote.gasEstimate) ?? t("common.unavailable")} /><QuoteLine label={t("trade.networkFee")} value={quote.networkFeeUsd ? `$${quote.networkFeeUsd}` : t("common.unavailable")} /><QuoteLine label={t("trade.providerFees")} value={formatProviderFees(quote, t("trade.noProviderFee"))} /><QuoteLine label={t("trade.quoteAge")} value={t("trade.quoteAgeSeconds", { count: quoteAgeSeconds })} /><QuoteLine label={t("trade.quoteExpiry")} value={new Date(quote.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} critical={quoteExpired} /></div> : null}
       {quoteError ? <p role="alert" className="rounded-control border border-freshness-delayed/30 bg-freshness-delayed/10 p-2 text-meta leading-5 text-freshness-delayed"><AlertTriangle size={12} className="mr-1 inline" />{quoteError}</p> : null}
@@ -397,10 +404,13 @@ function lifecycleTone(state: LifecycleState) {
   return "bg-surface-interactive text-content-secondary";
 }
 
-function getTradeTokens(pair: BasePair, side: TradeSide): { from?: Omit<TradeToken, "decimals">; to?: Omit<TradeToken, "decimals"> } {
-  const base = pair.baseTokenAddress ? { address: pair.baseTokenAddress, symbol: pair.baseToken } : undefined;
-  const quote = pair.quoteTokenAddress ? { address: pair.quoteTokenAddress, symbol: pair.quoteToken } : undefined;
-  return side === "buy" ? { from: quote, to: base } : { from: base, to: quote };
+export function getTradeTokens(pair: BasePair, side: TradeSide, spendToken: SpendTokenKey = "USDC"): { from?: Omit<TradeToken, "decimals">; to?: Omit<TradeToken, "decimals"> } {
+  const targetAddress = pair.focusTokenAddress ?? pair.baseTokenAddress;
+  const targetSymbol = pair.focusTokenSymbol ?? pair.baseToken;
+  const target = targetAddress ? { address: targetAddress, symbol: targetSymbol } : undefined;
+  const spend = SPEND_TOKENS[spendToken];
+  if (!target || target.address.toLowerCase() === spend.address) return {};
+  return side === "buy" ? { from: spend, to: target } : { from: target, to: spend };
 }
 
 function currentQuoteContext(quote: TransactionQuote, tokens: ReturnType<typeof getTradeTokens>, walletAddress: string, pairKey: string, side: TradeSide, amount: string, slippageBps: number): QuoteInvalidationInput {

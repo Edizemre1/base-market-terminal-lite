@@ -35,6 +35,9 @@ try {
   if (manifest.sourceSha !== expectedSha) {
     throw new Error(`Manifest SHA mismatch: ${manifest.sourceSha}`);
   }
+  if (manifest.runtimeEntrypoints?.web !== "server.js" || manifest.runtimeEntrypoints?.onchainCollector !== "collector/run.mjs") {
+    throw new Error("Manifest runtime entrypoints are incomplete.");
+  }
 
   const deploySha = (await readFile(path.join(verifyRoot, ".deploy-sha"), "utf8")).trim();
   if (deploySha !== expectedSha) {
@@ -64,6 +67,10 @@ try {
     if (contents.byteLength !== expected.size || digest !== expected.sha256) {
       throw new Error(`Artifact file verification failed: ${relativePath}`);
     }
+  }
+
+  for (const required of ["server.js", "collector/run.mjs", "collector/factory-registry.mjs", "collector/store.mjs"]) {
+    if (!expectedFiles.has(required)) throw new Error(`Required runtime file missing: ${required}`);
   }
 
   const archiveBytes = await readFile(archive);
