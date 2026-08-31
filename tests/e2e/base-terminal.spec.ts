@@ -51,14 +51,14 @@ test.describe("living Base terminal", () => {
   test("redirects legacy root parameters to canonical terminal and keeps deep-linked selection", async ({ page }) => {
     await page.goto("/?data=mock&pair=blob-usdc");
     await expect(page).toHaveURL(/\/terminal\?data=mock&pair=blob-usdc/);
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
     await page.reload();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
 
   test("selects a market inline without leaving the current workspace", async ({ page }) => {
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
     await expect(page).toHaveURL(/pair=0x[0-9a-f]{40}/);
     await expect(page.getByTestId("terminal-workspace")).toBeVisible();
     await expect(page.getByTestId("context-inspector")).toBeVisible();
@@ -71,7 +71,7 @@ test.describe("living Base terminal", () => {
     await search.fill("blob");
     await expect(page.getByTestId("search-result-blob-usdc")).toContainText("BLOB / USDC");
     await page.getByTestId("search-result-blob-usdc").click();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
 
   test("applies filters, shows active chips, updates result count, and resets", async ({ page }) => {

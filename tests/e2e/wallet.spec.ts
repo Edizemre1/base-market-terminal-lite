@@ -1,13 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { TransactionQuote, TradeCapabilities } from "../../src/lib/trade/types";
+import type { QuoteRequest, TransactionQuote, TradeCapabilities } from "../../src/lib/trade/types";
 import { BASE_TRADE_CHAIN_ID } from "../../src/lib/trade/types";
 import { createQuoteFingerprint } from "../../src/lib/trade/validation";
 import { installVerifiedWalletStub } from "./helpers/walletStub";
 
-const account = "0x1111111111111111111111111111111111111111";
-const pairAddress = mockAddress(1);
-const baseAddress = mockAddress(101);
-const quoteAddress = mockAddress(201);
 const targetAddress = "0x4444444444444444444444444444444444444444";
 const approvalAddress = "0x5555555555555555555555555555555555555555";
 
@@ -107,6 +103,10 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
     await openTradeDrawer(page);
+    await expect(page.getByTestId("trade-spend-token")).toHaveValue("USDC");
+    await page.getByTestId("trade-spend-token").selectOption("WETH");
+    await expect(page.getByTestId("trade-spend-token")).toHaveValue("WETH");
+    await page.getByTestId("trade-spend-token").selectOption("USDC");
 
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_loading");
@@ -127,7 +127,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     let sent = await sentTransactions(page);
     expect(sent).toHaveLength(1);
     expect(String(sent[0]?.data)).toMatch(/^0x095ea7b3/);
-    expect(String(sent[0]?.data).endsWith(BigInt("100000000000000000").toString(16).padStart(64, "0"))).toBeTruthy();
+    expect(String(sent[0]?.data).endsWith(BigInt("100000").toString(16).padStart(64, "0"))).toBeTruthy();
 
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
@@ -146,10 +146,11 @@ async function mockEnabledTradeServer(page: Page, options: { expiryMs?: number; 
   await page.route("**/api/health", (route) => route.fulfill({ json: { ok: true, ...capabilities, quoteProviders: capabilities.providers } }));
   await page.route("**/api/quote", async (route) => {
     if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    const request = route.request().postDataJSON() as QuoteRequest;
     const createdAt = new Date().toISOString();
     const withoutFingerprint: Omit<TransactionQuote, "fingerprint"> = {
-      kind: "transaction-quote", id: `mock_quote_${Date.now()}`, provider: "LI.FI", route: "Mocked CI route", walletAddress: account, pairKey: `base:pool:${pairAddress}`, side: "buy", chainId: BASE_TRADE_CHAIN_ID,
-      fromToken: { address: quoteAddress, symbol: "WETH", decimals: 18 }, toToken: { address: baseAddress, symbol: "PEPE", decimals: 18 }, amount: "0.10", fromAmountRaw: "100000000000000000", expectedAmountRaw: "200000000000000000000", minimumAmountRaw: "190000000000000000000", approvalAddress, slippageBps: 50, priceImpactPercent: 0.12, gasEstimate: "0x186a0", networkFeeUsd: "0.03", fees: [{ name: "Protocol fee", amountUsd: "0.01" }], createdAt, expiresAt: new Date(Date.now() + (options.expiryMs ?? 45_000)).toISOString(), transaction: { from: account, to: targetAddress, data: "0x12345678", value: "0x0", chainId: BASE_TRADE_CHAIN_ID, gasLimit: "0x186a0" }, simulation: "required"
+      kind: "transaction-quote", id: `mock_quote_${Date.now()}`, provider: "LI.FI", route: "Mocked CI route", walletAddress: request.walletAddress, pairKey: request.pairKey, side: request.side, chainId: BASE_TRADE_CHAIN_ID,
+      fromToken: request.fromToken, toToken: request.toToken, amount: request.amount, fromAmountRaw: request.fromAmountRaw, expectedAmountRaw: "200000000000000000000", minimumAmountRaw: "190000000000000000000", approvalAddress, slippageBps: request.slippageBps, priceImpactPercent: 0.12, gasEstimate: "0x186a0", networkFeeUsd: "0.03", fees: [{ name: "Protocol fee", amountUsd: "0.01" }], createdAt, expiresAt: new Date(Date.now() + (options.expiryMs ?? 45_000)).toISOString(), transaction: { from: request.walletAddress, to: targetAddress, data: "0x12345678", value: "0x0", chainId: BASE_TRADE_CHAIN_ID, gasLimit: "0x186a0" }, simulation: "required"
     };
     const quote = { ...withoutFingerprint, fingerprint: createQuoteFingerprint(withoutFingerprint) };
     return route.fulfill({ json: { quote, capabilities } });
@@ -188,5 +189,3 @@ async function walletMethods(page: Page) {
 async function sentTransactions(page: Page) {
   return page.evaluate(() => ((window as Window & { __walletHarness?: { requests: Array<{ method: string; params?: unknown }> } }).__walletHarness?.requests ?? []).filter((request) => request.method === "eth_sendTransaction").map((request) => Array.isArray(request.params) ? request.params[0] as { data?: string } : {}));
 }
-
-function mockAddress(value: number) { return `0x${value.toString(16).padStart(40, "0")}`; }

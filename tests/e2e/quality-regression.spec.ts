@@ -51,7 +51,7 @@ test.describe("terminal quality regression", () => {
     };
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: omitted }));
     await page.getByTestId("refresh-terminal").click();
-    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB / USDC");
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
 
   test("serves app assets and secondary pages without 500 responses", async ({ page, request }) => {
