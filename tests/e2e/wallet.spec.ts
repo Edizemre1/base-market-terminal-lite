@@ -6,6 +6,12 @@ import { installVerifiedWalletStub } from "./helpers/walletStub";
 
 const targetAddress = "0x4444444444444444444444444444444444444444";
 const approvalAddress = "0x5555555555555555555555555555555555555555";
+const usdcAddress = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+
+type BrowserQuoteRequest = Omit<QuoteRequest, "fromAmountRaw" | "chainId" | "fromToken" | "toToken"> & {
+  fromToken: Omit<QuoteRequest["fromToken"], "decimals">;
+  toToken: Omit<QuoteRequest["toToken"], "decimals">;
+};
 
 test.describe("explicit wallet and transaction lifecycle", () => {
   test("makes no wallet RPC or popup request on initial load", async ({ page }) => {
@@ -146,12 +152,14 @@ async function mockEnabledTradeServer(page: Page, options: { expiryMs?: number; 
   await page.route("**/api/health", (route) => route.fulfill({ json: { ok: true, ...capabilities, quoteProviders: capabilities.providers } }));
   await page.route("**/api/quote", async (route) => {
     if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
-    const request = route.request().postDataJSON() as Omit<QuoteRequest, "fromAmountRaw" | "chainId">;
-    const fromAmountRaw = parseHumanTokenAmount(request.amount, request.fromToken.decimals)!;
+    const request = route.request().postDataJSON() as BrowserQuoteRequest;
+    const fromToken = { ...request.fromToken, decimals: request.fromToken.address.toLowerCase() === usdcAddress ? 6 : 18 };
+    const toToken = { ...request.toToken, decimals: request.toToken.address.toLowerCase() === usdcAddress ? 6 : 18 };
+    const fromAmountRaw = parseHumanTokenAmount(request.amount, fromToken.decimals)!;
     const createdAt = new Date().toISOString();
     const withoutFingerprint: Omit<TransactionQuote, "fingerprint"> = {
       kind: "transaction-quote", id: `mock_quote_${Date.now()}`, provider: "LI.FI", route: "Mocked CI route", walletAddress: request.walletAddress, pairKey: request.pairKey, side: request.side, chainId: BASE_TRADE_CHAIN_ID,
-      fromToken: request.fromToken, toToken: request.toToken, amount: request.amount, fromAmountRaw, expectedAmountRaw: "200000000000000000000", minimumAmountRaw: "190000000000000000000", approvalAddress, slippageBps: request.slippageBps, priceImpactPercent: 0.12, gasEstimate: "0x186a0", networkFeeUsd: "0.03", fees: [{ name: "Protocol fee", amountUsd: "0.01" }], createdAt, expiresAt: new Date(Date.now() + (options.expiryMs ?? 45_000)).toISOString(), transaction: { from: request.walletAddress, to: targetAddress, data: "0x12345678", value: "0x0", chainId: BASE_TRADE_CHAIN_ID, gasLimit: "0x186a0" }, simulation: "required"
+      fromToken, toToken, amount: request.amount, fromAmountRaw, expectedAmountRaw: "200000000000000000000", minimumAmountRaw: "190000000000000000000", approvalAddress, slippageBps: request.slippageBps, priceImpactPercent: 0.12, gasEstimate: "0x186a0", networkFeeUsd: "0.03", fees: [{ name: "Protocol fee", amountUsd: "0.01" }], createdAt, expiresAt: new Date(Date.now() + (options.expiryMs ?? 45_000)).toISOString(), transaction: { from: request.walletAddress, to: targetAddress, data: "0x12345678", value: "0x0", chainId: BASE_TRADE_CHAIN_ID, gasLimit: "0x186a0" }, simulation: "required"
     };
     const quote = { ...withoutFingerprint, fingerprint: createQuoteFingerprint(withoutFingerprint) };
     return route.fulfill({ json: { quote, capabilities } });
