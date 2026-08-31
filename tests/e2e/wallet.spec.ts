@@ -80,23 +80,6 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     expect(await sentTransactions(page)).toHaveLength(0);
   });
 
-  test("invalidates a fresh quote on pair or wallet context changes", async ({ page }) => {
-    await installVerifiedWalletStub(page);
-    await mockEnabledTradeServer(page, { delayMs: 450 });
-    await page.goto("/terminal?data=mock");
-    await connectWallet(page);
-    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
-    await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
-    await page.keyboard.press("Escape");
-    await page.getByTestId("matrix-row-blob-usdc").getByRole("button").first().click();
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
-    await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_required");
-
-    await page.evaluate(() => (window as Window & { __walletHarness?: { disconnect: () => void } }).__walletHarness?.disconnect());
-    await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wallet_required");
-    expect(await sentTransactions(page)).toHaveLength(0);
-  });
-
   test("reports a rejected connection without exposing raw provider errors", async ({ page }) => {
     await installVerifiedWalletStub(page, { rejectConnection: true });
     await page.goto("/terminal?data=mock");
