@@ -73,6 +73,8 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   const mountedRef = useRef(true);
   const tokens = useMemo(() => getTradeTokens(pair, side, spendToken), [pair, side, spendToken]);
   const market = getNormalizedMarketModel(pair);
+  const quoteContextKey = [amount, pair.baseTokenAddress, pair.focusTokenAddress, pair.id, pair.quoteTokenAddress, side, slippageBps, spendToken, wallet.address, wallet.chainId].join("|");
+  const quoteContextKeyRef = useRef(quoteContextKey);
   const walletConnected = wallet.status === "connected" && Boolean(wallet.address);
   const connected = walletConnected && wallet.chainId === BASE_CHAIN_ID;
   const exactTokensAvailable = Boolean(tokens.from?.address && tokens.to?.address && market.key);
@@ -119,6 +121,8 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   }, []);
 
   useEffect(() => {
+    if (quoteContextKeyRef.current === quoteContextKey) return;
+    quoteContextKeyRef.current = quoteContextKey;
     requestIdRef.current += 1;
     quoteAbortRef.current?.abort();
     quoteAbortRef.current = undefined;
@@ -132,7 +136,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
     setSimulationPassed(false);
     if (!transactionInFlightRef.current) setTransactionStatus("idle");
     setBalanceRaw(undefined);
-  }, [amount, pair.baseTokenAddress, pair.focusTokenAddress, pair.id, pair.quoteTokenAddress, side, slippageBps, spendToken, wallet.address, wallet.chainId]);
+  }, [quoteContextKey]);
 
   useEffect(() => {
     if (!quote || !capabilities) return;
