@@ -69,7 +69,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).not.toContainText(/No route was found|işlem rotası bulunamadı/);
   });
 
-  test("expires and invalidates a quote on pair or wallet context changes", async ({ page }, testInfo) => {
+  test("expires a short-lived valid quote without sending a transaction", async ({ page }, testInfo) => {
     await installVerifiedWalletStub(page);
     await mockEnabledTradeServer(page, { expiryMs: 700 });
     await page.goto("/terminal?data=mock");
@@ -77,9 +77,14 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_expired");
     await page.screenshot({ path: testInfo.outputPath("trade-quote-expired-1440.png"), fullPage: false });
+    expect(await sentTransactions(page)).toHaveLength(0);
+  });
 
-    await page.unroute("**/api/quote");
+  test("invalidates a fresh quote on pair or wallet context changes", async ({ page }) => {
+    await installVerifiedWalletStub(page);
     await mockEnabledTradeServer(page);
+    await page.goto("/terminal?data=mock");
+    await connectWallet(page);
     await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "quote_available");
     await page.keyboard.press("Escape");
