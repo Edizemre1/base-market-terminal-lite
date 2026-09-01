@@ -59,6 +59,7 @@ export class OnchainDiscoveryCollector {
   async run(signal) {
     this.running = true;
     const enrichment = this.runEnrichmentLoop(signal);
+    const anchor = this.runAnchorLoop(signal);
     while (this.running && !signal?.aborted) {
       const startedAt = Date.now();
       try { await this.scanOnce(); }
@@ -66,7 +67,7 @@ export class OnchainDiscoveryCollector {
       const remaining = Math.max(50, this.config.pollIntervalMs - (Date.now() - startedAt));
       await delay(remaining, signal);
     }
-    await enrichment;
+    await Promise.all([enrichment, anchor]);
   }
 
   async scanOnce() {
@@ -229,7 +230,6 @@ export class OnchainDiscoveryCollector {
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
       });
     }
-    await this.refreshAnchorIfDue(now);
     const state = this.store.read();
     const due = (state.enrichmentQueue ?? [])
       .filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime())
@@ -347,6 +347,15 @@ export class OnchainDiscoveryCollector {
     });
     await this.publishSemanticDeltas(before, after, outcomes.map((outcome) => outcome.item.poolKey));
     return this.store.read();
+  }
+
+  async runAnchorLoop(signal) {
+    while (this.running && !signal?.aborted) {
+      const startedAt = Date.now();
+      await this.refreshAnchorIfDue(new Date());
+      if (!this.running || signal?.aborted) break;
+      await delay(Math.max(250, 5_000 - (Date.now() - startedAt)), signal);
+    }
   }
 
   async refreshAnchorIfDue(now = new Date()) {

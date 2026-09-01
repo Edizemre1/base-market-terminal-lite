@@ -142,6 +142,19 @@ test("anchor validation is bounded to the three highest-liquidity exact pools", 
   ]);
 });
 
+test("trusted anchor refresh has a dedicated loop independent of pool enrichment batches", async () => {
+  let refreshes = 0;
+  const subject = {
+    running: true,
+    refreshAnchorIfDue: async () => {
+      refreshes += 1;
+      subject.running = false;
+    }
+  };
+  await OnchainDiscoveryCollector.prototype.runAnchorLoop.call(subject, new AbortController().signal);
+  assert.equal(refreshes, 1);
+});
+
 test("enrichment queue deduplicates by normalized pool key and priority", () => {
   const queue = coalesceEnrichmentQueue([{ poolKey: POOL.toUpperCase().replace("0X", "0x"), priority: 10 }], [{ poolKey: POOL, priority: 90 }]);
   assert.equal(queue.length, 1);
