@@ -11,7 +11,8 @@ import {
   joinExactProviderPools,
   nextRetryAt,
   parseDexScreenerPayload,
-  resolveWethUsdcAnchor
+  resolveWethUsdcAnchor,
+  stabilizeWethUsdcAnchorRefresh
 } from "../collector/provider-enrichment.mjs";
 import { readSupportedPoolState } from "../collector/rpc.mjs";
 import { OnchainDiscoveryCollector } from "../collector/service.mjs";
@@ -95,6 +96,20 @@ test("stale and dust anchors never become ready", () => {
   assert.equal(stale.status, "unavailable");
   assert.equal(stale.reasonCode, "stale_anchor");
   assert.equal(dust.reasonCode, "dust_anchor_liquidity");
+});
+
+test("an empty refresh retains a still-fresh anchor and retries quickly", () => {
+  const current = resolveWethUsdcAnchor([anchorCandidate({ observedAt: new Date(NOW.getTime() - 60_000).toISOString() })], NOW);
+  const empty = resolveWethUsdcAnchor([], NOW);
+  const retained = stabilizeWethUsdcAnchorRefresh(current, empty, NOW);
+  assert.equal(retained.status, "ready");
+  assert.equal(retained.value, current.value);
+  assert.equal(retained.refreshStatus, "retained_last_fresh");
+  assert.equal(retained.lastRefreshReasonCode, "no_verified_anchor_candidate");
+  assert.equal(retained.nextRefreshAt, new Date(NOW.getTime() + 10_000).toISOString());
+
+  const staleCurrent = { ...current, observedAt: new Date(NOW.getTime() - 121_000).toISOString() };
+  assert.equal(stabilizeWethUsdcAnchorRefresh(staleCurrent, empty, NOW).status, "unavailable");
 });
 
 test("anchor validation uses lookup completion time after a slow RPC inspection", () => {

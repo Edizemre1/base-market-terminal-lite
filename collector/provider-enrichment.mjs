@@ -283,6 +283,29 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
   };
 }
 
+export function stabilizeWethUsdcAnchorRefresh(current, candidate, completedAt = new Date(), { maximumAgeMs = 2 * 60_000, emptyRetryMs = 10_000 } = {}) {
+  const completedMs = completedAt.getTime();
+  const observedMs = Date.parse(current?.observedAt ?? "");
+  const canRetain = candidate?.status === "unavailable"
+    && candidate?.reasonCode === "no_verified_anchor_candidate"
+    && current?.status === "ready"
+    && Number.isFinite(observedMs)
+    && completedMs >= observedMs
+    && completedMs - observedMs <= maximumAgeMs;
+  if (canRetain) {
+    return {
+      ...current,
+      nextRefreshAt: new Date(completedMs + emptyRetryMs).toISOString(),
+      lastRefreshReasonCode: candidate.reasonCode,
+      refreshStatus: "retained_last_fresh"
+    };
+  }
+  return {
+    ...candidate,
+    nextRefreshAt: new Date(completedMs + ANCHOR_REFRESH_MS).toISOString()
+  };
+}
+
 export function coalesceEnrichmentQueue(existing, incoming, maximum = ENRICHMENT_QUEUE_LIMIT) {
   const queue = new Map();
   for (const item of [...(existing ?? []), ...(incoming ?? [])]) {

@@ -3,7 +3,6 @@ import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, co
 import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding } from "./rpc.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
 import {
-  ANCHOR_REFRESH_MS,
   ENRICHMENT_MAX_ATTEMPTS,
   ProviderEnrichmentClient,
   PROVIDER_REFRESH_MS,
@@ -11,7 +10,8 @@ import {
   coalesceEnrichmentQueue,
   joinExactProviderPools,
   nextRetryAt,
-  resolveWethUsdcAnchor
+  resolveWethUsdcAnchor,
+  stabilizeWethUsdcAnchorRefresh
 } from "./provider-enrichment.mjs";
 
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
@@ -383,8 +383,8 @@ export class OnchainDiscoveryCollector {
         };
       });
       const completedAt = new Date();
-      const anchor = resolveWethUsdcAnchor(inspected.filter(Boolean), completedAt);
-      anchor.nextRefreshAt = new Date(completedAt.getTime() + ANCHOR_REFRESH_MS).toISOString();
+      const candidateAnchor = resolveWethUsdcAnchor(inspected.filter(Boolean), completedAt);
+      const anchor = stabilizeWethUsdcAnchorRefresh(current, candidateAnchor, completedAt);
       const after = await this.store.transact("trusted-weth-usdc-anchor-refresh", (draft) => {
         ensureEnrichmentState(draft);
         draft.tokenMetadata = { ...draft.tokenMetadata, ...metadata };
