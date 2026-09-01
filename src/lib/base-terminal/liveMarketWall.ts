@@ -44,6 +44,7 @@ export type LiveMarketWall = {
 type Candidate = Omit<LiveWallEntry, "strength">;
 
 const LANE_ORDER: LiveWallLaneId[] = ["new", "gainers", "losers", "volume", "liquidity", "traded"];
+const MOCK_LANE_MINIMUM_LIQUIDITY_USD = 10_000;
 const MINIMUM_LIQUIDITY_DELTA_USD = 1_000;
 const MINIMUM_VOLUME_USD: Record<LiveWallTimeframe, number> = { m5: 1_000, h1: 5_000, h24: 10_000 };
 const MINIMUM_TRADES: Record<LiveWallTimeframe, number> = { m5: 3, h1: 10, h24: 20 };
@@ -64,6 +65,7 @@ export function buildLiveMarketWall(
     now?: Date;
   } = {}
 ): LiveMarketWall {
+  const mockMode = snapshot.mode === "mock";
   const nowMs = now.getTime();
   const currentGeneratedAt = Date.parse(snapshot.generatedAt);
   const previousGeneratedAt = snapshot.comparison.previousGeneratedAt ? Date.parse(snapshot.comparison.previousGeneratedAt) : Number.NaN;
@@ -80,25 +82,39 @@ export function buildLiveMarketWall(
   });
 
   const newCandidates = rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (opportunity.qualityBand !== "RANKED" && opportunity.qualityBand !== "EMERGING") return [];
+    if (!mockMode && opportunity.qualityBand !== "RANKED" && opportunity.qualityBand !== "EMERGING") return [];
     const createdAt = opportunity.newestPoolCreatedAt ? Date.parse(opportunity.newestPoolCreatedAt) : Number.NaN;
     const ageMinutes = Number.isFinite(createdAt) ? (nowMs - createdAt) / 60_000 : Number.NaN;
     if (!Number.isFinite(ageMinutes) || ageMinutes < 0 || ageMinutes > NEW_POOL_MAX_AGE_MINUTES) return [];
     return [{ opportunity, pair, metric: { kind: "age", current: ageMinutes, window: "snapshot" } }];
   }).sort((left, right) => left.metric.current - right.metric.current || compareMarketQuality(left, right));
 
-  const directionalRows = comparisonReady ? rows.filter(({ opportunity, pair }) => isFreshRanked(opportunity, pair)
-    && finite(opportunity.bestLiquidityUsd)
-    && opportunity.bestLiquidityUsd! >= MARKET_QUALITY_THRESHOLDS.gainersLosersMinimumLiquidityUsd
-    && readPositive(opportunity.canonicalPrice.value) !== undefined
-    && readPositive(previousMetrics[opportunity.id]?.canonicalPriceUsd) !== undefined) : [];
+  // Explicit Mock mode remains a deterministic sample surface for interaction and
+  // visual regression coverage. Live/provider modes always use the canonical gates.
+  const directionalRows = mockMode
+    ? rows.filter(({ opportunity, pair }) => isFreshMockSample(opportunity, pair)
+      && finite(opportunity.aggregate.liquidityUsd)
+      && opportunity.aggregate.liquidityUsd! >= MOCK_LANE_MINIMUM_LIQUIDITY_USD)
+    : comparisonReady ? rows.filter(({ opportunity, pair }) => isFreshRanked(opportunity, pair)
+      && finite(opportunity.bestLiquidityUsd)
+      && opportunity.bestLiquidityUsd! >= MARKET_QUALITY_THRESHOLDS.gainersLosersMinimumLiquidityUsd
+      && readPositive(opportunity.canonicalPrice.value) !== undefined
+      && readPositive(previousMetrics[opportunity.id]?.canonicalPriceUsd) !== undefined) : [];
   const gainers = directionalRows.flatMap(({ opportunity, pair }): Candidate[] => {
+    if (mockMode) {
+      const change = readFinite(pair.priceChanges?.[timeframe]);
+      return change !== undefined && change > 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, window: timeframe } }] : [];
+    }
     const current = opportunity.canonicalPrice.value!;
     const previous = previousMetrics[opportunity.id]!.canonicalPriceUsd!;
     const change = (current / previous - 1) * 100;
     return change > 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, previous, delta: current - previous, ratio: current / previous, window: "snapshot" } }] : [];
   }).sort((left, right) => right.metric.current - left.metric.current || compareMarketQuality(left, right));
   const losers = directionalRows.flatMap(({ opportunity, pair }): Candidate[] => {
+    if (mockMode) {
+      const change = readFinite(pair.priceChanges?.[timeframe]);
+      return change !== undefined && change < 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, window: timeframe } }] : [];
+    }
     const current = opportunity.canonicalPrice.value!;
     const previous = previousMetrics[opportunity.id]!.canonicalPriceUsd!;
     const change = (current / previous - 1) * 100;
@@ -106,14 +122,18 @@ export function buildLiveMarketWall(
   }).sort((left, right) => left.metric.current - right.metric.current || compareMarketQuality(left, right));
 
   const inflowCandidates = comparisonReady ? rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
+    if (mockMode
+      ? !isFreshMockSample(opportunity, pair) || (opportunity.aggregate.liquidityUsd ?? 0) < MOCK_LANE_MINIMUM_LIQUIDITY_USD
+      : !isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.volumes?.[timeframe]);
     const previous = readFiniteNonNegative(previousMetrics[opportunity.id]?.volumes?.[timeframe]);
     if (current === undefined || previous === undefined || previous <= 0 || current <= previous || current < MINIMUM_VOLUME_USD[timeframe]) return [];
     return [{ opportunity, pair, metric: { kind: "volume_inflow", current, previous, delta: current - previous, ratio: current / previous, window: timeframe } }];
   }).sort((left, right) => (right.metric.ratio! - left.metric.ratio!) || (right.metric.delta! - left.metric.delta!) || compareMarketQuality(left, right)) : [];
   const volumeLeaders = rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
+    if (mockMode
+      ? !isFreshMockSample(opportunity, pair) || (opportunity.aggregate.liquidityUsd ?? 0) < MOCK_LANE_MINIMUM_LIQUIDITY_USD
+      : !isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.volumes?.[timeframe]);
     return current !== undefined && current >= MINIMUM_VOLUME_USD[timeframe]
       ? [{ opportunity, pair, metric: { kind: "volume_leader", current, window: timeframe } }]
@@ -122,7 +142,7 @@ export function buildLiveMarketWall(
   const volumeFallback = inflowCandidates.length === 0;
 
   const liquidityCandidates = comparisonReady ? rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshRanked(opportunity, pair)) return [];
+    if (mockMode ? !isFreshMockSample(opportunity, pair) : !isFreshRanked(opportunity, pair)) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.liquidityUsd);
     const previous = readFiniteNonNegative(previousMetrics[opportunity.id]?.liquidityUsd);
     if (current === undefined || previous === undefined || previous < MARKET_QUALITY_THRESHOLDS.liquidityLaneMinimumLiquidityUsd) return [];
@@ -134,7 +154,9 @@ export function buildLiveMarketWall(
   }).sort((left, right) => Math.abs(right.metric.delta!) - Math.abs(left.metric.delta!) || Math.abs(right.metric.ratio!) - Math.abs(left.metric.ratio!) || compareMarketQuality(left, right)) : [];
 
   const tradedCandidates = rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.mostTradedMinimumLiquidityUsd) return [];
+    if (mockMode
+      ? !isFreshMockSample(opportunity, pair)
+      : !isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.mostTradedMinimumLiquidityUsd) return [];
     const transactions = opportunity.aggregate.transactions?.[timeframe];
     const count = readTransactionCount(transactions);
     if (count === undefined || count < MINIMUM_TRADES[timeframe]) return [];
@@ -158,7 +180,7 @@ export function buildLiveMarketWall(
     fallback: id === "volume" && volumeFallback,
     baselinePending: (id === "volume" || id === "liquidity") && !comparisonReady,
     freshness: laneStatus,
-    timeframe: id === "new" ? "age" : id === "liquidity" || id === "gainers" || id === "losers" ? "snapshot" : timeframe
+    timeframe: id === "new" ? "age" : id === "liquidity" || (!mockMode && (id === "gainers" || id === "losers")) ? "snapshot" : timeframe
   }));
   const visibleIds = lanes.flatMap((lane) => lane.entries.map((entry) => entry.opportunity.id));
   return {
@@ -222,6 +244,10 @@ function isFreshRanked(opportunity: TokenOpportunity, pair: BasePair) {
   return opportunity.quality === "active" && opportunity.qualityBand === "RANKED" && opportunity.canonicalPrice.tier !== "UNPRICED" && !pair.stale;
 }
 
+function isFreshMockSample(opportunity: TokenOpportunity, pair: BasePair) {
+  return opportunity.quality === "active" && !pair.stale;
+}
+
 function readTransactionCount(value: PairTxnWindow | undefined) {
   if (!value || readFiniteNonNegative(value.buys) === undefined || readFiniteNonNegative(value.sells) === undefined) return undefined;
   return value.buys + value.sells;
@@ -235,6 +261,10 @@ function compareMarketQuality(left: Candidate, right: Candidate) {
 
 function readFiniteNonNegative(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function readFinite(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function readPositive(value: number | undefined) {
