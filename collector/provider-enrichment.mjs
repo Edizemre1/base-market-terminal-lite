@@ -7,6 +7,10 @@ export const UNMATCHED_REFRESH_MS = 10 * 60_000;
 export const ANCHOR_REFRESH_MS = 30_000;
 export const EXACT_LOOKUP_CACHE_MS = 30_000;
 export const EXACT_LOOKUP_NEGATIVE_TTL_MS = 2 * 60_000;
+export const PROVIDER_MINIMUM_INTERVAL_MS = Object.freeze({
+  dexscreener: 210,
+  geckoterminal: 3_000
+});
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const DEXSCREENER = "https://api.dexscreener.com";
@@ -23,7 +27,9 @@ export class ProviderEnrichmentClient {
     this.providerTimeoutMs = typeof timeoutMs === "number"
       ? { dexscreener: timeoutMs, geckoterminal: Math.min(12_000, Math.max(timeoutMs, 8_000)) }
       : { dexscreener: timeoutMs?.dexscreener ?? 8_000, geckoterminal: timeoutMs?.geckoterminal ?? 10_000 };
-    this.providerMinimumIntervalMs = { dexscreener: 210, geckoterminal: 2_050 };
+    // Leave shared-IP headroom for the web process's read-only GeckoTerminal
+    // requests while keeping this collector below the public 30 req/min limit.
+    this.providerMinimumIntervalMs = { ...PROVIDER_MINIMUM_INTERVAL_MS };
     this.providerNextRequestAt = { dexscreener: 0, geckoterminal: 0 };
     this.exactLookupCache = new Map();
     this.exactLookupInFlight = new Map();

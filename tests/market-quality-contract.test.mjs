@@ -11,7 +11,7 @@ import {
   classifyLiquidityState,
   evaluateOpportunityQuality
 } from "../collector/market-quality.mjs";
-import { ProviderEnrichmentClient, EXACT_LOOKUP_NEGATIVE_TTL_MS, joinExactProviderPools } from "../collector/provider-enrichment.mjs";
+import { ProviderEnrichmentClient, EXACT_LOOKUP_NEGATIVE_TTL_MS, PROVIDER_MINIMUM_INTERVAL_MS, joinExactProviderPools } from "../collector/provider-enrichment.mjs";
 import { OnchainDiscoveryCollector } from "../collector/service.mjs";
 import { initialState } from "../collector/store.mjs";
 
@@ -130,6 +130,12 @@ test("exact pool lookup uses only the requested address endpoints", async () => 
   assert.equal(result.observations.length, 2);
   assert.ok(urls.every((url) => url.includes(POOL)));
   assert.ok(urls.some((url) => url.endsWith(`/networks/base/pools/${POOL}/info`)));
+});
+
+test("exact provider rate gates leave shared-IP headroom", () => {
+  assert.ok(PROVIDER_MINIMUM_INTERVAL_MS.dexscreener >= 200);
+  assert.ok(PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal >= 3_000);
+  assert.ok(60_000 / PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal <= 20);
 });
 
 test("exact lookup 404 is negative-cached until TTL expires", async () => {
