@@ -18,6 +18,7 @@ test.describe("terminal quality regression", () => {
     const row = page.getByTestId("matrix-row-blob-usdc");
     const key = await row.getAttribute("data-market-key");
     await row.getByRole("button").first().click();
+    await expect(page).toHaveURL(/(?:\?|&)pair=blob-usdc(?:&|$)/);
     await expect(page.getByTestId("context-inspector")).toHaveAttribute("data-market-key", key!);
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
     await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
