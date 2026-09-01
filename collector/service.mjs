@@ -341,6 +341,7 @@ export class OnchainDiscoveryCollector {
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
     try {
       const observations = await this.provider.lookupWethPools();
+      const lookupCompletedAt = new Date();
       const blockNumber = before.currentHead || await this.rpc.blockNumber();
       const metadata = { ...before.tokenMetadata };
       for (const token of [BASE_WETH, BASE_USDC]) {
@@ -364,7 +365,7 @@ export class OnchainDiscoveryCollector {
           protocolVersion: identity.registry.protocolVersion
         };
         const onchainState = await readSupportedPoolState(this.rpc, pool, metadata, "latest");
-        const joined = joinExactProviderPools(pool, [observation], { onchainState, now });
+        const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
         const canonicalRate = pool.token0 === BASE_WETH ? joined.priceToken1PerToken0 : joined.priceToken1PerToken0 > 0 ? 1 / joined.priceToken1PerToken0 : undefined;
         return {
@@ -381,8 +382,9 @@ export class OnchainDiscoveryCollector {
           rawPriceRatio: pool.token0 === BASE_WETH ? joined.rawPriceRatio : invertRawRatio(joined.rawPriceRatio)
         };
       });
-      const anchor = resolveWethUsdcAnchor(inspected.filter(Boolean), now);
-      anchor.nextRefreshAt = new Date(now.getTime() + ANCHOR_REFRESH_MS).toISOString();
+      const completedAt = new Date();
+      const anchor = resolveWethUsdcAnchor(inspected.filter(Boolean), completedAt);
+      anchor.nextRefreshAt = new Date(completedAt.getTime() + ANCHOR_REFRESH_MS).toISOString();
       const after = await this.store.transact("trusted-weth-usdc-anchor-refresh", (draft) => {
         ensureEnrichmentState(draft);
         draft.tokenMetadata = { ...draft.tokenMetadata, ...metadata };
@@ -397,12 +399,13 @@ export class OnchainDiscoveryCollector {
     } catch (error) {
       return this.store.transact("trusted-anchor-refresh-failure", (draft) => {
         ensureEnrichmentState(draft);
+        const failedAt = new Date();
         const anchor = draft.priceAnchors.wethUsdc;
         const observed = Date.parse(anchor?.observedAt ?? "");
-        if (!Number.isFinite(observed) || now.getTime() - observed > 2 * 60_000) {
+        if (!Number.isFinite(observed) || failedAt.getTime() - observed > 2 * 60_000) {
           draft.priceAnchors.wethUsdc = { ...anchor, status: "unavailable", reasonCode: error?.reasonCode ?? "anchor_provider_failure", freshness: "unavailable" };
         }
-        draft.priceAnchors.wethUsdc.nextRefreshAt = new Date(now.getTime() + 10_000).toISOString();
+        draft.priceAnchors.wethUsdc.nextRefreshAt = new Date(failedAt.getTime() + 10_000).toISOString();
         draft.counters.enrichmentFailure += 1;
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
       });

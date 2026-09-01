@@ -97,6 +97,20 @@ test("stale and dust anchors never become ready", () => {
   assert.equal(dust.reasonCode, "dust_anchor_liquidity");
 });
 
+test("anchor validation uses lookup completion time after a slow RPC inspection", () => {
+  const startedAt = new Date("2026-09-01T12:00:00.000Z");
+  const observedAt = new Date(startedAt.getTime() + 6_000).toISOString();
+  const completedAt = new Date(startedAt.getTime() + 20_000);
+  const candidate = anchorCandidate({
+    poolAddress: "0x0000000000000000000000000000000000000111",
+    priceToken1PerToken0: 2_400,
+    liquidityUsd: 2_000_000,
+    observedAt
+  });
+  assert.equal(resolveWethUsdcAnchor([candidate], startedAt).status, "unavailable");
+  assert.equal(resolveWethUsdcAnchor([candidate], completedAt).status, "ready");
+});
+
 test("enrichment queue deduplicates by normalized pool key and priority", () => {
   const queue = coalesceEnrichmentQueue([{ poolKey: POOL.toUpperCase().replace("0X", "0x"), priority: 10 }], [{ poolKey: POOL, priority: 90 }]);
   assert.equal(queue.length, 1);
