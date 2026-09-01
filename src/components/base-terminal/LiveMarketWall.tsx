@@ -196,7 +196,7 @@ function formatAge(minutes: number, locale: "tr" | "en") {
 
 function formatObservedTime(value: string, locale: "tr" | "en") {
   const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleTimeString(locale === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "—";
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleTimeString(locale === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" }) : "—";
 }
 
 const PULSE_EVENT_KEYS: Record<PulseEventType, TranslationKey> = {

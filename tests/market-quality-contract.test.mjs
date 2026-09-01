@@ -203,6 +203,11 @@ test("live wall compares canonical snapshot prices and excludes observed-only pr
   assert.doesNotMatch(source, /observedPriceUsd.*gainer/i);
 });
 
+test("live wall event times are hydration-stable across server and browser time zones", async () => {
+  const source = await readFile(path.resolve("src/components/base-terminal/LiveMarketWall.tsx"), "utf8");
+  assert.match(source, /function formatObservedTime[\s\S]*?toLocaleTimeString[\s\S]*?timeZone: "UTC"/);
+});
+
 test("quality labels retain exact TR and EN parity", async () => {
   const source = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
   for (const key of ["qualityView", "thinMarket", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected"]) {
