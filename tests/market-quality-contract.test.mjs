@@ -134,8 +134,26 @@ test("exact pool lookup uses only the requested address endpoints", async () => 
 
 test("exact provider rate gates leave shared-IP headroom", () => {
   assert.ok(PROVIDER_MINIMUM_INTERVAL_MS.dexscreener >= 200);
-  assert.ok(PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal >= 3_000);
-  assert.ok(60_000 / PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal <= 20);
+  assert.ok(PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal >= 6_000);
+  assert.ok(60_000 / PROVIDER_MINIMUM_INTERVAL_MS.geckoterminal <= 10);
+});
+
+test("a 429 opens the provider circuit immediately and honors Retry-After without retrying", async () => {
+  let calls = 0;
+  const client = new ProviderEnrichmentClient({
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: false, status: 429, headers: { get: (name) => name === "retry-after" ? "120" : null } };
+    },
+    retries: 1,
+    now: () => NOW,
+    delayImpl: async () => {}
+  });
+  client.providerMinimumIntervalMs.geckoterminal = 0;
+  await assert.rejects(client.request("geckoterminal", "https://api.geckoterminal.com/test"), (error) => error?.reasonCode === "provider_http_429");
+  assert.equal(calls, 1);
+  assert.equal(client.circuitSnapshot().geckoterminal.state, "open");
+  assert.equal(client.circuitSnapshot().geckoterminal.openUntil, "2026-09-01T12:02:00.000Z");
 });
 
 test("exact lookup 404 is negative-cached until TTL expires", async () => {

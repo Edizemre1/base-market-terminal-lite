@@ -9,7 +9,7 @@ export const EXACT_LOOKUP_CACHE_MS = 30_000;
 export const EXACT_LOOKUP_NEGATIVE_TTL_MS = 2 * 60_000;
 export const PROVIDER_MINIMUM_INTERVAL_MS = Object.freeze({
   dexscreener: 210,
-  geckoterminal: 3_000
+  geckoterminal: 6_000
 });
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -27,8 +27,8 @@ export class ProviderEnrichmentClient {
     this.providerTimeoutMs = typeof timeoutMs === "number"
       ? { dexscreener: timeoutMs, geckoterminal: Math.min(12_000, Math.max(timeoutMs, 8_000)) }
       : { dexscreener: timeoutMs?.dexscreener ?? 8_000, geckoterminal: timeoutMs?.geckoterminal ?? 10_000 };
-    // Leave shared-IP headroom for the web process's read-only GeckoTerminal
-    // requests while keeping this collector below the public 30 req/min limit.
+    // Leave two-thirds shared-IP headroom for other read-only GeckoTerminal
+    // consumers while keeping this collector below the public 30 req/min limit.
     this.providerMinimumIntervalMs = { ...PROVIDER_MINIMUM_INTERVAL_MS };
     this.providerNextRequestAt = { dexscreener: 0, geckoterminal: 0 };
     this.exactLookupCache = new Map();
@@ -112,7 +112,11 @@ export class ProviderEnrichmentClient {
         });
         if (!response?.ok) {
           const status = Number(response?.status);
-          throw new ProviderRequestError(`provider_http_${status || "invalid"}`, { retryable: status === 408 || status === 429 || status >= 500, provider });
+          throw new ProviderRequestError(`provider_http_${status || "invalid"}`, {
+            retryable: status === 408 || status === 429 || status >= 500,
+            provider,
+            retryAfterMs: status === 429 ? readRetryAfterMs(response, this.now().getTime()) : undefined
+          });
         }
         const payload = await response.json();
         circuit.consecutiveFailures = 0;
@@ -123,6 +127,11 @@ export class ProviderEnrichmentClient {
       } catch (error) {
         const normalized = normalizeProviderError(error, provider);
         circuit.lastFailureReason = normalized.reasonCode;
+        if (normalized.reasonCode === "provider_http_429") {
+          circuit.consecutiveFailures += 1;
+          circuit.openUntil = Math.max(circuit.openUntil, this.now().getTime() + Math.max(60_000, normalized.retryAfterMs ?? 0));
+          throw normalized;
+        }
         if (!normalized.retryable || attempt === this.retries) {
           circuit.consecutiveFailures += 1;
           if (circuit.consecutiveFailures >= 5) circuit.openUntil = this.now().getTime() + 30_000;
@@ -143,12 +152,13 @@ export class ProviderEnrichmentClient {
 }
 
 export class ProviderRequestError extends Error {
-  constructor(reasonCode, { retryable = false, provider } = {}) {
+  constructor(reasonCode, { retryable = false, provider, retryAfterMs } = {}) {
     super(reasonCode);
     this.name = "ProviderRequestError";
     this.reasonCode = reasonCode;
     this.retryable = retryable;
     this.provider = provider;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -474,5 +484,12 @@ function relativeDeviation(values) { if (!values.length) return undefined; const
 function dominantReason(rejected) { return rejected.map((item) => item.reasonCode).sort()[0]; }
 function safeFailure(error) { return { provider: error?.provider, reasonCode: error?.reasonCode ?? "provider_failure", retryable: Boolean(error?.retryable) }; }
 function normalizeProviderError(error, provider) { if (error instanceof ProviderRequestError) return error; const timeout = error?.name === "TimeoutError" || error?.name === "AbortError"; return new ProviderRequestError(timeout ? "provider_timeout" : "provider_network_failure", { retryable: true, provider }); }
+function readRetryAfterMs(response, nowMs) {
+  const value = response?.headers?.get?.("retry-after")?.trim();
+  if (!value) return undefined;
+  const seconds = Number(value);
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - nowMs;
+  return Number.isFinite(milliseconds) && milliseconds > 0 ? Math.min(5 * 60_000, Math.max(1_000, milliseconds)) : undefined;
+}
 function newCircuit() { return { consecutiveFailures: 0, openUntil: 0, lastSuccessAt: undefined, lastFailureReason: undefined }; }
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
