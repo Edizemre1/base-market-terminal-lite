@@ -98,7 +98,9 @@ export async function getMarketTerminalSnapshot(
     return entry.snapshot;
   }
   if (!options.force && entry.inFlight) {
-    return entry.inFlight;
+    return entry.snapshot
+      ? markSnapshotDelayed(entry.snapshot, "Provider refresh is in progress; using the last healthy snapshot.")
+      : entry.inFlight;
   }
   if (!options.force && entry.snapshot && entry.retryAfter && now < entry.retryAfter) {
     return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
@@ -124,6 +126,9 @@ export async function getMarketTerminalSnapshot(
     });
 
   snapshotCache.set(mode, { ...entry, inFlight });
+  if (!options.force && entry.snapshot) {
+    return markSnapshotDelayed(entry.snapshot, "Provider refresh is running in the background; using the last healthy snapshot.");
+  }
   return inFlight;
 }
 

@@ -39,6 +39,17 @@ export class OnchainDiscoveryCollector {
     this.config = config;
     this.rpc = new JsonRpcClient(config.httpUrl);
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
+    // Anchor availability is a pricing safety boundary. Keep its provider
+    // request and bounded RPC validation independent from the normal exact-pool
+    // backlog so queued enrichment cannot age out a healthy anchor.
+    this.anchorProvider = config.anchorProviderClient ?? new ProviderEnrichmentClient({
+      timeoutMs: config.providerTimeoutMs,
+      retries: 0
+    });
+    this.anchorRpc = config.anchorRpcClient ?? new JsonRpcClient(config.httpUrl, {
+      timeoutMs: Math.min(5_000, config.providerTimeoutMs),
+      retries: 0
+    });
     this.store = new DurableDiscoveryStore(config.storeDirectory);
     this.running = false;
     this.websocket = undefined;
@@ -363,20 +374,20 @@ export class OnchainDiscoveryCollector {
     const current = before.priceAnchors?.wethUsdc;
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
     try {
-      const observations = selectAnchorValidationCandidates(await this.provider.lookupWethPools());
+      const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools());
       const lookupCompletedAt = new Date();
-      const blockNumber = before.currentHead || await this.rpc.blockNumber();
+      const blockNumber = before.currentHead || await this.anchorRpc.blockNumber();
       const metadata = { ...before.tokenMetadata };
       for (const token of [BASE_WETH, BASE_USDC]) {
         if (!Number.isInteger(metadata[token]?.decimals)) {
-          const exactDecimals = await readTokenDecimals(this.rpc, token, "latest");
+          const exactDecimals = await readTokenDecimals(this.anchorRpc, token, "latest");
           metadata[token] = exactDecimals.ok
             ? { ...metadata[token], address: token, decimals: exactDecimals.decimals, codeExists: true, observedAt: exactDecimals.observedAt, blockNumber, status: metadata[token]?.name && metadata[token]?.symbol ? "complete" : "partial" }
-            : metadata[token] ?? await enrichTokenMetadata(this.rpc, token, blockNumber, now);
+            : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now);
         }
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
-        const identity = await inspectRegisteredPool(this.rpc, observation.poolAddress, "latest");
+        const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest");
         if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
         const pool = {
           poolKey: observation.poolAddress,
@@ -387,7 +398,7 @@ export class OnchainDiscoveryCollector {
           factoryAddress: identity.registry.address,
           protocolVersion: identity.registry.protocolVersion
         };
-        const onchainState = await readSupportedPoolState(this.rpc, pool, metadata, "latest");
+        const onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest");
         const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
         const canonicalRate = pool.token0 === BASE_WETH ? joined.priceToken1PerToken0 : joined.priceToken1PerToken0 > 0 ? 1 / joined.priceToken1PerToken0 : undefined;

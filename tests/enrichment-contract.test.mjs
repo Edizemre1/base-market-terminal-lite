@@ -155,6 +155,24 @@ test("trusted anchor refresh has a dedicated loop independent of pool enrichment
   assert.equal(refreshes, 1);
 });
 
+test("trusted anchor owns isolated provider and bounded RPC clients", () => {
+  const providerClient = { circuitSnapshot: () => ({}) };
+  const anchorProviderClient = { lookupWethPools: async () => [] };
+  const anchorRpcClient = { blockNumber: async () => 1 };
+  const collector = new OnchainDiscoveryCollector({
+    httpUrl: "https://mainnet.base.org",
+    storeDirectory: path.join(tmpdir(), "anchor-client-contract"),
+    providerTimeoutMs: 8_000,
+    providerClient,
+    anchorProviderClient,
+    anchorRpcClient
+  });
+  assert.equal(collector.provider, providerClient);
+  assert.equal(collector.anchorProvider, anchorProviderClient);
+  assert.equal(collector.anchorRpc, anchorRpcClient);
+  assert.notEqual(collector.anchorProvider, collector.provider);
+});
+
 test("enrichment queue deduplicates by normalized pool key and priority", () => {
   const queue = coalesceEnrichmentQueue([{ poolKey: POOL.toUpperCase().replace("0X", "0x"), priority: 10 }], [{ poolKey: POOL, priority: 90 }]);
   assert.equal(queue.length, 1);

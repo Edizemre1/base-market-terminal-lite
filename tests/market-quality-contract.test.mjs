@@ -256,6 +256,12 @@ test("explicit mock mode cannot merge the persisted on-chain reservoir", async (
   assert.match(source, /provider\.mode === "dexscreener"[\s\S]*?mergeOnchainPoolsIntoPairs\(hydratedPairs\)[\s\S]*?: hydratedPairs/);
 });
 
+test("stale live snapshots serve immediately while provider refresh continues", async () => {
+  const source = await readFile(path.resolve("src/data/providers/index.ts"), "utf8");
+  assert.match(source, /entry\.inFlight[\s\S]*?entry\.snapshot[\s\S]*?markSnapshotDelayed/);
+  assert.match(source, /snapshotCache\.set\(mode, \{ \.\.\.entry, inFlight \}\);[\s\S]*?if \(!options\.force && entry\.snapshot\)[\s\S]*?return markSnapshotDelayed/);
+});
+
 test("quality labels retain exact TR and EN parity", async () => {
   const source = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
   for (const key of ["qualityView", "thinMarket", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected"]) {
