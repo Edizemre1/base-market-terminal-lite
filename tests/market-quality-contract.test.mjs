@@ -42,9 +42,16 @@ test("inverted exact provider orientation derives quote token USD", () => {
   assert.equal(observed.value, 1);
 });
 
-test("stale provider price is not promoted to observedPriceUsd", () => {
+test("expired provider price is not promoted to observedPriceUsd", () => {
   const old = new Date(NOW.getTime() - MARKET_QUALITY_THRESHOLDS.observedPriceMaximumAgeMs - 1).toISOString();
   assert.equal(buildObservedPriceUsd(TOKEN, [collectorPool({ observedAt: old })], NOW), undefined);
+});
+
+test("aged exact provider price remains explicitly delayed before bounded expiry", () => {
+  const delayed = new Date(NOW.getTime() - MARKET_QUALITY_THRESHOLDS.observedPriceFreshMaximumAgeMs - 1).toISOString();
+  const observed = buildObservedPriceUsd(TOKEN, [collectorPool({ observedAt: delayed })], NOW);
+  assert.equal(observed.freshness, "delayed");
+  assert.equal(observed.executable, false);
 });
 
 test("observed provider price is explicitly never executable", () => {

@@ -1,5 +1,6 @@
 export const MARKET_QUALITY_THRESHOLDS = Object.freeze({
-  observedPriceMaximumAgeMs: 2 * 60_000,
+  observedPriceFreshMaximumAgeMs: 2 * 60_000,
+  observedPriceMaximumAgeMs: 15 * 60_000,
   canonicalPriceMinimumLiquidityUsd: 1_000,
   qualityViewEmergingMinimumLiquidityUsd: 100,
   rankingMinimumLiquidityUsd: 25_000,
@@ -32,7 +33,10 @@ export function classifyLiquidityState(values, minimumLiquidityUsd = MARKET_QUAL
   return "liquidity_unknown";
 }
 
-export function buildObservedPriceUsd(tokenAddress, pools, now = new Date(), { maximumAgeMs = MARKET_QUALITY_THRESHOLDS.observedPriceMaximumAgeMs } = {}) {
+export function buildObservedPriceUsd(tokenAddress, pools, now = new Date(), {
+  freshMaximumAgeMs = MARKET_QUALITY_THRESHOLDS.observedPriceFreshMaximumAgeMs,
+  maximumAgeMs = MARKET_QUALITY_THRESHOLDS.observedPriceMaximumAgeMs
+} = {}) {
   const token = normalizeAddress(tokenAddress);
   if (!token) return undefined;
   const nowMs = now.getTime();
@@ -61,7 +65,7 @@ export function buildObservedPriceUsd(tokenAddress, pools, now = new Date(), { m
         poolAddress,
         observedAt,
         receivedAt: row.receivedAt,
-        freshness: "fresh",
+        freshness: nowMs - observedMs <= freshMaximumAgeMs ? "fresh" : "delayed",
         liquidityUsd: finiteNonNegative(row.liquidityUsd),
         reasonCode: "exact_provider_observed_price",
         executable: false
