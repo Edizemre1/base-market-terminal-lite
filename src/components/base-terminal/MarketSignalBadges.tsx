@@ -36,7 +36,7 @@ import {
 } from "@/lib/base-terminal/marketSignals";
 import type { BasePair } from "@/types/baseTerminal";
 import { useI18n } from "@/i18n/I18nProvider";
-import { cx } from "@/lib/format";
+import { cx, normalizeCompactNumberText } from "@/lib/format";
 
 export const MARKET_SIGNAL_ICONS: Readonly<Record<MarketSignalIconKey, LucideIcon>> = Object.freeze({
   sparkles: Sparkles,
@@ -298,7 +298,7 @@ function formatMetric(metric: NonNullable<MarketSignalBadge["metric"]>, locale: 
 }
 
 function formatMetricValue(value: number, unit: NonNullable<MarketSignalBadge["metric"]>["unit"], locale: "tr" | "en") {
-  if (unit === "usd") return new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value);
+  if (unit === "usd") return normalizeCompactNumberText(new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value));
   if (unit === "percent") return `${new Intl.NumberFormat(locale === "tr" ? "tr-TR" : "en-US", { maximumFractionDigits: 2 }).format(value)}%`;
   if (unit === "ratio") return `${value.toFixed(2)}×`;
   if (unit === "minutes") return `${Math.round(value)}m`;

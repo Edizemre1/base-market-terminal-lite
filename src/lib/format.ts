@@ -15,20 +15,30 @@ export function formatCurrency(value: number, maximumFractionDigits = 2) {
 
 export function formatCompactCurrency(value: number) {
   if (!Number.isFinite(value)) return "N/A";
-  return new Intl.NumberFormat("en-US", {
+  return normalizeCompactNumberText(new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     notation: "compact",
     maximumFractionDigits: 1
-  }).format(normalizeSignedZero(value));
+  }).format(normalizeSignedZero(value)));
 }
 
 export function formatNumber(value: number) {
   if (!Number.isFinite(value)) return "N/A";
-  return new Intl.NumberFormat("en-US", {
-    notation: value > 9999 ? "compact" : "standard",
+  const compact = value > 9999;
+  const formatted = new Intl.NumberFormat("en-US", {
+    notation: compact ? "compact" : "standard",
     maximumFractionDigits: 1
   }).format(normalizeSignedZero(value));
+  return compact ? normalizeCompactNumberText(formatted) : formatted;
+}
+
+// Node and Chromium can ship different ICU compact-number data. For example,
+// the same options may produce "$713.0K" during SSR and "$713K" in the
+// browser. Removing only an optional terminal zero keeps hydration stable
+// without hiding meaningful fractional precision.
+export function normalizeCompactNumberText(value: string) {
+  return value.replace(/([.,])0(?=\D*$)/u, "");
 }
 
 export function formatPercent(value: number) {

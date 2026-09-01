@@ -11,6 +11,7 @@ import {
 import type { BasePair } from "@/types/baseTerminal";
 import { canonicalPairKey, calculatePercentChange } from "@/lib/marketMath";
 import { shouldAcceptMarketSnapshot } from "@/lib/base-terminal/providerHealth";
+import { normalizeCompactNumberText } from "@/lib/format";
 
 export type PulseEventType =
   | "new_pool"
@@ -477,7 +478,7 @@ function isFinitePositive(value: number | undefined): value is number {
 
 function formatUsd(value: number | undefined) {
   if (!isFinitePositive(value)) return "unavailable";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return normalizeCompactNumberText(new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value));
 }
 
 function formatPercent(value: number) {

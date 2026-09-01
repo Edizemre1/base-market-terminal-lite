@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { isLocale, translate, type Locale, type TranslationKey } from "@/i18n/dictionaries";
 import { normalizeSignedZero } from "@/lib/marketMath";
 import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { normalizeCompactNumberText } from "@/lib/format";
 
 export const LOCALE_STORAGE_KEY = "mergen-pulse:locale:v1";
 export const LOCALE_COOKIE_NAME = "mergen_locale";
@@ -63,8 +64,13 @@ export function I18nProvider({ initialLocale, initialNow, children }: { initialL
       setLocale,
       t: (key, values) => translate(locale, key, values),
       formatCurrency: (number, maximumFractionDigits = 2) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", maximumFractionDigits }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
-      formatCompactCurrency: (number) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
-      formatNumber: (number, maximumFractionDigits = 1) => Number.isFinite(number) ? new Intl.NumberFormat(intlLocale, { notation: Math.abs(number) > 9999 ? "compact" : "standard", maximumFractionDigits }).format(normalizeSignedZero(number)) : translate(locale, "common.noData"),
+      formatCompactCurrency: (number) => Number.isFinite(number) ? normalizeCompactNumberText(new Intl.NumberFormat(intlLocale, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(normalizeSignedZero(number))) : translate(locale, "common.noData"),
+      formatNumber: (number, maximumFractionDigits = 1) => {
+        if (!Number.isFinite(number)) return translate(locale, "common.noData");
+        const compact = Math.abs(number) > 9999;
+        const formatted = new Intl.NumberFormat(intlLocale, { notation: compact ? "compact" : "standard", maximumFractionDigits }).format(normalizeSignedZero(number));
+        return compact ? normalizeCompactNumberText(formatted) : formatted;
+      },
       formatPercent: (number) => {
         if (!Number.isFinite(number)) return translate(locale, "common.noData");
         const normalized = normalizeSignedZero(number);

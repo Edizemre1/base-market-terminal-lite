@@ -3,6 +3,7 @@ import { getChange24h, getLiquidityUsd, getVolume24h } from "@/lib/base-terminal
 import type { PulseSignal } from "@/lib/base-terminal/pulse";
 import type { BasePair } from "@/types/baseTerminal";
 import { shouldAcceptMarketSnapshot } from "@/lib/base-terminal/providerHealth";
+import { normalizeCompactNumberText } from "@/lib/format";
 
 export type AlertMetric =
   | "price_above"
@@ -186,5 +187,5 @@ function alertTimeframe(metric: AlertMetric) {
 function formatThreshold(metric: AlertMetric, value: number) {
   if (metric.startsWith("change")) return `${value.toFixed(2)}%`;
   if (metric === "price_above" || metric === "price_below") return `$${value}`;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return normalizeCompactNumberText(new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value));
 }

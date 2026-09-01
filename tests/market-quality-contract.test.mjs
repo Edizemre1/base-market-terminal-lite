@@ -217,6 +217,20 @@ test("relative event times share the serialized server clock during hydration", 
   assert.doesNotMatch(provider, /function formatRelative[\s\S]*?Date\.now\(\) - new Date/);
 });
 
+test("compact market numbers normalize optional ICU trailing zeroes during hydration", async () => {
+  const formatter = await readFile(path.resolve("src/lib/format.ts"), "utf8");
+  const provider = await readFile(path.resolve("src/i18n/I18nProvider.tsx"), "utf8");
+  const badges = await readFile(path.resolve("src/components/base-terminal/MarketSignalBadges.tsx"), "utf8");
+  assert.match(formatter, /function normalizeCompactNumberText[\s\S]*?replace\(\/\(\[\.,\]\)0\(\?=\\D\*\$\)\/u/);
+  assert.match(provider, /formatCompactCurrency:[^\n]+normalizeCompactNumberText/);
+  assert.match(badges, /unit === "usd"[^\n]+normalizeCompactNumberText/);
+});
+
+test("explicit mock mode cannot merge the persisted on-chain reservoir", async () => {
+  const source = await readFile(path.resolve("src/data/providers/index.ts"), "utf8");
+  assert.match(source, /provider\.mode === "dexscreener"[\s\S]*?mergeOnchainPoolsIntoPairs\(hydratedPairs\)[\s\S]*?: hydratedPairs/);
+});
+
 test("quality labels retain exact TR and EN parity", async () => {
   const source = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
   for (const key of ["qualityView", "thinMarket", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected"]) {

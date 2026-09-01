@@ -152,7 +152,12 @@ async function buildMarketTerminalSnapshot(
     provider,
     dedupePairs([...allPairInputs, ...newPairInputs, ...volumeInflowInputs, ...momentumPairInputs])
   );
-  const discoveryInput = mergeWithPreviousReservoir(mergeOnchainPoolsIntoPairs(hydratedPairs), previous, receivedAt);
+  // Explicit sample mode stays isolated from the staging collector store. The
+  // live provider alone may merge the persisted on-chain discovery reservoir.
+  const providerPairs = provider.mode === "dexscreener"
+    ? mergeOnchainPoolsIntoPairs(hydratedPairs)
+    : hydratedPairs;
+  const discoveryInput = mergeWithPreviousReservoir(providerPairs, previous, receivedAt);
   const discovery = buildDiscoveryUniverse(
     discoveryInput.map((pair) => ({
       ...pair,
