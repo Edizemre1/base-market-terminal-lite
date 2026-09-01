@@ -158,7 +158,7 @@ export function initialState(now = new Date()) {
     provisional: {},
     metadataQueue: [],
     enrichmentQueue: [],
-    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0, enrichmentSuccess: 0, enrichmentFailure: 0, providerMatched: 0, providerUnmatched: 0, priceConflict: 0, staleAnchorRejected: 0, dustRejected: 0 },
+    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0, enrichmentSuccess: 0, enrichmentFailure: 0, providerMatched: 0, providerUnmatched: 0, priceConflict: 0, staleAnchorRejected: 0, dustRejected: 0, exactLookupSuccess: 0, exactLookupPending: 0, exactLookupNotFound: 0, bandTransitions: 0 },
     health: {
       ready: false,
       mode: "confirmed_polling",
@@ -231,6 +231,22 @@ function synchronizeDerivedHealth(state) {
   state.health.pricingTierCounts = pricingTierCounts;
   state.health.pricedOpportunities = pricingTierCounts.A + pricingTierCounts.B + pricingTierCounts.C;
   state.health.rankedOpportunities = (state.opportunities ?? []).filter((opportunity) => opportunity.ranked).length;
+  const bands = { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 };
+  const liquidity = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0 };
+  for (const opportunity of state.opportunities ?? []) {
+    if (Object.hasOwn(bands, opportunity.qualityBand)) bands[opportunity.qualityBand] += 1;
+    if (Object.hasOwn(liquidity, opportunity.liquidityState)) liquidity[opportunity.liquidityState] += 1;
+  }
+  state.health.rankedCount = bands.RANKED;
+  state.health.emergingCount = bands.EMERGING;
+  state.health.detectedCount = bands.DETECTED;
+  state.health.rejectedConflictingCount = bands.REJECTED + Object.values(state.pools ?? {}).filter((pool) => pool.providerEnrichment?.status === "conflicting").length;
+  state.health.observedPriceCount = (state.opportunities ?? []).filter((opportunity) => Number.isFinite(opportunity.observedPriceUsd?.value) && opportunity.observedPriceUsd.value > 0).length;
+  state.health.canonicalPriceCount = pricingTierCounts.A + pricingTierCounts.B + pricingTierCounts.C;
+  state.health.liquidityUnknownCount = liquidity.liquidity_unknown;
+  state.health.thinLiquidityCount = liquidity.thin_liquidity;
+  state.health.zeroLiquidityCount = liquidity.zero_liquidity;
+  state.health.usableLiquidityCount = liquidity.usable_liquidity;
   state.health.anchorStatus = anchor.status ?? "unavailable";
   state.health.anchorUsdPrice = anchor.value;
   state.health.anchorSourcePoolCount = anchor.sourcePoolCount ?? 0;

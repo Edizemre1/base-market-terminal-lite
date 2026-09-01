@@ -69,6 +69,9 @@ jobs:
       - name: Pricing and enrichment contracts
         run: npm run test:enrichment
 
+      - name: Market quality and targeted enrichment contracts
+        run: npm run test:quality
+
       - name: Lint
         run: npm run lint
 

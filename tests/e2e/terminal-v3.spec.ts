@@ -27,10 +27,10 @@ test.describe("terminal v3 market contracts", () => {
     const snapshot = await getMarketTerminalSnapshot("mock");
     const pair = snapshot.allPairs[0];
     const missing = { ...pair, id: "missing", pairAddress: "0x9999999999999999999999999999999999999999", liquidityUsd: undefined, liquidity: Number.NaN };
-    const rows = filterAndSortMarkets([missing, ...snapshot.allPairs], { query: "", minimumLiquidity: 1, change: "all", sortBy: "liquidity", sortDirection: "desc" });
+    const rows = filterAndSortMarkets([missing, ...snapshot.allPairs], { query: "", minimumLiquidity: 1, change: "all", qualityView: "quality", sortBy: "liquidity", sortDirection: "desc" });
     expect(rows.some((row) => row.id === "missing")).toBeFalsy();
-    const deterministic = filterAndSortMarkets([...snapshot.allPairs].reverse(), { query: "", change: "all", sortBy: "volume24h", sortDirection: "desc" });
-    expect(deterministic.map((row) => row.id)).toEqual(filterAndSortMarkets(snapshot.allPairs, { query: "", change: "all", sortBy: "volume24h", sortDirection: "desc" }).map((row) => row.id));
+    const deterministic = filterAndSortMarkets([...snapshot.allPairs].reverse(), { query: "", change: "all", qualityView: "quality", sortBy: "volume24h", sortDirection: "desc" });
+    expect(deterministic.map((row) => row.id)).toEqual(filterAndSortMarkets(snapshot.allPairs, { query: "", change: "all", qualityView: "quality", sortBy: "volume24h", sortDirection: "desc" }).map((row) => row.id));
   });
 
   test("caps pinned charts at four and counts queued reorder positions", async () => {

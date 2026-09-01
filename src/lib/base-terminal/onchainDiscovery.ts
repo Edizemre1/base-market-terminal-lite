@@ -4,7 +4,7 @@ import path from "node:path";
 import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
-export const ONCHAIN_COLLECTOR_VERSION = "base-market-enrichment-v2";
+export const ONCHAIN_COLLECTOR_VERSION = "base-market-quality-v3";
 const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 const BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 
@@ -34,10 +34,15 @@ type StoredPool = {
   liquidityUsd?: number;
   volume24hUsd?: number;
   trades24h?: number;
+  transactions?: Partial<Record<"m5" | "h1" | "h6" | "h24", { buys: number; sells: number }>>;
   decimalsVerified?: boolean;
   anchorConsensus?: boolean;
   sourcePoolKeys?: string[];
-  providerEnrichment?: { decimalsVerified?: boolean };
+  observedPricesUsd?: Record<string, number>;
+  providerSnapshots?: Array<{ provider?: string; poolAddress?: string; baseTokenAddress?: string; quoteTokenAddress?: string; priceUsd?: number; priceNative?: number; observedAt?: string; receivedAt?: string; liquidityUsd?: number }>;
+  providerIndexedAt?: string;
+  providerIndexingLatencyMs?: number;
+  providerEnrichment?: { status?: "matched" | "pending" | "unmatched" | "conflicting" | "discarded"; decimalsVerified?: boolean; selectedProvider?: string; observedAt?: string };
 };
 
 type StoredMetadata = {
@@ -183,6 +188,12 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
         firstSeenAt: earliestIso(current.firstSeenAt, pool.firstSeenAt),
         blockNumber: pool.blockNumber,
         onchainProvenance: provenance(pool),
+        observedPriceUsd: positive(pool.observedPricesUsd?.[normalizeAddress(current.baseTokenAddress) ?? ""]),
+        observedPriceProvider: pool.providerEnrichment?.selectedProvider,
+        observedPricePoolAddress: pool.poolAddress,
+        observedPriceAt: pool.providerEnrichment?.observedAt,
+        providerDiscoveryState: mapProviderDiscoveryState(pool.providerEnrichment?.status),
+        providerIndexedAt: pool.providerIndexedAt,
         liquidityUsd: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidityUsd,
         liquidity: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidity,
         volume24h: pool.anchorConsensus && pool.volume24hUsd !== undefined ? pool.volume24hUsd : current.volume24h,
@@ -258,9 +269,9 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
   const symbol0 = safeLabel(token0?.symbol, pool.token0);
   const symbol1 = safeLabel(token1?.symbol, pool.token1);
   const nativePrice = positive(pool.priceToken1PerToken0);
-  const directUsd = nativePrice === undefined ? undefined
+  const directUsd = positive(pool.observedPricesUsd?.[pool.token0]) ?? (nativePrice === undefined ? undefined
     : pool.token1 === BASE_USDC_ADDRESS ? nativePrice
-      : pool.token0 === BASE_USDC_ADDRESS ? 1 : undefined;
+      : pool.token0 === BASE_USDC_ADDRESS ? 1 : undefined);
   return {
     id: normalizePoolKey(pool.poolAddress ?? pool.poolKey),
     pairAddress: pool.poolAddress,
@@ -270,7 +281,7 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     dexId: pool.dexId,
     dexName: pool.dexId,
     dataSource: "onchain",
-    dataProviders: ["onchain"],
+    dataProviders: [...new Set([...(pool.providers ?? []).filter((provider): provider is "dexscreener" | "geckoterminal" => provider === "dexscreener" || provider === "geckoterminal"), "onchain" as const])],
     sourceUpdatedAt: pool.observedAt,
     firstSeenAt: pool.firstSeenAt,
     pairCreatedAt: createdAt,
@@ -278,6 +289,12 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     blockNumber: pool.blockNumber,
     metadataStatus: token0?.status === "complete" && token1?.status === "complete" ? "complete" : token0?.status || token1?.status ? "partial" : "unavailable",
     onchainProvenance: provenance(pool),
+    observedPriceUsd: directUsd,
+    observedPriceProvider: pool.providerEnrichment?.selectedProvider,
+    observedPricePoolAddress: pool.poolAddress,
+    observedPriceAt: pool.providerEnrichment?.observedAt,
+    providerDiscoveryState: mapProviderDiscoveryState(pool.providerEnrichment?.status),
+    providerIndexedAt: pool.providerIndexedAt,
     pair: `${symbol0} / ${symbol1}`,
     baseToken: symbol0,
     quoteToken: symbol1,
@@ -359,3 +376,8 @@ function earliestIso(left: string | undefined, right: string) { return left && D
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException { return Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"); }
 function readPricingTier(value: unknown): "A" | "B" | "C" | "UNPRICED" { if (!value || typeof value !== "object" || !("tier" in value)) return "UNPRICED"; const tier = (value as { tier?: unknown }).tier; return tier === "A" || tier === "B" || tier === "C" ? tier : "UNPRICED"; }
 function positive(value: number | undefined) { return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined; }
+function mapProviderDiscoveryState(value: "matched" | "pending" | "conflicting" | "unmatched" | "discarded" | undefined): BasePair["providerDiscoveryState"] {
+  if (value === "matched" || value === "pending" || value === "conflicting") return value;
+  if (value === "unmatched") return "not_found";
+  return "detected";
+}

@@ -110,8 +110,11 @@ export function BaseTerminal({
     if (!selectedPair) return undefined;
     const hydrated = { ...selectedPair, ...chartOverrides[getChartCacheKey(selectedPair)] };
     const opportunity = snapshotData.opportunities.find((item) => item.id === selectedPair.opportunityId);
-    return orientPairToOpportunity(hydrated, opportunity);
+    const oriented = orientPairToOpportunity(hydrated, opportunity);
+    const displayPrice = opportunity?.canonicalPrice.value ?? opportunity?.observedPriceUsd?.value;
+    return displayPrice === undefined ? oriented : { ...oriented, priceUsdValue: displayPrice, priceUsd: formatUsd(displayPrice), price: formatUsd(displayPrice), qualityBand: opportunity?.qualityBand, liquidityState: opportunity?.liquidityState };
   }, [chartOverrides, selectedPair, snapshotData.opportunities]);
+  const selectedOpportunity = useMemo(() => snapshotData.opportunities.find((item) => item.id === selectedPairWithLiveChart?.opportunityId), [selectedPairWithLiveChart?.opportunityId, snapshotData.opportunities]);
   const viewTitle = useMemo(() => {
     if (view === "markets") return t("route.marketsTitle");
     if (view === "watchlist") return t("route.watchlistTitle");
@@ -146,6 +149,12 @@ export function BaseTerminal({
 
   const openTrade = useCallback((pair: BasePair, side: "buy" | "sell") => {
     handleSelectPairById(pair.id);
+    const opportunity = snapshotRef.current.opportunities.find((item) => item.id === pair.opportunityId);
+    // Mock mode exercises the disabled-by-default transaction UI; live non-ranked opportunities remain read-only.
+    if (!opportunity?.rankingEligibility && !(snapshotRef.current.mode === "mock" && pair.dataSource === "mock")) {
+      overlay.open("market_inspector", { pairId: pair.id, tab: "overview" });
+      return;
+    }
     setTradeSide(side);
     overlay.open("trade_drawer", { pairId: pair.id, side });
   }, [handleSelectPairById, overlay]);
@@ -388,7 +397,7 @@ export function BaseTerminal({
 
       {view === "watchlist" ? <section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")}><div className="min-w-0 space-y-3"><PinnedMarketGrid pairs={pinnedMarketPairs} onSelect={openPair} onUnpin={togglePinnedPair} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
 
-      {view === "workspace" ? <section className="space-y-3" data-testid="pair-workspace"><div className="flex items-center justify-between gap-2 px-1"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("workspace.selected")}</p><h1 className="text-base font-semibold">{selectedPairWithLiveChart.pair}</h1></div><button type="button" onClick={() => navigateView("terminal")} className="min-h-10 rounded-control bg-surface-interactive px-3 text-meta text-content-secondary">{t("common.backToMarkets")}</button></div><section className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]"><SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} /><MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} /></section><PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} /><div className="flex justify-end"><button type="button" onClick={() => openTrade(selectedPairWithLiveChart, "buy")} className="min-h-11 rounded-control bg-brand-action px-6 text-meta font-bold text-content-on-accent">{t("trade.open")}</button></div></section> : null}
+      {view === "workspace" ? <section className="space-y-3" data-testid="pair-workspace"><div className="flex items-center justify-between gap-2 px-1"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("workspace.selected")}</p><h1 className="text-base font-semibold">{selectedPairWithLiveChart.pair}</h1></div><button type="button" onClick={() => navigateView("terminal")} className="min-h-10 rounded-control bg-surface-interactive px-3 text-meta text-content-secondary">{t("common.backToMarkets")}</button></div><section className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]"><SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} /><MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} /></section><PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} />{selectedOpportunity?.rankingEligibility || snapshotData.mode === "mock" ? <div className="flex justify-end"><button type="button" onClick={() => openTrade(selectedPairWithLiveChart, "buy")} className="min-h-11 rounded-control bg-brand-action px-6 text-meta font-bold text-content-on-accent">{t("trade.open")}</button></div> : null}</section> : null}
 
       {view === "alerts" ? <section className="mx-auto w-full max-w-3xl" data-testid="alerts-workspace"><AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} embedded /></section> : null}
       {view === "portfolio" ? <section className="pulse-surface rounded-panel p-6" data-testid="portfolio-workspace"><BriefcaseBusiness size={20} className="text-content-secondary" /><h2 className="mt-3 text-lg font-semibold">{t("portfolio.title")}</h2><p className="mt-2 max-w-2xl text-meta leading-6 text-content-secondary">{t("portfolio.scope")}</p><div className="mt-4 rounded-card bg-surface-interactive p-4 text-meta text-content-secondary">{t("portfolio.empty")}</div></section> : null}
@@ -422,4 +431,8 @@ function normalizeTerminalView(value: string | undefined): TerminalView {
   if (value === "markets" || value === "watchlist" || value === "alerts" || value === "portfolio" || value === "workspace") return value;
   if (value === "wallet") return "portfolio";
   return "terminal";
+}
+
+function formatUsd(value: number) {
+  return value >= 1 ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 6 })}` : `$${value.toPrecision(6)}`;
 }

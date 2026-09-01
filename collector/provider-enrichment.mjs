@@ -5,6 +5,8 @@ export const ENRICHMENT_MAX_ATTEMPTS = 4;
 export const PROVIDER_REFRESH_MS = 60_000;
 export const UNMATCHED_REFRESH_MS = 10 * 60_000;
 export const ANCHOR_REFRESH_MS = 30_000;
+export const EXACT_LOOKUP_CACHE_MS = 30_000;
+export const EXACT_LOOKUP_NEGATIVE_TTL_MS = 2 * 60_000;
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const DEXSCREENER = "https://api.dexscreener.com";
@@ -18,6 +20,13 @@ export class ProviderEnrichmentClient {
     this.retries = retries;
     this.now = now;
     this.delayImpl = delayImpl;
+    this.providerTimeoutMs = typeof timeoutMs === "number"
+      ? { dexscreener: timeoutMs, geckoterminal: Math.min(12_000, Math.max(timeoutMs, 8_000)) }
+      : { dexscreener: timeoutMs?.dexscreener ?? 8_000, geckoterminal: timeoutMs?.geckoterminal ?? 10_000 };
+    this.providerMinimumIntervalMs = { dexscreener: 210, geckoterminal: 2_050 };
+    this.providerNextRequestAt = { dexscreener: 0, geckoterminal: 0 };
+    this.exactLookupCache = new Map();
+    this.exactLookupInFlight = new Map();
     this.circuits = {
       dexscreener: newCircuit(),
       geckoterminal: newCircuit()
@@ -27,18 +36,43 @@ export class ProviderEnrichmentClient {
   async lookupPool(poolAddress) {
     const address = normalizeAddress(poolAddress);
     if (!address) throw new ProviderRequestError("malformed_pool_address", { retryable: false });
+    const nowMs = this.now().getTime();
+    const cached = this.exactLookupCache.get(address);
+    if (cached && cached.expiresAt > nowMs) return structuredClone({ ...cached.value, cacheHit: true });
+    const pending = this.exactLookupInFlight.get(address);
+    if (pending) return pending;
+    const lookup = this.performExactPoolLookup(address).then((value) => {
+      const ttl = value.lookupState === "not_found" ? EXACT_LOOKUP_NEGATIVE_TTL_MS : EXACT_LOOKUP_CACHE_MS;
+      this.exactLookupCache.set(address, { expiresAt: this.now().getTime() + ttl, value });
+      return structuredClone(value);
+    }).finally(() => this.exactLookupInFlight.delete(address));
+    this.exactLookupInFlight.set(address, lookup);
+    return lookup;
+  }
+
+  async performExactPoolLookup(address) {
     const receivedAt = this.now().toISOString();
     const calls = [
-      this.request("dexscreener", `${DEXSCREENER}/latest/dex/pairs/base/${address}`).then((payload) => parseDexScreenerPayload(payload, receivedAt)),
-      this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}?include=base_token,quote_token,dex`).then((payload) => parseGeckoTerminalPayload(payload, receivedAt))
+      { kind: "dexscreener", promise: this.request("dexscreener", `${DEXSCREENER}/latest/dex/pairs/base/${address}`).then((payload) => parseDexScreenerPayload(payload, receivedAt)) },
+      { kind: "geckoterminal", promise: this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}?include=base_token,quote_token,dex`).then((payload) => parseGeckoTerminalPayload(payload, receivedAt)) }
     ];
-    const settled = await Promise.allSettled(calls);
+    const settled = await Promise.allSettled(calls.map((call) => call.promise));
     const observations = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-    const failures = settled.filter((result) => result.status === "rejected").map((result) => result.reason);
-    if (!observations.length && failures.length === settled.length && failures.some((error) => error?.retryable)) {
+    const providerFailures = settled.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (!observations.length && providerFailures.some((error) => error?.retryable)) {
       throw new ProviderRequestError("all_providers_transient_failure", { retryable: true });
     }
-    return { observations, failures: failures.map(safeFailure), circuits: this.circuitSnapshot() };
+    let poolInfo;
+    const failures = [...providerFailures];
+    if (observations.length) {
+      try {
+        const payload = await this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}/info`);
+        poolInfo = parseGeckoTerminalInfo(payload, address, receivedAt);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    return { observations, poolInfo, lookupState: observations.length ? "found" : "not_found", receivedAt, failures: failures.map(safeFailure), circuits: this.circuitSnapshot(), cacheHit: false };
   }
 
   async lookupWethPools() {
@@ -52,7 +86,7 @@ export class ProviderEnrichmentClient {
 
   circuitSnapshot() {
     return Object.fromEntries(Object.entries(this.circuits).map(([provider, circuit]) => [provider, {
-      state: Date.now() < circuit.openUntil ? "open" : "closed",
+      state: this.now().getTime() < circuit.openUntil ? "open" : "closed",
       consecutiveFailures: circuit.consecutiveFailures,
       openUntil: circuit.openUntil ? new Date(circuit.openUntil).toISOString() : undefined,
       lastSuccessAt: circuit.lastSuccessAt,
@@ -62,12 +96,13 @@ export class ProviderEnrichmentClient {
 
   async request(provider, url) {
     const circuit = this.circuits[provider];
-    if (Date.now() < circuit.openUntil) throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
+    if (this.now().getTime() < circuit.openUntil) throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
+        await this.waitForProviderSlot(provider);
         const response = await this.fetchImpl(url, {
           headers: { accept: "application/json", "user-agent": "Mergen-Base-Terminal/2.0" },
-          signal: AbortSignal.timeout(this.timeoutMs)
+          signal: AbortSignal.timeout(this.providerTimeoutMs[provider] ?? 8_000)
         });
         if (!response?.ok) {
           const status = Number(response?.status);
@@ -84,13 +119,20 @@ export class ProviderEnrichmentClient {
         circuit.lastFailureReason = normalized.reasonCode;
         if (!normalized.retryable || attempt === this.retries) {
           circuit.consecutiveFailures += 1;
-          if (circuit.consecutiveFailures >= 5) circuit.openUntil = Date.now() + 30_000;
+          if (circuit.consecutiveFailures >= 5) circuit.openUntil = this.now().getTime() + 30_000;
           throw normalized;
         }
         await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
       }
     }
     throw new ProviderRequestError("provider_retry_exhausted", { retryable: true, provider });
+  }
+
+  async waitForProviderSlot(provider) {
+    const nowMs = this.now().getTime();
+    const scheduledAt = Math.max(nowMs, this.providerNextRequestAt[provider] ?? 0);
+    this.providerNextRequestAt[provider] = scheduledAt + (this.providerMinimumIntervalMs[provider] ?? 250);
+    if (scheduledAt > nowMs) await this.delayImpl(scheduledAt - nowMs);
   }
 }
 
@@ -169,6 +211,26 @@ export function parseGeckoTerminalPayload(payload, receivedAt = new Date().toISO
   });
 }
 
+export function parseGeckoTerminalInfo(payload, poolAddress, receivedAt = new Date().toISOString()) {
+  const address = normalizeAddress(poolAddress);
+  if (!address) return undefined;
+  const rows = Array.isArray(payload?.data) ? payload.data : payload?.data ? [payload.data] : [];
+  const tokens = rows.flatMap((row) => {
+    const attributes = row?.attributes ?? {};
+    const tokenAddress = normalizeAddress(attributes.address) ?? normalizeAddress(String(row?.id ?? "").split("_").at(-1));
+    if (!tokenAddress) return [];
+    return [{ address: tokenAddress, name: boundedText(attributes.name, 160), symbol: boundedText(attributes.symbol, 80), sourceId: boundedText(row?.id, 220) }];
+  });
+  if (!tokens.length) return undefined;
+  return {
+    provider: "geckoterminal",
+    poolAddress: address,
+    indexedAt: receivedAt,
+    tokens,
+    source: "networks/base/pools/{pool_address}/info"
+  };
+}
+
 export function joinExactProviderPools(pool, observations, { onchainState, now = new Date() } = {}) {
   const poolAddress = normalizeAddress(pool?.poolAddress);
   const token0 = normalizeAddress(pool?.token0);
@@ -194,6 +256,15 @@ export function joinExactProviderPools(pool, observations, { onchainState, now =
   const priceToken1PerToken0 = onchainRate ?? positive(selected.priceToken1PerToken0);
   const providers = [...new Set(accepted.map((item) => item.provider))].sort();
   const observedAt = newestIso(accepted.map((item) => item.observedAt)) ?? now.toISOString();
+  const observedPricesUsd = Object.fromEntries([token0, token1].flatMap((token) => {
+    const candidates = accepted.flatMap((item) => {
+      const value = item.baseTokenAddress === token
+        ? positive(item.priceUsd)
+        : item.quoteTokenAddress === token && positive(item.priceUsd) && positive(item.priceNative) ? item.priceUsd / item.priceNative : undefined;
+      return positive(value) ? [{ value, item }] : [];
+    }).sort((left, right) => compareObservations(left.item, right.item));
+    return candidates[0] ? [[token, candidates[0].value]] : [];
+  }));
   return {
     status: "matched",
     reasonCode: onchainRate ? onchainState.reasonCode : "exact_provider_pool_match",
@@ -207,6 +278,7 @@ export function joinExactProviderPools(pool, observations, { onchainState, now =
     priceToken1PerToken0,
     rawPriceRatio: onchainState?.rawPriceRatio,
     priceUsd: selected.priceUsd,
+    observedPricesUsd,
     liquidityUsd: selected.liquidityUsd,
     volumes: selected.volumes,
     volume24hUsd: selected.volumes?.h24,

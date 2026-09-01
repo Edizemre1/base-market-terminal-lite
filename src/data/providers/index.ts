@@ -286,6 +286,9 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
       newPools24h: 0,
       capacity: { pools: 1_000, opportunities: 600 },
       qualityCounts: { active: 0, thin: 0, incomplete: 0, expired: 0 },
+      qualityBandCounts: { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 },
+      observedPriceCount: 0,
+      canonicalPriceCount: 0,
       providerCoverage: []
     },
     recentSignals: [],
@@ -401,6 +404,7 @@ function buildOpportunityComparison(mode: MarketDataMode, previous?: MarketTermi
       return typeof value === "number" && Number.isFinite(value) && value >= 0 ? [[opportunity.id, value]] : [];
     })),
     opportunityMetrics: Object.fromEntries(previous.opportunities.map((opportunity) => [opportunity.id, {
+      canonicalPriceUsd: opportunity.canonicalPrice.tier === "UNPRICED" ? undefined : opportunity.canonicalPrice.value,
       liquidityUsd: opportunity.aggregate.liquidityUsd,
       volumes: opportunity.aggregate.volumes,
       transactions: opportunity.aggregate.transactions

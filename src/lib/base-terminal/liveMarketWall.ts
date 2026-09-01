@@ -1,6 +1,7 @@
 import type { MarketTerminalSnapshot } from "@/data/providers";
 import { NEW_POOL_MAX_AGE_MINUTES, orientPairToOpportunity, type TokenOpportunity } from "@/lib/base-terminal/opportunityModel";
 import type { BasePair, PairTxnWindow } from "@/types/baseTerminal";
+import { MARKET_QUALITY_THRESHOLDS } from "../../../collector/market-quality.mjs";
 
 export type LiveWallTimeframe = "m5" | "h1" | "h24";
 export type LiveWallLaneId = "new" | "gainers" | "losers" | "volume" | "liquidity" | "traded";
@@ -43,9 +44,7 @@ export type LiveMarketWall = {
 type Candidate = Omit<LiveWallEntry, "strength">;
 
 const LANE_ORDER: LiveWallLaneId[] = ["new", "gainers", "losers", "volume", "liquidity", "traded"];
-const MINIMUM_LIQUIDITY_USD = 10_000;
 const MINIMUM_LIQUIDITY_DELTA_USD = 1_000;
-const MINIMUM_LIQUIDITY_BASE_USD = 1_000;
 const MINIMUM_VOLUME_USD: Record<LiveWallTimeframe, number> = { m5: 1_000, h1: 5_000, h24: 10_000 };
 const MINIMUM_TRADES: Record<LiveWallTimeframe, number> = { m5: 3, h1: 10, h24: 20 };
 
@@ -75,37 +74,46 @@ export function buildLiveMarketWall(
   const comparisonWindowSeconds = comparisonReady ? Math.max(1, Math.round((currentGeneratedAt - previousGeneratedAt) / 1_000)) : undefined;
   const previousMetrics = snapshot.comparison.opportunityMetrics ?? {};
   const rows = snapshot.opportunities.flatMap((opportunity) => {
-    if (opportunity.quality === "expired") return [];
+    if (opportunity.quality === "expired" || opportunity.qualityBand === "REJECTED") return [];
     const primary = snapshot.allPairs.find((pair) => pair.id === opportunity.primaryMarketId);
     return primary ? [{ opportunity, pair: orientPairToOpportunity(primary, opportunity) }] : [];
   });
 
   const newCandidates = rows.flatMap(({ opportunity, pair }): Candidate[] => {
+    if (opportunity.qualityBand !== "RANKED" && opportunity.qualityBand !== "EMERGING") return [];
     const createdAt = opportunity.newestPoolCreatedAt ? Date.parse(opportunity.newestPoolCreatedAt) : Number.NaN;
     const ageMinutes = Number.isFinite(createdAt) ? (nowMs - createdAt) / 60_000 : Number.NaN;
     if (!Number.isFinite(ageMinutes) || ageMinutes < 0 || ageMinutes > NEW_POOL_MAX_AGE_MINUTES) return [];
     return [{ opportunity, pair, metric: { kind: "age", current: ageMinutes, window: "snapshot" } }];
   }).sort((left, right) => left.metric.current - right.metric.current || compareMarketQuality(left, right));
 
-  const directionalRows = rows.filter(({ opportunity, pair }) => isFreshQuality(opportunity, pair) && finite(opportunity.aggregate.liquidityUsd) && opportunity.aggregate.liquidityUsd! >= MINIMUM_LIQUIDITY_USD);
+  const directionalRows = comparisonReady ? rows.filter(({ opportunity, pair }) => isFreshRanked(opportunity, pair)
+    && finite(opportunity.bestLiquidityUsd)
+    && opportunity.bestLiquidityUsd! >= MARKET_QUALITY_THRESHOLDS.gainersLosersMinimumLiquidityUsd
+    && readPositive(opportunity.canonicalPrice.value) !== undefined
+    && readPositive(previousMetrics[opportunity.id]?.canonicalPriceUsd) !== undefined) : [];
   const gainers = directionalRows.flatMap(({ opportunity, pair }): Candidate[] => {
-    const change = readChange(pair, timeframe);
-    return change !== undefined && change > 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, window: timeframe } }] : [];
+    const current = opportunity.canonicalPrice.value!;
+    const previous = previousMetrics[opportunity.id]!.canonicalPriceUsd!;
+    const change = (current / previous - 1) * 100;
+    return change > 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, previous, delta: current - previous, ratio: current / previous, window: "snapshot" } }] : [];
   }).sort((left, right) => right.metric.current - left.metric.current || compareMarketQuality(left, right));
   const losers = directionalRows.flatMap(({ opportunity, pair }): Candidate[] => {
-    const change = readChange(pair, timeframe);
-    return change !== undefined && change < 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, window: timeframe } }] : [];
+    const current = opportunity.canonicalPrice.value!;
+    const previous = previousMetrics[opportunity.id]!.canonicalPriceUsd!;
+    const change = (current / previous - 1) * 100;
+    return change < 0 ? [{ opportunity, pair, metric: { kind: "change", current: change, previous, delta: current - previous, ratio: current / previous, window: "snapshot" } }] : [];
   }).sort((left, right) => left.metric.current - right.metric.current || compareMarketQuality(left, right));
 
   const inflowCandidates = comparisonReady ? rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshQuality(opportunity, pair) || (opportunity.aggregate.liquidityUsd ?? 0) < MINIMUM_LIQUIDITY_USD) return [];
+    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.volumes?.[timeframe]);
     const previous = readFiniteNonNegative(previousMetrics[opportunity.id]?.volumes?.[timeframe]);
     if (current === undefined || previous === undefined || previous <= 0 || current <= previous || current < MINIMUM_VOLUME_USD[timeframe]) return [];
     return [{ opportunity, pair, metric: { kind: "volume_inflow", current, previous, delta: current - previous, ratio: current / previous, window: timeframe } }];
   }).sort((left, right) => (right.metric.ratio! - left.metric.ratio!) || (right.metric.delta! - left.metric.delta!) || compareMarketQuality(left, right)) : [];
   const volumeLeaders = rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshQuality(opportunity, pair) || (opportunity.aggregate.liquidityUsd ?? 0) < MINIMUM_LIQUIDITY_USD) return [];
+    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.volumeMinimumLiquidityUsd) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.volumes?.[timeframe]);
     return current !== undefined && current >= MINIMUM_VOLUME_USD[timeframe]
       ? [{ opportunity, pair, metric: { kind: "volume_leader", current, window: timeframe } }]
@@ -114,10 +122,10 @@ export function buildLiveMarketWall(
   const volumeFallback = inflowCandidates.length === 0;
 
   const liquidityCandidates = comparisonReady ? rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshQuality(opportunity, pair)) return [];
+    if (!isFreshRanked(opportunity, pair)) return [];
     const current = readFiniteNonNegative(opportunity.aggregate.liquidityUsd);
     const previous = readFiniteNonNegative(previousMetrics[opportunity.id]?.liquidityUsd);
-    if (current === undefined || previous === undefined || previous < MINIMUM_LIQUIDITY_BASE_USD) return [];
+    if (current === undefined || previous === undefined || previous < MARKET_QUALITY_THRESHOLDS.liquidityLaneMinimumLiquidityUsd) return [];
     const delta = current - previous;
     if (Math.abs(delta) < MINIMUM_LIQUIDITY_DELTA_USD) return [];
     if (liquidityDirection === "added" && delta <= 0) return [];
@@ -126,7 +134,7 @@ export function buildLiveMarketWall(
   }).sort((left, right) => Math.abs(right.metric.delta!) - Math.abs(left.metric.delta!) || Math.abs(right.metric.ratio!) - Math.abs(left.metric.ratio!) || compareMarketQuality(left, right)) : [];
 
   const tradedCandidates = rows.flatMap(({ opportunity, pair }): Candidate[] => {
-    if (!isFreshQuality(opportunity, pair)) return [];
+    if (!isFreshRanked(opportunity, pair) || (opportunity.bestLiquidityUsd ?? 0) < MARKET_QUALITY_THRESHOLDS.mostTradedMinimumLiquidityUsd) return [];
     const transactions = opportunity.aggregate.transactions?.[timeframe];
     const count = readTransactionCount(transactions);
     if (count === undefined || count < MINIMUM_TRADES[timeframe]) return [];
@@ -150,7 +158,7 @@ export function buildLiveMarketWall(
     fallback: id === "volume" && volumeFallback,
     baselinePending: (id === "volume" || id === "liquidity") && !comparisonReady,
     freshness: laneStatus,
-    timeframe: id === "new" ? "age" : id === "liquidity" ? "snapshot" : timeframe
+    timeframe: id === "new" ? "age" : id === "liquidity" || id === "gainers" || id === "losers" ? "snapshot" : timeframe
   }));
   const visibleIds = lanes.flatMap((lane) => lane.entries.map((entry) => entry.opportunity.id));
   return {
@@ -210,12 +218,8 @@ function deterministicLaneTie(opportunityId: string, lane: LiveWallLaneId) {
   return hash >>> 0;
 }
 
-function isFreshQuality(opportunity: TokenOpportunity, pair: BasePair) {
-  return opportunity.quality === "active" && !pair.stale;
-}
-
-function readChange(pair: BasePair, timeframe: LiveWallTimeframe) {
-  return readFinite(pair.priceChanges?.[timeframe]);
+function isFreshRanked(opportunity: TokenOpportunity, pair: BasePair) {
+  return opportunity.quality === "active" && opportunity.qualityBand === "RANKED" && opportunity.canonicalPrice.tier !== "UNPRICED" && !pair.stale;
 }
 
 function readTransactionCount(value: PairTxnWindow | undefined) {
@@ -229,12 +233,12 @@ function compareMarketQuality(left: Candidate, right: Candidate) {
     || left.opportunity.id.localeCompare(right.opportunity.id);
 }
 
-function readFinite(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function readFiniteNonNegative(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function readPositive(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function finite(value: number | undefined): value is number {

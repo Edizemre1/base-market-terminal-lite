@@ -3,7 +3,7 @@ import { keccak256Hex } from "./keccak.mjs";
 export const BASE_CHAIN_ID = 8453;
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const BASE_WETH = "0x4200000000000000000000000000000000000006";
-export const COLLECTOR_VERSION = "base-market-enrichment-v2";
+export const COLLECTOR_VERSION = "base-market-quality-v3";
 
 const PROVENANCE = Object.freeze({
   aerodromeClassic: "https://github.com/aerodrome-finance/contracts#deployment",

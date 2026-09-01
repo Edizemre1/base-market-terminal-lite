@@ -1,6 +1,12 @@
 import type { BasePair, PairTxnWindow } from "@/types/baseTerminal";
 import { calculateReverseChangePercent, invertPositiveValue, reverseOhlcvCandle } from "@/lib/marketMath";
 import { calculateOpportunityUsdcPrice, type CanonicalPrice } from "@/lib/base-terminal/canonicalPricing";
+import {
+  MARKET_QUALITY_THRESHOLDS,
+  categoryEligibility as buildQualityCategoryEligibility,
+  classifyLiquidityState,
+  evaluateOpportunityQuality
+} from "../../../collector/market-quality.mjs";
 
 export const BASE_DISCOVERY_CHAIN_ID = 8453 as const;
 export const NEW_POOL_MAX_AGE_MINUTES = 7 * 24 * 60;
@@ -72,6 +78,29 @@ export type TokenOpportunity = {
   oldestPoolCreatedAt?: string;
   sourceProviders: MarketProviderId[];
   canonicalPrice: CanonicalPrice;
+  canonicalPriceUsd?: number;
+  observedPriceUsd?: {
+    value: number;
+    rawValue: string;
+    provider: string;
+    poolKey: string;
+    poolAddress: string;
+    observedAt: string;
+    freshness: "fresh";
+    liquidityUsd?: number;
+    reasonCode: string;
+    executable: false;
+  };
+  qualityBand: "RANKED" | "EMERGING" | "DETECTED" | "REJECTED";
+  liquidityState: "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity";
+  bestLiquidityUsd?: number;
+  rankingEligibility: boolean;
+  exclusionReason?: string;
+  highQualityEmerging: boolean;
+  displayMode: "canonical" | "observed_thin" | "pending";
+  providerDiscoveryState: "matched" | "pending" | "not_found" | "conflicting" | "detected";
+  providerIndexedAt?: string;
+  firstSeenAt?: string;
   metadataStatus: "complete" | "partial" | "unavailable";
   tradeability: "market_data_only" | "wallet_required" | "quote_required" | "quote_loading" | "quote_available" | "no_route" | "provider_unavailable" | "wrong_network" | "approval_required" | "simulation_required" | "review_ready" | "transaction_ready" | "expired";
   freshness: {
@@ -85,6 +114,10 @@ export type TokenOpportunity = {
     justLaunched: boolean;
     moving: boolean;
     liquidity: boolean;
+    detected: boolean;
+    gainersLosers: boolean;
+    volume: boolean;
+    mostTraded: boolean;
   };
 };
 
@@ -105,6 +138,9 @@ export type DiscoveryUniverse = {
     opportunities: number;
   };
   qualityCounts: Record<PoolQualityTier, number>;
+  qualityBandCounts: Record<TokenOpportunity["qualityBand"], number>;
+  observedPriceCount: number;
+  canonicalPriceCount: number;
   providerCoverage: DiscoveryProviderCoverage[];
 };
 
@@ -168,6 +204,8 @@ export function buildDiscoveryUniverse(
       sourceUpdatedAt: pair.sourceUpdatedAt ?? firstSeenAt,
       firstSeenAt: pair.firstSeenAt ?? firstSeenAt,
       qualityTier: pool?.quality,
+      qualityBand: opportunity?.qualityBand,
+      liquidityState: opportunity?.liquidityState,
       opportunityId: opportunity?.id,
       opportunityKind: opportunity?.kind,
       focusTokenAddress: opportunity?.focusTokenAddress,
@@ -287,6 +325,26 @@ function buildTokenOpportunity(
   const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, pricingPairs, new Date(nowMs));
   const canonicalPriced = canonicalPrice.tier !== "UNPRICED";
   const metadataStatus = metadataQuality(uniquePairs);
+  const aggregate = buildAggregate(uniquePairs);
+  const liquidityValues = uniquePairs.map((pair) => readNonNegative(pair.liquidityUsd));
+  const liquidityState = classifyLiquidityState(liquidityValues);
+  const bestLiquidityUsd = liquidityValues.filter((value): value is number => value !== undefined).sort((left, right) => right - left)[0];
+  const observedPriceUsd = buildWebObservedPrice(focus.address, uniquePairs, nowMs);
+  const providerDiscoveryState = uniquePairs.some((pair) => pair.providerDiscoveryState === "matched") ? "matched"
+    : uniquePairs.some((pair) => pair.providerDiscoveryState === "pending") ? "pending"
+      : uniquePairs.some((pair) => pair.providerDiscoveryState === "conflicting") ? "conflicting"
+        : uniquePairs.some((pair) => pair.providerDiscoveryState === "not_found") ? "not_found" : "detected";
+  const ranked = canonicalPriced && !primary.stale && bestLiquidityUsd !== undefined && bestLiquidityUsd >= MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd;
+  const qualityBand = evaluateOpportunityQuality({ canonicalPrice, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState: providerDiscoveryState, exclusionReason: canonicalPrice.reasonCode });
+  const qualityEligibility = buildQualityCategoryEligibility({
+    band: qualityBand.band,
+    canonicalPrice,
+    bestLiquidityUsd,
+    volumes: aggregate.volumes,
+    transactions: aggregate.transactions,
+    comparableSnapshots: false,
+    newlyCreated: newestAgeMinutes !== undefined && newestAgeMinutes <= NEW_POOL_MAX_AGE_MINUTES
+  });
   return {
     id: focus.id,
     chainId: BASE_DISCOVERY_CHAIN_ID,
@@ -300,15 +358,27 @@ function buildTokenOpportunity(
     poolCount: pools.length,
     primaryMarketId: primary.id,
     primarySelection,
-    executionCandidates: [...uniquePairs]
+    executionCandidates: ranked ? [...uniquePairs]
       .filter((pair) => classifyPoolQuality(pair) === "active")
       .sort((left, right) => marketQualityScore(right) - marketQualityScore(left) || comparePoolAddress(left, right))
-      .map((pair) => pair.id),
-    aggregate: buildAggregate(uniquePairs),
+      .map((pair) => pair.id) : [],
+    aggregate,
     newestPoolCreatedAt,
     oldestPoolCreatedAt: timestamps[0],
     sourceProviders: uniqueProviders(pools.flatMap((pool) => pool.sourceProviders)),
     canonicalPrice,
+    canonicalPriceUsd: canonicalPriced ? canonicalPrice.value : undefined,
+    observedPriceUsd,
+    qualityBand: qualityBand.band,
+    liquidityState,
+    bestLiquidityUsd,
+    rankingEligibility: qualityBand.rankingEligible,
+    exclusionReason: qualityBand.exclusionReason,
+    highQualityEmerging: qualityBand.highQualityEmerging,
+    displayMode: qualityBand.displayMode,
+    providerDiscoveryState,
+    providerIndexedAt: uniquePairs.map((pair) => pair.providerIndexedAt).filter(isValidDateString).sort()[0],
+    firstSeenAt: uniquePairs.map((pair) => pair.firstSeenAt).filter(isValidDateString).sort()[0],
     metadataStatus,
     tradeability: "market_data_only",
     freshness: {
@@ -318,10 +388,14 @@ function buildTokenOpportunity(
     },
     quality,
     categoryEligibility: {
-      newlyCreated: newestAgeMinutes !== undefined && newestAgeMinutes <= NEW_POOL_MAX_AGE_MINUTES,
-      justLaunched: newestAgeMinutes !== undefined && newestAgeMinutes <= JUST_LAUNCHED_MAX_AGE_MINUTES,
-      moving: canonicalPriced && getMovingInputs(primary) !== undefined && quality === "active",
-      liquidity: canonicalPriced && quality === "active" && (buildAggregate(uniquePairs).liquidityUsd ?? 0) > 0
+      newlyCreated: qualityEligibility.new,
+      justLaunched: newestAgeMinutes !== undefined && newestAgeMinutes <= JUST_LAUNCHED_MAX_AGE_MINUTES && (qualityBand.band === "RANKED" || qualityBand.band === "EMERGING"),
+      moving: ranked && getMovingInputs(primary) !== undefined,
+      liquidity: qualityEligibility.liquidity,
+      detected: qualityEligibility.detected,
+      gainersLosers: qualityEligibility.gainersLosers,
+      volume: qualityEligibility.volume,
+      mostTraded: qualityEligibility.mostTraded
     }
   };
 }
@@ -447,6 +521,8 @@ function getOpportunityQuality(pools: PoolMarket[]): PoolQualityTier {
 function summarizeUniverse(pools: PoolMarket[], opportunities: TokenOpportunity[], nowMs: number): DiscoveryUniverse {
   const qualityCounts = { active: 0, thin: 0, incomplete: 0, expired: 0 } satisfies Record<PoolQualityTier, number>;
   for (const opportunity of opportunities) qualityCounts[opportunity.quality] += 1;
+  const qualityBandCounts = { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 } satisfies Record<TokenOpportunity["qualityBand"], number>;
+  for (const opportunity of opportunities) qualityBandCounts[opportunity.qualityBand] += 1;
   const providerCoverage = (["onchain", "geckoterminal", "dexscreener", "mock"] as const)
     .map((provider) => ({
       provider,
@@ -465,6 +541,9 @@ function summarizeUniverse(pools: PoolMarket[], opportunities: TokenOpportunity[
     }).length,
     capacity: { pools: DISCOVERY_RESERVOIR_CAPACITY, opportunities: DISCOVERY_OPPORTUNITY_CAPACITY },
     qualityCounts,
+    qualityBandCounts,
+    observedPriceCount: opportunities.filter((opportunity) => opportunity.observedPriceUsd !== undefined).length,
+    canonicalPriceCount: opportunities.filter((opportunity) => opportunity.canonicalPrice.tier !== "UNPRICED").length,
     providerCoverage
   };
 }
@@ -553,8 +632,11 @@ function getMovingInputs(pair: BasePair) {
 }
 
 function compareOpportunities(left: TokenOpportunity, right: TokenOpportunity) {
+  const band = { RANKED: 0, EMERGING: 1, DETECTED: 2, REJECTED: 3 } as const;
   const tier = { active: 0, thin: 1, incomplete: 2, expired: 3 } as const;
-  return tier[left.quality] - tier[right.quality]
+  return band[left.qualityBand] - band[right.qualityBand]
+    || Number(right.highQualityEmerging) - Number(left.highQualityEmerging)
+    || tier[left.quality] - tier[right.quality]
     || (right.aggregate.volumes?.h24 ?? -1) - (left.aggregate.volumes?.h24 ?? -1)
     || (right.aggregate.liquidityUsd ?? -1) - (left.aggregate.liquidityUsd ?? -1)
     || left.id.localeCompare(right.id);
@@ -574,6 +656,38 @@ function readPositive(value: number | undefined) {
 
 function readNonNegative(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function buildWebObservedPrice(tokenAddress: string, pairs: BasePair[], nowMs: number): TokenOpportunity["observedPriceUsd"] {
+  const token = normalizeAddress(tokenAddress);
+  if (!token) return undefined;
+  const candidates = pairs.flatMap((pair) => {
+    if (!pair.onchainProvenance || pair.providerDiscoveryState !== "matched") return [];
+    const provider = pair.observedPriceProvider ?? (pair.dataProviders ?? []).find((value) => value === "dexscreener" || value === "geckoterminal");
+    if (!provider || provider === "mock") return [];
+    const base = normalizeAddress(pair.baseTokenAddress);
+    const quote = normalizeAddress(pair.quoteTokenAddress);
+    const baseUsd = readPositive(pair.observedPriceUsd ?? pair.priceUsdValue);
+    const native = readPositive(Number(pair.priceNative));
+    const value = token === base ? baseUsd : token === quote && baseUsd !== undefined && native !== undefined ? baseUsd / native : undefined;
+    const observedAt = isValidDateString(pair.observedPriceAt) ? pair.observedPriceAt : isValidDateString(pair.sourceUpdatedAt) ? pair.sourceUpdatedAt : undefined;
+    if (value === undefined || !observedAt) return [];
+    const observedMs = Date.parse(observedAt);
+    if (observedMs > nowMs + 5_000 || nowMs - observedMs > MARKET_QUALITY_THRESHOLDS.observedPriceMaximumAgeMs) return [];
+    return [{
+      value,
+      rawValue: value.toPrecision(15),
+      provider,
+      poolKey: pair.id,
+      poolAddress: normalizeAddress(pair.pairAddress) ?? pair.id,
+      observedAt,
+      freshness: "fresh" as const,
+      liquidityUsd: readNonNegative(pair.liquidityUsd),
+      reasonCode: "exact_provider_observed_price",
+      executable: false as const
+    }];
+  }).sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt) || (right.liquidityUsd ?? -1) - (left.liquidityUsd ?? -1) || left.poolAddress.localeCompare(right.poolAddress));
+  return candidates[0];
 }
 
 function isValidDateString(value: string | undefined): value is string {

@@ -184,7 +184,7 @@ test("cyclic graph without USDC remains UNPRICED", () => {
 test("dust liquidity cannot establish a canonical price", () => {
   const price = calculateCanonicalUsdcPrice(TOKEN_A, [pricingPool({ token0: TOKEN_A, token1: BASE_USDC, liquidityUsd: 999 })], NOW);
   assert.equal(price.tier, "UNPRICED");
-  assert.equal(price.reasonCode, "dust_liquidity");
+  assert.equal(price.reasonCode, "thin_liquidity");
 });
 
 test("stale WETH anchor cannot establish a Tier B price", () => {
@@ -273,7 +273,7 @@ test("incomplete aggregate remains undefined rather than substituting zero", () 
 test("unpriced confirmed token remains visible", () => {
   const pool = pricingPool({ priceToken1PerToken0: undefined, liquidityUsd: undefined });
   const opportunity = buildCanonicalOpportunities([pool], {}, [], NOW).find((item) => item.tokenAddress === TOKEN_A);
-  assert.equal(opportunity.lifecycle, "unpriced");
+  assert.equal(opportunity.lifecycle, "detected");
   assert.equal(opportunity.canonicalPrice.tier, "UNPRICED");
 });
 

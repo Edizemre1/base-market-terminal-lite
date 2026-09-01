@@ -1,4 +1,12 @@
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH, FACTORY_REGISTRY } from "./factory-registry.mjs";
+import {
+  MARKET_QUALITY_THRESHOLDS,
+  bestKnownLiquidityUsd,
+  buildObservedPriceUsd,
+  categoryEligibility as buildCategoryEligibility,
+  classifyLiquidityState,
+  evaluateOpportunityQuality
+} from "./market-quality.mjs";
 
 export const BASE_CBBTC = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
 export const BASE_AERO = "0x940181a94a35a4569e4529a3cdfb74e38fd98631";
@@ -7,7 +15,7 @@ export const MAX_EVENT_RING = 256;
 export const MAX_HISTORY_RING = 512;
 export const MAX_RECONCILIATION_RING = 128;
 export const MAX_PRICE_HOPS = 3;
-export const MIN_PRICE_LIQUIDITY_USD = 1_000;
+export const MIN_PRICE_LIQUIDITY_USD = MARKET_QUALITY_THRESHOLDS.canonicalPriceMinimumLiquidityUsd;
 export const MAX_PRICE_AGE_MS = 2 * 60_000;
 
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -169,6 +177,21 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
     const tokenMetadata = metadata[group.tokenAddress];
     const observed = group.pools.map((pool) => pool.observedAt ?? pool.confirmedAt).filter(Boolean).sort();
     const ranked = price.tier !== "UNPRICED" && group.pools.some((pool) => isUsableRankedPool(pool, now));
+    const observedPriceUsd = buildObservedPriceUsd(group.tokenAddress, group.pools, now);
+    const bestLiquidityUsd = bestKnownLiquidityUsd(group.pools);
+    const liquidityState = classifyLiquidityState(group.pools.map((pool) => pool.liquidityUsd));
+    const providerState = group.pools.some((pool) => pool.providerEnrichment?.status === "matched") ? "matched"
+      : group.pools.some((pool) => pool.providerEnrichment?.status === "pending") ? "pending"
+        : group.pools.some((pool) => pool.providerEnrichment?.status === "conflicting") ? "conflicting"
+          : group.pools.some((pool) => pool.providerEnrichment?.status === "unmatched") ? "not_found" : "detected";
+    const quality = evaluateOpportunityQuality({ canonicalPrice: price, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState, exclusionReason: price.reasonCode });
+    const poolCreatedTimes = group.pools.map((pool) => pool.blockTimestamp ?? pool.confirmedAt).filter(Boolean).sort();
+    const firstSeenTimes = group.pools.map((pool) => pool.firstSeenAt).filter(Boolean).sort();
+    const providerIndexedTimes = group.pools.map((pool) => pool.providerIndexedAt).filter(Boolean).sort();
+    const newestCreatedAt = poolCreatedTimes.at(-1);
+    const newestCreatedMs = Date.parse(newestCreatedAt ?? "");
+    const newlyCreated = Number.isFinite(newestCreatedMs) && now.getTime() >= newestCreatedMs && now.getTime() - newestCreatedMs <= 7 * 24 * 60 * 60_000;
+    const aggregate = aggregateVerifiedMetrics(group.pools);
     return {
       id: group.id,
       chainId: BASE_CHAIN_ID,
@@ -182,12 +205,35 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
       primaryPoolKey: selection.pool?.poolKey,
       primarySelection: selection.reason,
       canonicalPrice: price,
+      canonicalPriceUsd: price.tier === "UNPRICED" ? undefined : price.value,
+      observedPriceUsd,
+      qualityBand: quality.band,
+      highQualityEmerging: quality.highQualityEmerging,
+      liquidityState,
+      bestLiquidityUsd,
+      rankingEligibility: quality.rankingEligible,
+      exclusionReason: quality.exclusionReason,
+      displayMode: quality.displayMode,
+      providerDiscoveryState: providerState,
+      poolCreatedAt: poolCreatedTimes[0],
+      newestPoolCreatedAt: newestCreatedAt,
+      firstSeenAt: firstSeenTimes[0],
+      providerIndexedAt: providerIndexedTimes[0],
       freshness: observed.at(-1) ?? now.toISOString(),
-      lifecycle: price.tier === "UNPRICED" ? "unpriced" : ranked ? "active" : "priced",
+      lifecycle: quality.band === "RANKED" ? "active" : quality.band === "EMERGING" ? "emerging" : quality.band === "REJECTED" ? "rejected" : "detected",
       ranked,
       activationReason: price.tier === "UNPRICED" ? price.reasonCode : ranked ? "priced_fresh_usable_liquidity" : "ranking_metrics_pending",
       tradeability: "market_data_only",
-      aggregate: aggregateVerifiedMetrics(group.pools)
+      aggregate,
+      categoryEligibility: buildCategoryEligibility({
+        band: quality.band,
+        canonicalPrice: price,
+        bestLiquidityUsd,
+        volumes: aggregate.volumes,
+        transactions: aggregate.transactions,
+        comparableSnapshots: false,
+        newlyCreated
+      })
     };
   }).sort((left, right) => opportunityRank(right) - opportunityRank(left) || left.id.localeCompare(right.id));
 }
@@ -229,8 +275,11 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
   if (!candidates.length) {
     const relevant = rejected.filter(({ pool }) => pool.token0 === token || pool.token1 === token || pool.token0 === BASE_WETH || pool.token1 === BASE_WETH);
     if (relevant.some(({ reason }) => reason === "future_timestamp")) return unpriced("future_timestamp");
+    if (relevant.some(({ reason }) => reason === "conflicting_pool_identity")) return unpriced("conflicting_pool_identity");
     if (relevant.some(({ reason }) => reason === "stale_anchor")) return unpriced("stale_anchor");
-    if (relevant.some(({ reason }) => reason === "dust_liquidity")) return unpriced("dust_liquidity");
+    if (relevant.some(({ reason }) => reason === "liquidity_unknown")) return unpriced("liquidity_unknown");
+    if (relevant.some(({ reason }) => reason === "zero_liquidity")) return unpriced("zero_liquidity");
+    if (relevant.some(({ reason }) => reason === "thin_liquidity")) return unpriced("thin_liquidity");
     if (relevant.some(({ reason }) => reason === "stale_pool")) return unpriced("stale_pool");
     return unpriced(graph.has(token) ? "no_bounded_usdc_path" : "no_trustworthy_usdc_path");
   }
@@ -382,8 +431,11 @@ function opportunityTokens(pool) {
 
 function validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd) {
   if (pool.status !== "confirmed" || pool.orphaned || !pool.verifiedSource) return "unverified_pool";
+  if (pool.providerEnrichment?.status === "conflicting") return "conflicting_pool_identity";
   if (!Number.isFinite(pool.priceToken1PerToken0) || pool.priceToken1PerToken0 <= 0) return "invalid_price";
-  if (!Number.isFinite(pool.liquidityUsd) || pool.liquidityUsd < minimumLiquidityUsd) return "dust_liquidity";
+  if (!Number.isFinite(pool.liquidityUsd)) return "liquidity_unknown";
+  if (pool.liquidityUsd === 0) return "zero_liquidity";
+  if (pool.liquidityUsd < minimumLiquidityUsd) return "thin_liquidity";
   const observed = Date.parse(pool.observedAt ?? pool.confirmedAt ?? "");
   if (!Number.isFinite(observed)) return "invalid_timestamp";
   if (observed > nowMs + 5_000) return "future_timestamp";
@@ -458,12 +510,38 @@ function primaryScore(pool, now) {
 }
 
 function aggregateVerifiedMetrics(pools) {
+  const windows = ["m5", "h1", "h6", "h24"];
+  const knownLiquidity = pools.map((pool) => pool.liquidityUsd).filter((value) => Number.isFinite(value) && value >= 0);
+  const volumes = Object.fromEntries(windows.flatMap((window) => {
+    const values = pools.map((pool) => window === "h24" ? pool.volumes?.h24 ?? pool.volume24hUsd : pool.volumes?.[window]);
+    const total = knownSum(values);
+    return total === undefined ? [] : [[window, total]];
+  }));
+  const transactionRowsByWindow = Object.fromEntries(windows.map((window) => [window, pools.map((pool) => pool.transactions?.[window]).filter((value) => Number.isFinite(value?.buys) && value.buys >= 0 && Number.isFinite(value?.sells) && value.sells >= 0)]));
+  const transactions = Object.fromEntries(windows.flatMap((window) => {
+    const rows = transactionRowsByWindow[window];
+    return rows.length ? [[window, rows.reduce((total, value) => ({ buys: total.buys + value.buys, sells: total.sells + value.sells }), { buys: 0, sells: 0 })]] : [];
+  }));
+  const volume24h = volumes.h24;
+  const trades24h = transactions.h24 ? transactions.h24.buys + transactions.h24.sells : undefined;
   return {
     liquidityUsd: completeSum(pools, "liquidityUsd"),
-    volume24hUsd: completeSum(pools, "volume24hUsd"),
-    trades24h: completeSum(pools, "trades24h"),
+    knownLiquidityUsd: knownLiquidity.length ? knownLiquidity.reduce((sum, value) => sum + value, 0) : undefined,
+    liquidityKnownPoolCount: knownLiquidity.length,
+    liquidityCoverageComplete: knownLiquidity.length === pools.length,
+    volume24hUsd: volume24h,
+    volumes,
+    trades24h,
+    transactions,
+    volumeKnownPoolCount: pools.filter((pool) => Number.isFinite(pool.volume24hUsd) && pool.volume24hUsd >= 0).length,
+    transactionsKnownPoolCount: transactionRowsByWindow.h24.length,
     contributingPoolCount: pools.length
   };
+}
+
+function knownSum(values) {
+  const known = values.filter((value) => Number.isFinite(value) && value >= 0);
+  return known.length ? known.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
 function completeSum(pools, key) {
@@ -472,14 +550,15 @@ function completeSum(pools, key) {
 }
 
 function opportunityRank(opportunity) {
-  return (opportunity.canonicalPrice.tier === "A" ? 400 : opportunity.canonicalPrice.tier === "B" ? 300 : opportunity.canonicalPrice.tier === "C" ? 200 : 0)
-    + Math.log10(Math.max(1, opportunity.aggregate.liquidityUsd ?? 0)) * 10;
+  const band = opportunity.qualityBand === "RANKED" ? 800 : opportunity.qualityBand === "EMERGING" ? 600 : opportunity.qualityBand === "DETECTED" ? 200 : 0;
+  const tier = opportunity.canonicalPrice.tier === "A" ? 90 : opportunity.canonicalPrice.tier === "B" ? 70 : opportunity.canonicalPrice.tier === "C" ? 50 : 0;
+  return band + tier + Math.log10(Math.max(1, opportunity.bestLiquidityUsd ?? 0)) * 10;
 }
 
 function isUsableRankedPool(pool, now) {
   const observed = Date.parse(pool.observedAt ?? pool.confirmedAt ?? "");
-  return pool.status === "confirmed" && !pool.orphaned && pool.verifiedSource
-    && Number.isFinite(pool.liquidityUsd) && pool.liquidityUsd >= MIN_PRICE_LIQUIDITY_USD
+  return pool.status === "confirmed" && !pool.orphaned && pool.verifiedSource && pool.providerEnrichment?.status !== "conflicting"
+    && Number.isFinite(pool.liquidityUsd) && pool.liquidityUsd >= MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd
     && Number.isFinite(pool.priceToken1PerToken0) && pool.priceToken1PerToken0 > 0
     && Number.isFinite(observed) && observed <= now.getTime() + 5_000 && now.getTime() - observed <= MAX_PRICE_AGE_MS;
 }

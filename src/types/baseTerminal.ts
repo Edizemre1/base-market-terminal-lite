@@ -25,6 +25,14 @@ export type BasePair = {
   sourceUpdatedAt?: string;
   firstSeenAt?: string;
   qualityTier?: "active" | "thin" | "incomplete" | "expired";
+  qualityBand?: "RANKED" | "EMERGING" | "DETECTED" | "REJECTED";
+  liquidityState?: "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity";
+  observedPriceUsd?: number;
+  observedPriceProvider?: string;
+  observedPricePoolAddress?: string;
+  observedPriceAt?: string;
+  providerDiscoveryState?: "matched" | "pending" | "not_found" | "conflicting" | "detected";
+  providerIndexedAt?: string;
   opportunityId?: string;
   opportunityKind?: "token";
   focusTokenAddress?: string;

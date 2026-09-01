@@ -49,7 +49,24 @@ Canonical pricing uses exact Base USDC `0x833589fcd6edb6e08f4c7c32d4f71b54bda029
 - Tier C: another verified conversion path, bounded to three hops.
 - UNPRICED: no trustworthy path.
 
-Every result carries direct/converted kind, exact source pool keys, anchor, observation time, block/provider time, freshness, quality status, tier, raw precision, deterministic display precision, selection reason, and reason code. Same-tier paths use median outlier rejection and bounded square-root liquidity weighting. Cycles, future or stale timestamps, non-positive/non-finite rates, incomplete decimals, and liquidity below the dust threshold are rejected. Missing aggregate inputs remain missing; they are not replaced with zero. This analytical price is never treated as an executable LI.FI quote.
+Every result carries direct/converted kind, exact source pool keys, anchor, observation time, block/provider time, freshness, quality status, tier, raw precision, deterministic display precision, selection reason, and reason code. Same-tier paths use median outlier rejection and bounded square-root liquidity weighting. Cycles, future or stale timestamps, non-positive/non-finite rates, incomplete decimals, and liquidity below the canonical-price threshold are rejected. Missing aggregate inputs remain missing; they are not replaced with zero. This analytical price is never treated as an executable LI.FI quote.
+
+## Market quality bands and thresholds
+
+Quality gates are centralized in `collector/market-quality.mjs` and use USD values. A provider-observed price is separate from a canonical price and always carries exact provider, pool, timestamp, freshness, and `executable: false` provenance.
+
+- Canonical price requires at least $1,000 verified liquidity on its pricing path.
+- The default Quality view may include an EMERGING opportunity from $100 known liquidity, but labels its observed value as a thin market.
+- RANKED requires a fresh canonical price and at least $25,000 liquidity.
+- Gainers/Losers additionally require comparable canonical snapshots and at least $50,000 liquidity.
+- Volume, Liquidity, and Most Traded each require a RANKED opportunity, a real category input, and at least $1,000 liquidity.
+- Missing liquidity is `liquidity_unknown`; exact zero is `zero_liquidity`; a positive sub-$1,000 value is `thin_liquidity`. These states are never collapsed into one dust boolean.
+
+RANKED, EMERGING, DETECTED, and REJECTED/CONFLICTING remain distinct. DETECTED and rejected records stay in the operational universe, while the default board excludes their flood. Observed-only prices never enter ranking, canonical snapshot comparison, or execution.
+
+## Targeted exact-address enrichment
+
+New confirmed pools and prioritized unpriced opportunities enter a bounded queue. The collector requests the exact DexScreener Base pair plus the exact GeckoTerminal Base pool and pool-info endpoints. It never resolves by symbol. Requests use provider-specific timeouts and rate gates, bounded concurrency, retry/backoff, circuit breakers, in-flight coalescing, a short positive cache, and a longer negative-result TTL. A recently confirmed provider miss remains pending for bounded retry; an older exact 404 is retained as not found. Provider observations merge into one canonical pool with field-level provenance, so liquidity, volume, and transactions are not double-counted.
 
 ## Store and limits
 

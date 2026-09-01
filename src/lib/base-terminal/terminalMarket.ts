@@ -32,6 +32,7 @@ export type MarketFilters = {
   dex?: string;
   quoteTokenAddress?: string;
   category?: "all" | TerminalLaneId;
+  qualityView: "quality" | "emerging" | "detected" | "all" | "pools";
   sortBy: MarketSortKey;
   sortDirection: "asc" | "desc";
 };
@@ -42,6 +43,7 @@ export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   dex: "",
   quoteTokenAddress: "",
   category: "all",
+  qualityView: "quality",
   sortBy: "volume24h",
   sortDirection: "desc"
 };
@@ -78,10 +80,10 @@ export function buildOpportunityLanes(current: BasePair[], previous: BasePair[] 
 
 export function buildTokenOpportunityLanes(snapshot: MarketTerminalSnapshot, limit = 6): TokenOpportunityLane[] {
   const pairsById = new Map(snapshot.allPairs.map((pair) => [pair.id, pair]));
-  const eligible = snapshot.opportunities.filter((opportunity) => opportunity.quality !== "expired");
-  const rankedEligible = eligible.filter((opportunity) => opportunity.canonicalPrice.tier !== "UNPRICED" && opportunity.freshness.stalePoolCount === 0);
+  const eligible = snapshot.opportunities.filter((opportunity) => opportunity.quality !== "expired" && opportunity.qualityBand !== "REJECTED");
+  const rankedEligible = eligible.filter((opportunity) => opportunity.qualityBand === "RANKED" && opportunity.canonicalPrice.tier !== "UNPRICED" && opportunity.freshness.stalePoolCount === 0);
   const newCandidates = eligible
-    .filter((opportunity) => opportunity.categoryEligibility.newlyCreated)
+    .filter((opportunity) => opportunity.categoryEligibility.newlyCreated && (opportunity.qualityBand === "RANKED" || opportunity.qualityBand === "EMERGING"))
     .map((opportunity) => ({ opportunity, score: opportunity.newestPoolCreatedAt ? Date.parse(opportunity.newestPoolCreatedAt) : Number.NEGATIVE_INFINITY }))
     .filter((entry) => Number.isFinite(entry.score))
     .sort(descendingCandidate);

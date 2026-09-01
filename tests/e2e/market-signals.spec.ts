@@ -162,7 +162,7 @@ async function fixture(options: {
     primaryMarketId: poolId, executionCandidates: [poolId], newestPoolCreatedAt: createdAt, oldestPoolCreatedAt: createdAt,
     aggregate: { liquidityUsd: options.liquidity, volumes: pair.volumes, transactions: pair.txns, contributingPoolCount: options.poolCount ?? 1 },
     freshness: { newestSourceAt: new Date(generatedAt).toISOString(), oldestSourceAt: new Date(generatedAt).toISOString(), stalePoolCount: 0 }, quality: "active" as const,
-    categoryEligibility: { newlyCreated: true, justLaunched: true, moving: true, liquidity: true }
+    categoryEligibility: { newlyCreated: true, justLaunched: true, moving: true, liquidity: true, detected: false, gainersLosers: false, volume: true, mostTraded: true }
   };
   const pool = { ...base.poolMarkets[0], id: poolId, poolAddress: poolId, baseTokenAddress: tokenAddress, poolCreatedAt: createdAt, liquidityUsd: options.liquidity, volumes: pair.volumes, priceChanges: pair.priceChanges, transactions: pair.txns, quality: "active" as const };
   const previousAt = options.previousGeneratedAt ?? new Date(generatedAt - 12_000).toISOString();

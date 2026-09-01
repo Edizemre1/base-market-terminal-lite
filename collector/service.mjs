@@ -258,7 +258,7 @@ export class OnchainDiscoveryCollector {
           joined.reasonCode = "invalid_decimals";
         }
         joined.decimalsVerified = decimalsVerified;
-        return { item, status: joined.status, joined, metadataUpdates, circuits: lookup.circuits };
+        return { item, status: joined.status, joined, lookup, metadataUpdates, circuits: lookup.circuits };
       } catch (error) {
         return { item, status: "failed", reasonCode: error?.reasonCode ?? "enrichment_failure", retryable: Boolean(error?.retryable) };
       }
@@ -281,6 +281,7 @@ export class OnchainDiscoveryCollector {
             priceToken1PerToken0: joined.priceToken1PerToken0,
             rawPriceRatio: joined.rawPriceRatio,
             priceUsd: joined.priceUsd,
+            observedPricesUsd: joined.observedPricesUsd,
             liquidityUsd: joined.liquidityUsd,
             volumes: joined.volumes,
             volume24hUsd: joined.volume24hUsd,
@@ -289,6 +290,8 @@ export class OnchainDiscoveryCollector {
             providerSnapshots: joined.providerSnapshots,
             fieldProvenance: joined.fieldProvenance,
             onchainState: joined.onchainState,
+            providerIndexedAt: pool.providerIndexedAt ?? joined.receivedAt ?? joined.observedAt,
+            providerIndexingLatencyMs: pool.providerIndexingLatencyMs ?? indexingLatencyMs(pool.firstSeenAt, joined.receivedAt ?? joined.observedAt),
             providerEnrichment: {
               status: "matched",
               reasonCode: joined.reasonCode,
@@ -297,11 +300,15 @@ export class OnchainDiscoveryCollector {
               orientation: joined.orientation,
               decimalsVerified: joined.decimalsVerified,
               observedAt: joined.observedAt,
+              exactLookupState: "found",
+              cacheHit: Boolean(outcome.lookup?.cacheHit),
+              poolInfoStatus: outcome.lookup?.poolInfo ? "found" : "unavailable",
               nextRefreshAt: new Date(now.getTime() + PROVIDER_REFRESH_MS).toISOString()
             }
           };
           draft.counters.enrichmentSuccess += 1;
           draft.counters.providerMatched += 1;
+          draft.counters.exactLookupSuccess += 1;
           draft.health.lastSuccessfulEnrichment = joined.observedAt;
           completed.add(key);
           continue;
@@ -314,17 +321,23 @@ export class OnchainDiscoveryCollector {
           continue;
         }
         const reasonCode = outcome.joined?.reasonCode ?? outcome.reasonCode ?? "provider_pool_not_found";
+        const recentlyDetected = reasonCode === "provider_pool_not_found" && isRecentlyDetected(pool, now);
+        const providerStatus = outcome.status === "conflicting" ? "conflicting" : outcome.status === "discarded" ? "discarded" : recentlyDetected ? "pending" : "unmatched";
         draft.pools[key] = {
           ...pool,
           providerEnrichment: {
-            status: outcome.status === "conflicting" ? "conflicting" : outcome.status === "discarded" ? "discarded" : "unmatched",
+            status: providerStatus,
             reasonCode,
             observedAt: now.toISOString(),
-            nextRefreshAt: new Date(now.getTime() + UNMATCHED_REFRESH_MS).toISOString()
+            exactLookupState: recentlyDetected ? "pending_indexing" : "not_found",
+            negativeResultExpiresAt: new Date(now.getTime() + 2 * 60_000).toISOString(),
+            nextRefreshAt: new Date(now.getTime() + (recentlyDetected ? 30_000 : UNMATCHED_REFRESH_MS)).toISOString()
           }
         };
         if (outcome.status === "conflicting") draft.counters.priceConflict += 1;
         else draft.counters.providerUnmatched += 1;
+        if (recentlyDetected) draft.counters.exactLookupPending += 1;
+        else if (reasonCode === "provider_pool_not_found") draft.counters.exactLookupNotFound += 1;
         if (outcome.status === "failed") draft.counters.enrichmentFailure += 1;
         completed.add(key);
       }
@@ -417,7 +430,11 @@ export class OnchainDiscoveryCollector {
     for (const poolKey of touchedPoolKeys) {
       const previous = before.pools?.[poolKey]?.providerEnrichment?.status;
       const current = after.pools?.[poolKey]?.providerEnrichment?.status;
-      if (previous !== "matched" && current === "matched") events.push({ type: "pool_enriched", data: { poolKey, providers: after.pools[poolKey].providerEnrichment.providers } });
+      if (previous !== "matched" && current === "matched") {
+        events.push({ type: "pool_enriched", data: { poolKey, providers: after.pools[poolKey].providerEnrichment.providers } });
+        events.push({ type: "provider_pool_found", data: { poolKey, providerIndexedAt: after.pools[poolKey].providerIndexedAt } });
+      }
+      if (previous !== "pending" && current === "pending") events.push({ type: "provider_pool_pending", data: { poolKey, reasonCode: after.pools[poolKey].providerEnrichment.reasonCode } });
     }
     const beforeAnchor = semanticAnchor(before.priceAnchors?.wethUsdc);
     const afterAnchor = semanticAnchor(after.priceAnchors?.wethUsdc);
@@ -428,12 +445,17 @@ export class OnchainDiscoveryCollector {
       if (previous?.canonicalPrice?.tier === "UNPRICED" && opportunity.canonicalPrice.tier !== "UNPRICED") events.push({ type: "opportunity_priced", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value } });
       if (previous?.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
       if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
+      if (!previous?.observedPriceUsd && opportunity.observedPriceUsd) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd.value, provider: opportunity.observedPriceUsd.provider, poolAddress: opportunity.observedPriceUsd.poolAddress } });
+      if (previous && previous.qualityBand !== opportunity.qualityBand) events.push({ type: "opportunity_band_changed", data: { opportunityId: opportunity.id, previousBand: previous.qualityBand, band: opportunity.qualityBand } });
+      if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
+      if (previous?.ranked && !opportunity.ranked) events.push({ type: "opportunity_unranked", data: { opportunityId: opportunity.id, reasonCode: opportunity.exclusionReason } });
       if (previous && semanticMetrics(previous) !== semanticMetrics(opportunity)) events.push({ type: "metrics_updated", data: { opportunityId: opportunity.id, aggregate: opportunity.aggregate } });
     }
     if (!events.length) return after;
     return this.store.transact("semantic-enrichment-deltas", (draft) => {
       const at = new Date().toISOString();
       for (const event of events) appendRelayEvent(draft, event.type, event.data, at);
+      draft.counters.bandTransitions += events.filter((event) => event.type === "opportunity_band_changed").length;
     });
   }
 
@@ -542,28 +564,34 @@ function ensureEnrichmentState(state) {
   state.priceAnchors ??= {};
   state.priceAnchors.wethUsdc ??= { status: "unavailable", reasonCode: "not_initialized", sourcePoolCount: 0, freshness: "unavailable" };
   state.counters ??= {};
-  for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected"]) {
+  for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected", "exactLookupSuccess", "exactLookupPending", "exactLookupNotFound", "bandTransitions"]) {
     if (!Number.isFinite(state.counters[key])) state.counters[key] = 0;
   }
   state.health ??= {};
 }
 
 function seedEnrichmentQueue(state, now) {
+  const reprioritized = (state.enrichmentQueue ?? []).flatMap((item) => {
+    const pool = state.pools?.[item.poolKey];
+    if (!pool) return [];
+    const containsAnchor = sameTokenSet(pool.token0, pool.token1, BASE_WETH, BASE_USDC);
+    return [{ ...item, priority: enrichmentPriority(state, pool, containsAnchor, now) }];
+  });
   const jobs = Object.values(state.pools ?? {}).flatMap((pool) => {
     if (pool.status !== "confirmed" || pool.orphaned || !/^0x[0-9a-f]{40}$/.test(pool.poolAddress ?? "")) return [];
     const refreshAt = Date.parse(pool.providerEnrichment?.nextRefreshAt ?? "");
     if (Number.isFinite(refreshAt) && refreshAt > now.getTime()) return [];
-    const containsAnchor = pool.token0 === BASE_WETH || pool.token1 === BASE_WETH || pool.token0 === BASE_USDC || pool.token1 === BASE_USDC;
+    const containsAnchor = sameTokenSet(pool.token0, pool.token1, BASE_WETH, BASE_USDC);
     return [{
       poolKey: pool.poolKey,
       poolAddress: pool.poolAddress,
-      priority: pool.providerEnrichment?.status === "matched" ? 70 : containsAnchor ? 90 : 30,
+      priority: enrichmentPriority(state, pool, containsAnchor, now),
       attempts: 0,
       createdAt: now.toISOString(),
       nextAttemptAt: now.toISOString()
     }];
   });
-  state.enrichmentQueue = coalesceEnrichmentQueue(state.enrichmentQueue, jobs);
+  state.enrichmentQueue = coalesceEnrichmentQueue(reprioritized, jobs);
   state.health.enrichmentQueueDepth = state.enrichmentQueue.length;
 }
 
@@ -580,6 +608,7 @@ function refreshEnrichmentHealth(state, circuits) {
   const pools = Object.values(state.pools ?? {}).filter((pool) => pool.status === "confirmed" && !pool.orphaned && !pool.replay);
   const matched = pools.filter((pool) => pool.providerEnrichment?.status === "matched");
   const unmatched = pools.filter((pool) => ["unmatched", "conflicting", "discarded"].includes(pool.providerEnrichment?.status));
+  const pending = pools.filter((pool) => pool.providerEnrichment?.status === "pending");
   const reasons = {};
   for (const pool of unmatched) {
     const reason = pool.providerEnrichment?.reasonCode ?? "unknown";
@@ -588,6 +617,19 @@ function refreshEnrichmentHealth(state, circuits) {
   const tiers = { A: 0, B: 0, C: 0, UNPRICED: 0 };
   for (const opportunity of state.opportunities ?? []) tiers[opportunity.canonicalPrice?.tier ?? "UNPRICED"] += 1;
   const anchor = state.priceAnchors?.wethUsdc ?? {};
+  const bands = { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 };
+  const liquidityStates = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0 };
+  const categoryEligibilityCounts = { new: 0, detected: 0, gainersLosers: 0, volume: 0, liquidity: 0, mostTraded: 0 };
+  for (const opportunity of state.opportunities ?? []) {
+    if (bands[opportunity.qualityBand] !== undefined) bands[opportunity.qualityBand] += 1;
+    if (liquidityStates[opportunity.liquidityState] !== undefined) liquidityStates[opportunity.liquidityState] += 1;
+    for (const key of Object.keys(categoryEligibilityCounts)) if (opportunity.categoryEligibility?.[key]) categoryEligibilityCounts[key] += 1;
+  }
+  const indexingLatencies = matched.map((pool) => pool.providerIndexingLatencyMs).filter((value) => Number.isFinite(value) && value >= 0).sort((left, right) => left - right);
+  const pendingTimes = [
+    ...(state.enrichmentQueue ?? []).map((item) => item.createdAt),
+    ...pending.map((pool) => pool.firstSeenAt)
+  ].filter(Boolean).sort();
   state.health = {
     ...state.health,
     enrichmentQueueDepth: state.enrichmentQueue?.length ?? 0,
@@ -595,6 +637,7 @@ function refreshEnrichmentHealth(state, circuits) {
     enrichmentFailure: state.counters.enrichmentFailure,
     providerMatchedPools: matched.length,
     providerUnmatchedPools: unmatched.length,
+    providerPendingPools: pending.length,
     providerUnmatchedReasons: reasons,
     anchorStatus: anchor.status ?? "unavailable",
     anchorUsdPrice: anchor.value,
@@ -607,7 +650,24 @@ function refreshEnrichmentHealth(state, circuits) {
     pricingTierCounts: tiers,
     pricedOpportunities: tiers.A + tiers.B + tiers.C,
     rankedOpportunities: (state.opportunities ?? []).filter((item) => item.ranked).length,
-    oldestPendingEnrichment: (state.enrichmentQueue ?? []).map((item) => item.createdAt).filter(Boolean).sort()[0],
+    rankedCount: bands.RANKED,
+    emergingCount: bands.EMERGING,
+    detectedCount: bands.DETECTED,
+    rejectedConflictingCount: bands.REJECTED + pools.filter((pool) => pool.providerEnrichment?.status === "conflicting").length,
+    observedPriceCount: (state.opportunities ?? []).filter((item) => Number.isFinite(item.observedPriceUsd?.value) && item.observedPriceUsd.value > 0).length,
+    canonicalPriceCount: tiers.A + tiers.B + tiers.C,
+    liquidityUnknownCount: liquidityStates.liquidity_unknown,
+    thinLiquidityCount: liquidityStates.thin_liquidity,
+    zeroLiquidityCount: liquidityStates.zero_liquidity,
+    usableLiquidityCount: liquidityStates.usable_liquidity,
+    exactLookupQueueDepth: state.enrichmentQueue?.length ?? 0,
+    exactLookupSuccess: matched.length,
+    exactLookupPending: pending.length,
+    exactLookupNotFound: pools.filter((pool) => pool.providerEnrichment?.exactLookupState === "not_found").length,
+    providerIndexingLatencyMs: summarizeLatency(indexingLatencies),
+    bandTransitions: state.counters.bandTransitions,
+    categoryEligibilityCounts,
+    oldestPendingEnrichment: pendingTimes[0],
     providerCircuits: circuits,
     priceConflictCount: state.counters.priceConflict,
     staleAnchorRejectionCount: state.counters.staleAnchorRejected,
@@ -620,7 +680,42 @@ function semanticAnchor(anchor) {
 }
 
 function semanticMetrics(opportunity) {
-  return JSON.stringify({ aggregate: opportunity?.aggregate, lifecycle: opportunity?.lifecycle, ranked: opportunity?.ranked });
+  return JSON.stringify({ aggregate: opportunity?.aggregate, lifecycle: opportunity?.lifecycle, ranked: opportunity?.ranked, qualityBand: opportunity?.qualityBand, observedPriceUsd: opportunity?.observedPriceUsd, liquidityState: opportunity?.liquidityState });
+}
+
+function enrichmentPriority(state, pool, containsAnchor, now) {
+  if (isRecentlyDetected(pool, now)) return 100;
+  if (containsAnchor) return 95;
+  const opportunity = (state.opportunities ?? []).find((item) => item.poolKeys?.includes(pool.poolKey));
+  if (opportunity?.categoryEligibility?.new) return 90;
+  if (pool.providerEnrichment?.status === "matched") return 85;
+  if (opportunity?.qualityBand === "RANKED") return 80;
+  if (opportunity?.qualityBand === "EMERGING") return 60;
+  if (pool.providerEnrichment?.status === "pending") return 55;
+  return 30;
+}
+
+function isRecentlyDetected(pool, now, maximumAgeMs = 15 * 60_000) {
+  const detected = Date.parse(pool?.firstSeenAt ?? pool?.confirmedAt ?? "");
+  return Number.isFinite(detected) && now.getTime() >= detected && now.getTime() - detected <= maximumAgeMs;
+}
+
+function indexingLatencyMs(firstSeenAt, providerIndexedAt) {
+  const first = Date.parse(firstSeenAt ?? "");
+  const indexed = Date.parse(providerIndexedAt ?? "");
+  return Number.isFinite(first) && Number.isFinite(indexed) && indexed >= first ? indexed - first : undefined;
+}
+
+function summarizeLatency(values) {
+  if (!values.length) return { count: 0 };
+  return { count: values.length, min: values[0], median: percentile(values, 0.5), p95: percentile(values, 0.95), max: values.at(-1) };
+}
+
+function percentile(values, ratio) {
+  const index = (values.length - 1) * ratio;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  return lower === upper ? values[lower] : values[lower] + (values[upper] - values[lower]) * (index - lower);
 }
 
 function sameTokenSet(left0, left1, right0, right1) {

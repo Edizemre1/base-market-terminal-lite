@@ -6,7 +6,7 @@ import { coalescePendingOpportunityIds, MAX_PENDING_OPPORTUNITY_UPDATES, shouldA
 import type { BasePair } from "../../src/types/baseTerminal";
 
 const NOW = Date.parse("2026-08-30T12:00:00.000Z");
-const WETH = "0x4200000000000000000000000000000000000006";
+const USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 
 test.describe("live market wall contracts", () => {
   test("accepts only exact valid non-future seven-day pool ages", async () => {
@@ -23,7 +23,7 @@ test.describe("live market wall contracts", () => {
   });
 
   test("keeps gainers positive-only, losers negative-only, missing distinct from zero, and ordering deterministic", async () => {
-    const snapshot = await fixture([
+    const warming = await fixture([
       market(11, { symbol: "GAIN_A", change: 5, liquidity: 200_000 }),
       market(12, { symbol: "GAIN_B", change: 5, liquidity: 300_000 }),
       market(13, { symbol: "LOSS_A", change: -9 }),
@@ -31,6 +31,9 @@ test.describe("live market wall contracts", () => {
       market(15, { symbol: "ZERO", change: 0 }),
       market(16, { symbol: "MISS", change: undefined })
     ]);
+    expect(lane(warming, "gainers", { allowCrossLaneRepeats: true })).toHaveLength(0);
+    expect(lane(warming, "losers", { allowCrossLaneRepeats: true })).toHaveLength(0);
+    const snapshot = withComparison(warming, {});
     const gainers = lane(snapshot, "gainers", { allowCrossLaneRepeats: true });
     const losers = lane(snapshot, "losers", { allowCrossLaneRepeats: true });
     expect(gainers.map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["GAIN_B", "GAIN_A"]);
@@ -77,14 +80,15 @@ test.describe("live market wall contracts", () => {
     expect([...added, ...removed].some((entry) => entry.opportunity.focusTokenSymbol === "TINY")).toBeFalsy();
   });
 
-  test("never infers trade count and switches the exact shared timeframe", async () => {
-    const snapshot = await fixture([
+  test("never infers trade count and keeps canonical snapshot direction across display timeframes", async () => {
+    const warming = await fixture([
       market(41, { symbol: "COUNTED", change: 4, change24h: -3, trades: 55 }),
       market(42, { symbol: "NO_COUNT", change: 8, trades: undefined })
     ]);
+    const snapshot = withComparison(warming, {});
     expect(lane(snapshot, "traded", { allowCrossLaneRepeats: true }).map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["COUNTED"]);
     expect(lane(snapshot, "gainers", { allowCrossLaneRepeats: true, timeframe: "h1" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
-    expect(lane(snapshot, "losers", { allowCrossLaneRepeats: true, timeframe: "h24" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
+    expect(lane(snapshot, "gainers", { allowCrossLaneRepeats: true, timeframe: "h24" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
   });
 
   test("keeps canonical diversity, same-symbol contracts, multi-pool tokens, deterministic assignment, and backfill", async () => {
@@ -154,7 +158,11 @@ function withComparison(snapshot: MarketTerminalSnapshot, bySymbol: Record<strin
   const opportunityMetrics = Object.fromEntries(snapshot.opportunities.map((opportunity) => {
     const key = includeAddress && opportunity.focusTokenSymbol === "SAME" ? `${opportunity.focusTokenSymbol}:${opportunity.focusTokenAddress}` : opportunity.focusTokenSymbol;
     const before = bySymbol[key] ?? { volume: 10_000, liquidity: (opportunity.aggregate.liquidityUsd ?? 20_000) - 2_000 };
-    return [opportunity.id, { liquidityUsd: before.liquidity, volumes: { m5: before.volume, h1: before.volume, h24: before.volume }, transactions: opportunity.aggregate.transactions }];
+    const pair = snapshot.allPairs.find((item) => item.id === opportunity.primaryMarketId);
+    const currentPrice = opportunity.canonicalPrice.value;
+    const change = pair?.priceChanges?.h1 ?? 0;
+    const canonicalPriceUsd = currentPrice === undefined || 1 + change / 100 <= 0 ? currentPrice : currentPrice / (1 + change / 100);
+    return [opportunity.id, { canonicalPriceUsd, liquidityUsd: before.liquidity, volumes: { m5: before.volume, h1: before.volume, h24: before.volume }, transactions: opportunity.aggregate.transactions }];
   }));
   return { ...snapshot, comparison: { status: "ready", previousGeneratedAt: new Date(NOW - 12_000).toISOString(), opportunityVolume1h: {}, opportunityMetrics } };
 }
@@ -168,18 +176,18 @@ function market(seed: number, options: { symbol: string; ageMinutes?: number; ch
   return {
     fixtureSymbol: options.symbol,
     dataSource: "dexscreener",
-    dataProviders: ["dexscreener"],
+    dataProviders: ["dexscreener", "onchain"],
     id: address(seed + 10_000),
     pairAddress: address(seed + 10_000),
     baseTokenAddress: address(seed + 20_000),
-    quoteTokenAddress: WETH,
+    quoteTokenAddress: USDC,
     chainId: "base",
     baseToken: options.symbol,
-    quoteToken: "WETH",
-    pair: `${options.symbol} / WETH`,
+    quoteToken: "USDC",
+    pair: `${options.symbol} / USDC`,
     project: `${options.symbol} token`,
     address: address(seed + 20_000),
-    route: `${options.symbol}-WETH`,
+    route: `${options.symbol}-USDC`,
     dexId: "aerodrome",
     dexName: "Aerodrome",
     dex: "Aerodrome",
@@ -188,9 +196,11 @@ function market(seed: number, options: { symbol: string; ageMinutes?: number; ch
     pairCreatedAtMs: createdAt ? Date.parse(createdAt) : undefined,
     ageMinutes: ageMinutes >= 0 ? ageMinutes : 0,
     age: createdAt && ageMinutes >= 0 ? `${ageMinutes}m` : "N/A",
-    price: "$1",
-    priceUsd: "$1",
-    priceUsdValue: 1,
+    priceNative: String(1 + (options.change ?? 0) / 100),
+    price: `$${1 + (options.change ?? 0) / 100}`,
+    priceUsd: `$${1 + (options.change ?? 0) / 100}`,
+    priceUsdValue: 1 + (options.change ?? 0) / 100,
+    onchainProvenance: { factoryId: "fixture", factoryAddress: address(seed + 30_000), protocolVersion: "v2", confirmedAt: new Date(NOW).toISOString(), bindingKind: "registered_pool_identity", decimalsVerified: true },
     change24h: options.change24h ?? options.change ?? 0,
     priceChanges: { m5: options.change, h1: options.change, h24: options.change24h ?? options.change },
     liquidity,

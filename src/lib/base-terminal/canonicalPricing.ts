@@ -8,6 +8,7 @@ export const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 
 export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: BasePair[], now = new Date()): CanonicalPrice {
   const pricingPools = pairs.flatMap((pair) => {
+    if (pair.providerDiscoveryState === "conflicting") return [];
     const token0 = normalizeAddress(pair.baseTokenAddress);
     const token1 = normalizeAddress(pair.quoteTokenAddress);
     const poolKey = (pair.pairAddress ?? pair.id).toLowerCase();
