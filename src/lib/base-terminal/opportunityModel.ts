@@ -152,7 +152,7 @@ export function buildDiscoveryUniverse(
 
   const previousById = new Map(previousOpportunities.map((opportunity) => [opportunity.id, opportunity]));
   const opportunities = [...groups.values()]
-    .map(({ focus, pairs }) => buildTokenOpportunity(focus, pairs, poolsById, previousById.get(focus.id), nowMs))
+    .map(({ focus, pairs }) => buildTokenOpportunity(focus, pairs, uniquePairs, poolsById, previousById.get(focus.id), nowMs))
     .filter((opportunity): opportunity is TokenOpportunity => Boolean(opportunity))
     .sort(compareOpportunities)
     .slice(0, DISCOVERY_OPPORTUNITY_CAPACITY);
@@ -269,6 +269,7 @@ export function mergePoolPairs(pairs: BasePair[]) {
 function buildTokenOpportunity(
   focus: FocusIdentity,
   pairs: BasePair[],
+  pricingPairs: BasePair[],
   poolsById: Map<string, PoolMarket>,
   previous: TokenOpportunity | undefined,
   nowMs: number
@@ -283,7 +284,7 @@ function buildTokenOpportunity(
   const newestPoolCreatedAt = timestamps.at(-1);
   const newestAgeMinutes = getPoolAgeMinutes(newestPoolCreatedAt, nowMs);
   const primarySelection = explainPrimarySelection(uniquePairs, primary, previous?.primaryMarketId);
-  const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, uniquePairs, new Date(nowMs));
+  const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, pricingPairs, new Date(nowMs));
   const canonicalPriced = canonicalPrice.tier !== "UNPRICED";
   const metadataStatus = metadataQuality(uniquePairs);
   return {

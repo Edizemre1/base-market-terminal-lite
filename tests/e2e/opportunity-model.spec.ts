@@ -135,7 +135,7 @@ test.describe("pool market to token opportunity contracts", () => {
 
   test("uses Volume Leaders until a comparable baseline exists, then enables real surge", async () => {
     const template = await fixtureTemplate();
-    const pools = [1, 2, 3, 4].map((index) => fixturePool(template, { poolAddress: address(600 + index), tokenAddress: address(700 + index), tokenSymbol: `VOL${index}`, quoteAddress: WETH, quoteSymbol: "WETH", volume1h: index * 10_000 }));
+    const pools = [1, 2, 3, 4].map((index) => verifiedPool(fixturePool(template, { poolAddress: address(600 + index), tokenAddress: address(700 + index), tokenSymbol: `VOL${index}`, quoteAddress: USDC, quoteSymbol: "USDC", volume1h: index * 10_000 })));
     const warming = await snapshotFrom(template, pools);
     expect(buildTokenOpportunityLanes(warming).find((lane) => lane.id === "volume")?.fallback).toBeTruthy();
     const baseline = Object.fromEntries(warming.opportunities.map((item) => [item.id, (item.aggregate.volumes?.h1 ?? 1) / 2]));
@@ -147,12 +147,23 @@ test.describe("pool market to token opportunity contracts", () => {
 
   test("treats a verified negative price move as movement instead of missing data", async () => {
     const template = await fixtureTemplate();
-    const pool = fixturePool(template, { poolAddress: address(751), tokenAddress: address(752), tokenSymbol: "DOWN", quoteAddress: WETH, quoteSymbol: "WETH" });
+    const pool = verifiedPool(fixturePool(template, { poolAddress: address(751), tokenAddress: address(752), tokenSymbol: "DOWN", quoteAddress: USDC, quoteSymbol: "USDC" }));
     pool.priceChanges = { ...pool.priceChanges, h1: -4.25 };
     const discovery = buildDiscoveryUniverse([pool]);
     expect(discovery.opportunities[0].categoryEligibility.moving).toBeTruthy();
     const snapshot = await snapshotFrom(template, [pool]);
     expect(buildTokenOpportunityLanes(snapshot).some((lane) => lane.opportunities.some((opportunity) => opportunity.focusTokenSymbol === "DOWN"))).toBeTruthy();
+  });
+
+  test("uses a verified global WETH/USDC anchor for an exact TOKEN/WETH Tier B path", async () => {
+    const template = await fixtureTemplate();
+    const tokenAddress = address(761);
+    const tokenWeth = verifiedPool(fixturePool(template, { poolAddress: address(762), tokenAddress, tokenSymbol: "PATH", quoteAddress: WETH, quoteSymbol: "WETH" }));
+    const wethUsdc = verifiedPool(fixturePool(template, { poolAddress: address(763), tokenAddress: WETH, tokenSymbol: "WETH", quoteAddress: USDC, quoteSymbol: "USDC" }));
+    const discovery = buildDiscoveryUniverse([tokenWeth, wethUsdc]);
+    const opportunity = discovery.opportunities.find((item) => item.focusTokenAddress === tokenAddress);
+    expect(opportunity?.canonicalPrice.tier).toBe("B");
+    expect(opportunity?.canonicalPrice.sourcePoolKeys).toEqual([tokenWeth.id, wethUsdc.id].sort());
   });
 
   test("holds a healthy primary through small changes and switches on material improvement or staleness", async () => {
@@ -263,6 +274,23 @@ function fixturePool(template: BasePair, options: { poolAddress: string; tokenAd
     volume24h,
     txns: { m5: { buys: 3, sells: 2 }, h1: { buys: 30, sells: 20 }, h6: { buys: 90, sells: 70 }, h24: { buys: 300, sells: 200 } },
     stale: false
+  };
+}
+
+function verifiedPool(pool: BasePair): BasePair {
+  const observedAt = new Date().toISOString();
+  return {
+    ...pool,
+    dataProviders: [...new Set([...(pool.dataProviders ?? []), "onchain" as const])],
+    sourceUpdatedAt: observedAt,
+    onchainProvenance: {
+      factoryId: "fixture-factory",
+      factoryAddress: address(99_001),
+      protocolVersion: "fixture-v2",
+      confirmedAt: observedAt,
+      bindingKind: "registered_pool_identity",
+      decimalsVerified: true
+    }
   };
 }
 
