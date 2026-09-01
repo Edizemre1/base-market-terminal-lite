@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BASE_CHAIN_ID, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
-import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_RECONCILIATION_RING } from "./model.mjs";
+import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_PRICE_AGE_MS, MAX_RECONCILIATION_RING } from "./model.mjs";
 
 export const STORE_SCHEMA_VERSION = 1;
 export const MAX_CANONICAL_EVENTS = 5_000;
@@ -58,6 +58,7 @@ export class DurableDiscoveryStore {
     next.collectorVersion = COLLECTOR_VERSION;
     next.updatedAt = new Date().toISOString();
     enforceRetention(next);
+    expireStalePriceAnchors(next, new Date(next.updatedAt));
     next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
     synchronizeDerivedHealth(next);
     next.integrity = createIntegrity(next);
@@ -218,6 +219,22 @@ export function pricingPoolsForState(state) {
   const pools = Object.values(state.pools ?? {});
   const anchor = state.priceAnchors?.wethUsdc;
   return anchor?.status === "ready" && anchor.pricingPool ? [...pools, anchor.pricingPool] : pools;
+}
+
+export function expireStalePriceAnchors(state, now = new Date()) {
+  const anchor = state.priceAnchors?.wethUsdc;
+  if (anchor?.status !== "ready") return state;
+  const observedMs = Date.parse(anchor.observedAt ?? "");
+  const ageMs = now.getTime() - observedMs;
+  if (Number.isFinite(observedMs) && ageMs >= 0 && ageMs <= MAX_PRICE_AGE_MS) return state;
+  state.priceAnchors.wethUsdc = {
+    ...anchor,
+    status: "unavailable",
+    freshness: "unavailable",
+    reasonCode: Number.isFinite(observedMs) && ageMs > MAX_PRICE_AGE_MS ? "stale_anchor" : "invalid_anchor_timestamp",
+    nextRefreshAt: now.toISOString()
+  };
+  return state;
 }
 
 function synchronizeDerivedHealth(state) {

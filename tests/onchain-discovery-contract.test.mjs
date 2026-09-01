@@ -17,7 +17,7 @@ import {
   reconcileCanonicalWindow,
   selectPrimaryPool
 } from "../collector/model.mjs";
-import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
+import { DurableDiscoveryStore, expireStalePriceAnchors, initialState } from "../collector/store.mjs";
 import { decodeAbiText, enrichTokenMetadata } from "../collector/rpc.mjs";
 
 const NOW = new Date("2026-08-31T12:00:00.000Z");
@@ -195,6 +195,22 @@ test("stale WETH anchor cannot establish a Tier B price", () => {
   ], NOW);
   assert.equal(price.tier, "UNPRICED");
   assert.equal(price.reasonCode, "stale_anchor");
+});
+
+test("stale ready anchor is expired before health can report it as fresh", () => {
+  const state = initialState(NOW);
+  state.priceAnchors.wethUsdc = {
+    status: "ready",
+    freshness: "fresh",
+    reasonCode: "single_verified_anchor_pool",
+    observedAt: new Date(NOW.getTime() - 121_000).toISOString(),
+    pricingPool: pricingPool({ token0: BASE_WETH, token1: BASE_USDC })
+  };
+  expireStalePriceAnchors(state, NOW);
+  assert.equal(state.priceAnchors.wethUsdc.status, "unavailable");
+  assert.equal(state.priceAnchors.wethUsdc.freshness, "unavailable");
+  assert.equal(state.priceAnchors.wethUsdc.reasonCode, "stale_anchor");
+  assert.equal(state.priceAnchors.wethUsdc.nextRefreshAt, NOW.toISOString());
 });
 
 test("stale TOKEN/WETH pool is not mislabeled as a stale WETH/USDC anchor", () => {

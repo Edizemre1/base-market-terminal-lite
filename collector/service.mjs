@@ -11,6 +11,7 @@ import {
   joinExactProviderPools,
   nextRetryAt,
   resolveWethUsdcAnchor,
+  selectAnchorValidationCandidates,
   stabilizeWethUsdcAnchorRefresh
 } from "./provider-enrichment.mjs";
 
@@ -353,7 +354,7 @@ export class OnchainDiscoveryCollector {
     const current = before.priceAnchors?.wethUsdc;
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
     try {
-      const observations = await this.provider.lookupWethPools();
+      const observations = selectAnchorValidationCandidates(await this.provider.lookupWethPools());
       const lookupCompletedAt = new Date();
       const blockNumber = before.currentHead || await this.rpc.blockNumber();
       const metadata = { ...before.tokenMetadata };
@@ -365,7 +366,7 @@ export class OnchainDiscoveryCollector {
             : metadata[token] ?? await enrichTokenMetadata(this.rpc, token, blockNumber, now);
         }
       }
-      const inspected = await mapWithConcurrency(observations, 1, async (observation) => {
+      const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
         const identity = await inspectRegisteredPool(this.rpc, observation.poolAddress, "latest");
         if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
         const pool = {

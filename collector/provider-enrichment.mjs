@@ -5,6 +5,7 @@ export const ENRICHMENT_MAX_ATTEMPTS = 4;
 export const PROVIDER_REFRESH_MS = 60_000;
 export const UNMATCHED_REFRESH_MS = 10 * 60_000;
 export const ANCHOR_REFRESH_MS = 30_000;
+export const ANCHOR_VALIDATION_LIMIT = 3;
 export const EXACT_LOOKUP_CACHE_MS = 30_000;
 export const EXACT_LOOKUP_NEGATIVE_TTL_MS = 2 * 60_000;
 export const PROVIDER_MINIMUM_INTERVAL_MS = Object.freeze({
@@ -392,6 +393,18 @@ export function stabilizeWethUsdcAnchorRefresh(current, candidate, completedAt =
     ...candidate,
     nextRefreshAt: new Date(completedMs + ANCHOR_REFRESH_MS).toISOString()
   };
+}
+
+export function selectAnchorValidationCandidates(observations, maximum = ANCHOR_VALIDATION_LIMIT) {
+  const byAddress = new Map();
+  for (const observation of observations ?? []) {
+    const address = normalizeAddress(observation?.poolAddress);
+    if (!address || byAddress.has(address)) continue;
+    byAddress.set(address, { ...observation, poolAddress: address });
+  }
+  return [...byAddress.values()]
+    .sort((left, right) => (right.liquidityUsd ?? -1) - (left.liquidityUsd ?? -1) || left.poolAddress.localeCompare(right.poolAddress))
+    .slice(0, Math.max(1, maximum));
 }
 
 export function coalesceEnrichmentQueue(existing, incoming, maximum = ENRICHMENT_QUEUE_LIMIT) {

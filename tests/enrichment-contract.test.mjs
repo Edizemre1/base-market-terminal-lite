@@ -12,6 +12,7 @@ import {
   nextRetryAt,
   parseDexScreenerPayload,
   resolveWethUsdcAnchor,
+  selectAnchorValidationCandidates,
   stabilizeWethUsdcAnchorRefresh
 } from "../collector/provider-enrichment.mjs";
 import { readSupportedPoolState } from "../collector/rpc.mjs";
@@ -124,6 +125,21 @@ test("anchor validation uses lookup completion time after a slow RPC inspection"
   });
   assert.equal(resolveWethUsdcAnchor([candidate], startedAt).status, "unavailable");
   assert.equal(resolveWethUsdcAnchor([candidate], completedAt).status, "ready");
+});
+
+test("anchor validation is bounded to the three highest-liquidity exact pools", () => {
+  const candidates = selectAnchorValidationCandidates([
+    anchorCandidate({ poolAddress: "0x0000000000000000000000000000000000000001", liquidityUsd: 10 }),
+    anchorCandidate({ poolAddress: "0x0000000000000000000000000000000000000002", liquidityUsd: 40 }),
+    anchorCandidate({ poolAddress: "0x0000000000000000000000000000000000000003", liquidityUsd: 30 }),
+    anchorCandidate({ poolAddress: "0x0000000000000000000000000000000000000004", liquidityUsd: 20 }),
+    anchorCandidate({ poolAddress: "0x0000000000000000000000000000000000000002", liquidityUsd: 999 })
+  ]);
+  assert.deepEqual(candidates.map((candidate) => candidate.poolAddress), [
+    "0x0000000000000000000000000000000000000002",
+    "0x0000000000000000000000000000000000000003",
+    "0x0000000000000000000000000000000000000004"
+  ]);
 });
 
 test("enrichment queue deduplicates by normalized pool key and priority", () => {
