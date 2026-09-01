@@ -21,7 +21,7 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
       token1,
       status: "confirmed",
       orphaned: false,
-      verifiedSource: Boolean(pair.pairAddress && (pair.dataSource || pair.dataProviders?.length)),
+      verifiedSource: Boolean(pair.pairAddress && pair.onchainProvenance?.decimalsVerified && pair.dataProviders?.includes("onchain")),
       priceToken1PerToken0: rate,
       liquidityUsd: nonNegative(pair.liquidityUsd),
       volume24hUsd: nonNegative(pair.volumes?.h24),

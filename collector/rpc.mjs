@@ -4,8 +4,13 @@ const SELECTOR = Object.freeze({
   decimals: "0x313ce567",
   token0: "0x0dfe1681",
   token1: "0xd21220a7",
-  factory: "0xc45a0155"
+  factory: "0xc45a0155",
+  getReserves: "0x0902f1ac",
+  slot0: "0x3850c7bd",
+  liquidity: "0x1a686502"
 });
+
+import { FACTORY_REGISTRY } from "./factory-registry.mjs";
 
 export class JsonRpcClient {
   constructor(url, { timeoutMs = 12_000, retries = 3 } = {}) {
@@ -136,6 +141,87 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
+export async function inspectRegisteredPool(rpc, poolAddress, block = "latest") {
+  const address = normalizeAddress(poolAddress);
+  if (!address) return { ok: false, reason: "malformed_pool_address", retryable: false };
+  try {
+    const code = await rpc.getCode(address, block);
+    if (!code || code === "0x") return { ok: false, reason: "contract_code_missing", retryable: false };
+    const [token0Raw, token1Raw, factoryRaw] = await Promise.all([
+      rpc.call(address, SELECTOR.token0, block),
+      rpc.call(address, SELECTOR.token1, block),
+      rpc.call(address, SELECTOR.factory, block)
+    ]);
+    const token0 = decodeAbiAddress(token0Raw);
+    const token1 = decodeAbiAddress(token1Raw);
+    const factoryAddress = decodeAbiAddress(factoryRaw);
+    if (!token0 || !token1 || !factoryAddress) return { ok: false, reason: "identity_getter_unavailable", retryable: false };
+    const registry = FACTORY_REGISTRY.find((entry) => entry.enabled && entry.address === factoryAddress);
+    if (!registry) return { ok: false, reason: "unregistered_factory", retryable: false, token0, token1, factoryAddress };
+    return { ok: true, token0, token1, factoryAddress, registry };
+  } catch {
+    return { ok: false, reason: "identity_read_failed", retryable: true };
+  }
+}
+
+export async function readTokenDecimals(rpc, tokenAddress, block = "latest") {
+  const address = normalizeAddress(tokenAddress);
+  if (!address) return { ok: false, reasonCode: "malformed_token_address", retryable: false };
+  try {
+    const code = await rpc.getCode(address, block);
+    if (!code || code === "0x") return { ok: false, reasonCode: "token_code_missing", retryable: false };
+    const decimals = decodeAbiUint(await rpc.call(address, SELECTOR.decimals, block));
+    return validDecimals(decimals)
+      ? { ok: true, decimals, observedAt: new Date().toISOString() }
+      : { ok: false, reasonCode: "invalid_decimals", retryable: false };
+  } catch {
+    return { ok: false, reasonCode: "decimals_read_failed", retryable: true };
+  }
+}
+
+export async function readSupportedPoolState(rpc, pool, metadata = {}, block = "latest") {
+  const registry = FACTORY_REGISTRY.find((entry) => entry.id === pool?.factoryId);
+  if (!registry || !pool?.poolAddress) return { status: "unsupported", reasonCode: "provider_enrichment_required" };
+  const capabilities = registry.capabilities;
+  if (!capabilities.identityReadable) return { status: "unsupported", reasonCode: "provider_enrichment_required", capabilities };
+  const decimals0 = metadata[pool.token0]?.decimals;
+  const decimals1 = metadata[pool.token1]?.decimals;
+  if (!validDecimals(decimals0) || !validDecimals(decimals1)) {
+    return { status: "rejected", reasonCode: "invalid_decimals", retryable: false, capabilities };
+  }
+  try {
+    const tag = blockTag(block);
+    if (capabilities.reservesReadable) {
+      const raw = await rpc.call(pool.poolAddress, SELECTOR.getReserves, block);
+      const reserve0 = decodeAbiBigUint(raw, 0);
+      const reserve1 = decodeAbiBigUint(raw, 1);
+      if (reserve0 === undefined || reserve1 === undefined) return { status: "rejected", reasonCode: "malformed_reserves", retryable: false, capabilities };
+      const reserveState = { reserve0Raw: reserve0.toString(), reserve1Raw: reserve1.toString() };
+      if (!capabilities.spotPriceReadable) return { status: "complete", reasonCode: "exact_reserves_only", capabilities, ...reserveState };
+      const price = rationalPrice(reserve1, reserve0, decimals0, decimals1);
+      return price
+        ? { status: "complete", reasonCode: "onchain_reserve_spot", capabilities, ...reserveState, ...price }
+        : { status: "rejected", reasonCode: "zero_or_invalid_reserves", retryable: false, capabilities, ...reserveState };
+    }
+    if (capabilities.spotPriceReadable) {
+      const [slot0Raw, liquidityRaw] = await rpc.batch([
+        { method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.slot0 }, tag] },
+        { method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.liquidity }, tag] }
+      ]);
+      const sqrtPriceX96 = decodeAbiBigUint(slot0Raw, 0);
+      const inRangeLiquidity = decodeAbiBigUint(liquidityRaw, 0);
+      if (!sqrtPriceX96 || sqrtPriceX96 <= 0n) return { status: "rejected", reasonCode: "invalid_slot0", retryable: false, capabilities };
+      const price = rationalPrice(sqrtPriceX96 * sqrtPriceX96, 2n ** 192n, decimals0, decimals1);
+      return price
+        ? { status: "complete", reasonCode: "onchain_slot0_spot", capabilities, sqrtPriceX96: sqrtPriceX96.toString(), inRangeLiquidityRaw: inRangeLiquidity?.toString(), liquidityUsd: undefined, ...price }
+        : { status: "rejected", reasonCode: "invalid_slot0_price", retryable: false, capabilities };
+    }
+    return { status: "unsupported", reasonCode: "provider_enrichment_required", capabilities };
+  } catch {
+    return { status: "retryable", reasonCode: "pool_state_read_failed", retryable: true, capabilities };
+  }
+}
+
 export function decodeAbiText(value) {
   if (typeof value !== "string" || !/^0x[0-9a-f]*$/i.test(value)) return undefined;
   const hex = value.slice(2);
@@ -163,6 +249,14 @@ export function decodeAbiAddress(value) {
   return /^0x[0-9a-f]{40}$/.test(address) ? address : undefined;
 }
 
+export function decodeAbiBigUint(value, wordIndex = 0) {
+  if (typeof value !== "string" || !/^0x[0-9a-f]+$/i.test(value)) return undefined;
+  const start = 2 + wordIndex * 64;
+  const word = value.slice(start, start + 64);
+  if (!/^[0-9a-f]{64}$/i.test(word)) return undefined;
+  try { return BigInt(`0x${word}`); } catch { return undefined; }
+}
+
 export function hexToSafeNumber(value) {
   if (typeof value !== "string" || !/^0x[0-9a-f]+$/i.test(value)) throw new Error("Invalid RPC hex number");
   const parsed = Number.parseInt(value, 16);
@@ -174,6 +268,28 @@ export function toHex(value) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error("Block number must be a non-negative safe integer");
   return `0x${value.toString(16)}`;
 }
+
+function rationalPrice(rawNumerator, rawDenominator, decimals0, decimals1) {
+  if (rawNumerator <= 0n || rawDenominator <= 0n) return undefined;
+  const numerator = rawNumerator * 10n ** BigInt(decimals0);
+  const denominator = rawDenominator * 10n ** BigInt(decimals1);
+  const value = rationalToNumber(numerator, denominator);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return {
+    priceToken1PerToken0: value,
+    rawPriceRatio: { numerator: numerator.toString(), denominator: denominator.toString() }
+  };
+}
+
+function rationalToNumber(numerator, denominator) {
+  const scale = 10n ** 30n;
+  const scaled = numerator * scale / denominator;
+  return Number(scaled.toString()) / 1e30;
+}
+
+function validDecimals(value) { return Number.isInteger(value) && value >= 0 && value <= 36; }
+function blockTag(value) { return typeof value === "number" ? toHex(value) : value; }
+function normalizeAddress(value) { const normalized = typeof value === "string" ? value.toLowerCase() : ""; return /^0x[0-9a-f]{40}$/.test(normalized) ? normalized : undefined; }
 
 function bytesFromHex(hex) {
   const bytes = new Uint8Array(Math.floor(hex.length / 2));

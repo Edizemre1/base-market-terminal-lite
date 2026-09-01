@@ -66,6 +66,9 @@ jobs:
       - name: On-chain discovery contracts
         run: npm run test:onchain
 
+      - name: Pricing and enrichment contracts
+        run: npm run test:enrichment
+
       - name: Lint
         run: npm run lint
 

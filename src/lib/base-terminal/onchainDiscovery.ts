@@ -4,7 +4,7 @@ import path from "node:path";
 import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
-export const ONCHAIN_COLLECTOR_VERSION = "base-onchain-discovery-v1";
+export const ONCHAIN_COLLECTOR_VERSION = "base-market-enrichment-v2";
 
 type StoredPool = {
   poolKey: string;
@@ -25,9 +25,15 @@ type StoredPool = {
   observedAt: string;
   blockTimestamp?: string;
   blockNumber: number;
-  transactionHash: string;
-  logIndex: number;
+  transactionHash?: string;
+  logIndex?: number;
   providers?: string[];
+  priceToken1PerToken0?: number;
+  liquidityUsd?: number;
+  volume24hUsd?: number;
+  trades24h?: number;
+  decimalsVerified?: boolean;
+  providerEnrichment?: { decimalsVerified?: boolean };
 };
 
 type StoredMetadata = {
@@ -50,6 +56,31 @@ export type OnchainStoreState = {
   pools: Record<string, StoredPool>;
   tokenMetadata: Record<string, StoredMetadata>;
   opportunities: Array<Record<string, unknown>>;
+  priceAnchors?: {
+    wethUsdc?: Record<string, unknown> & {
+      status?: string;
+      value?: number;
+      observedAt?: string;
+      freshness?: string;
+      reasonCode?: string;
+      sourcePoolCount?: number;
+      selectedPool?: string;
+      consensusPools?: string[];
+      deviation?: number;
+      candidates?: Array<Record<string, unknown> & {
+        poolAddress?: string;
+        token0?: string;
+        token1?: string;
+        factoryId?: string;
+        factoryAddress?: string;
+        protocolVersion?: string;
+        observedAt?: string;
+        blockNumber?: number;
+        providers?: string[];
+        decimalsVerified?: boolean;
+      }>;
+    };
+  };
   eventRing: Array<{ id: string; type: string; at: string; data: Record<string, unknown> }>;
   replayEvidence?: Array<Record<string, unknown>>;
   counters: { reconnectCount: number; reorgCount: number; duplicateDropped: number; malformedRejected: number };
@@ -81,9 +112,38 @@ export function readOnchainStoreSnapshot(): OnchainStoreReadResult {
 export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = readOnchainStoreSnapshot()) {
   if (!result.ok) return providerPairs;
   const pairsByPool = new Map(providerPairs.map((pair) => [normalizePoolKey(pair.pairAddress ?? pair.id), pair]));
-  for (const pool of Object.values(result.state.pools)) {
+  const anchorBindings = (result.state.priceAnchors?.wethUsdc?.candidates ?? []).flatMap((candidate) => {
+    if (!candidate.poolAddress || !candidate.token0 || !candidate.token1 || !candidate.factoryId || !candidate.factoryAddress || !candidate.protocolVersion || !candidate.observedAt) return [];
+    return [{
+      poolKey: candidate.poolAddress,
+      poolAddress: candidate.poolAddress,
+      chainId: 8453 as const,
+      dexId: candidate.factoryId.split("-")[0],
+      factoryId: candidate.factoryId,
+      factoryAddress: candidate.factoryAddress,
+      protocolVersion: candidate.protocolVersion,
+      token0: candidate.token0,
+      token1: candidate.token1,
+      status: "confirmed" as const,
+      verifiedSource: true,
+      replay: false,
+      firstSeenAt: candidate.observedAt,
+      confirmedAt: candidate.observedAt,
+      observedAt: candidate.observedAt,
+      blockNumber: candidate.blockNumber ?? result.state.confirmedHead,
+      transactionHash: undefined,
+      logIndex: undefined,
+      providers: [...new Set([...(candidate.providers ?? []), "onchain"])],
+      decimalsVerified: candidate.decimalsVerified === true
+    } satisfies StoredPool];
+  });
+  const bindingsByPool = new Map<string, StoredPool>();
+  for (const pool of [...Object.values(result.state.pools), ...anchorBindings]) {
     if (pool.status !== "confirmed" || !pool.verifiedSource || pool.replay) continue;
     const key = normalizePoolKey(pool.poolAddress ?? pool.poolKey);
+    bindingsByPool.set(key, pool);
+  }
+  for (const [key, pool] of bindingsByPool) {
     const current = pairsByPool.get(key);
     if (current) {
       const providers = [...new Set([...(current.dataProviders ?? (current.dataSource ? [current.dataSource] : [])), "onchain" as const])];
@@ -134,10 +194,24 @@ export function getOnchainCollectorHealth(sseClients: number) {
     uniquePoolCount: confirmedPools.length,
     tokenOpportunityCount: state.opportunities.length,
     pricingTierCounts,
+    pricedOpportunities: pricingTierCounts.A + pricingTierCounts.B + pricingTierCounts.C,
+    rankedOpportunities: state.opportunities.filter((opportunity) => opportunity.ranked === true).length,
+    anchorStatus: state.priceAnchors?.wethUsdc?.status ?? "unavailable",
+    anchorUsdPrice: state.priceAnchors?.wethUsdc?.value,
+    anchorSourcePoolCount: state.priceAnchors?.wethUsdc?.sourcePoolCount ?? 0,
+    anchorObservedAt: state.priceAnchors?.wethUsdc?.observedAt,
+    anchorFreshness: state.priceAnchors?.wethUsdc?.freshness ?? "unavailable",
+    anchorReasonCode: state.priceAnchors?.wethUsdc?.reasonCode,
     collectorVersion: state.collectorVersion,
     storeSchemaVersion: state.schemaVersion,
     sseClients
   };
+}
+
+export function getOnchainPricingStatus() {
+  const result = readOnchainStoreSnapshot();
+  if (!result.ok) return { available: false as const, reasonCode: result.reason };
+  return { available: true as const, wethUsdcAnchor: result.state.priceAnchors?.wethUsdc };
 }
 
 function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetadata>): BasePair {
@@ -192,9 +266,11 @@ function provenance(pool: StoredPool) {
     factoryId: pool.factoryId,
     factoryAddress: pool.factoryAddress,
     protocolVersion: pool.protocolVersion,
-    transactionHash: pool.transactionHash,
-    logIndex: pool.logIndex,
-    confirmedAt: pool.confirmedAt ?? pool.observedAt
+    transactionHash: pool.transactionHash || undefined,
+    logIndex: Number.isInteger(pool.logIndex) ? pool.logIndex : undefined,
+    confirmedAt: pool.confirmedAt ?? pool.observedAt,
+    bindingKind: pool.transactionHash ? "factory_event" as const : "registered_pool_identity" as const,
+    decimalsVerified: pool.decimalsVerified === true || pool.providerEnrichment?.decimalsVerified === true
   };
 }
 

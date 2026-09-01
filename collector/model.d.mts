@@ -1,5 +1,6 @@
 export type CanonicalPrice = {
   value?: number;
+  rawValue?: string;
   tier: "A" | "B" | "C" | "UNPRICED";
   kind: "direct" | "converted" | "unpriced";
   sourcePoolKeys: string[];
@@ -8,6 +9,9 @@ export type CanonicalPrice = {
   blockNumber?: number;
   freshness: "fresh" | "unavailable";
   reasonCode: string;
+  qualityStatus?: "consensus" | "single_path";
+  selectionReason?: string;
+  maximumDeviation?: number;
 };
 
 export function calculateCanonicalUsdcPrice(tokenAddress: string, pools: Array<Record<string, unknown>>, now?: Date, options?: { maxAgeMs?: number; minimumLiquidityUsd?: number }): CanonicalPrice;

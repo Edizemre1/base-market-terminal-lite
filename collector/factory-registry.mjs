@@ -3,7 +3,7 @@ import { keccak256Hex } from "./keccak.mjs";
 export const BASE_CHAIN_ID = 8453;
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const BASE_WETH = "0x4200000000000000000000000000000000000006";
-export const COLLECTOR_VERSION = "base-onchain-discovery-v1";
+export const COLLECTOR_VERSION = "base-market-enrichment-v2";
 
 const PROVENANCE = Object.freeze({
   aerodromeClassic: "https://github.com/aerodrome-finance/contracts#deployment",
@@ -40,6 +40,37 @@ const DEPLOYMENT = Object.freeze({
   "pancakeswap-infinity-bin": [30544163, "0x918cbc88a37d421c58b8298398592d06e4ee9e3275a432dcc7f0c3aa1fbaedef"]
 });
 
+function capabilitiesFor(adapter) {
+  if (adapter === "uniswap-v2") return Object.freeze({
+    identityReadable: true,
+    spotPriceReadable: true,
+    reservesReadable: true,
+    liquidityExactlyReadable: true,
+    providerEnrichmentRequired: true
+  });
+  if (adapter === "aerodrome-classic") return Object.freeze({
+    identityReadable: true,
+    spotPriceReadable: false,
+    reservesReadable: true,
+    liquidityExactlyReadable: true,
+    providerEnrichmentRequired: true
+  });
+  if (adapter === "uniswap-v3" || adapter === "aerodrome-slipstream") return Object.freeze({
+    identityReadable: true,
+    spotPriceReadable: true,
+    reservesReadable: false,
+    liquidityExactlyReadable: false,
+    providerEnrichmentRequired: true
+  });
+  return Object.freeze({
+    identityReadable: false,
+    spotPriceReadable: false,
+    reservesReadable: false,
+    liquidityExactlyReadable: false,
+    providerEnrichmentRequired: true
+  });
+}
+
 function entry({ id, dexId, protocolVersion, address, eventSignature, poolType, provenanceUrl, adapter }) {
   const [deploymentStartBlock, creationTransactionHash] = DEPLOYMENT[id];
   return Object.freeze({
@@ -58,7 +89,8 @@ function entry({ id, dexId, protocolVersion, address, eventSignature, poolType, 
     enabled: true,
     confirmationPolicy: Object.freeze({ confirmations: 2, overlapBlocks: 16, maximumChunkBlocks: 250 }),
     adapterVersion: "1.0.0",
-    adapter
+    adapter,
+    capabilities: capabilitiesFor(adapter)
   });
 }
 
@@ -89,6 +121,9 @@ export function assertFactoryRegistry(registry = FACTORY_REGISTRY) {
     if (!Number.isSafeInteger(item.deploymentStartBlock) || item.deploymentStartBlock <= 0) throw new Error(`Invalid deployment block for ${item.id}`);
     if (!/^0x[0-9a-f]{64}$/.test(item.creationTransactionHash)) throw new Error(`Invalid creation transaction for ${item.id}`);
     if (!item.officialProvenanceUrl.startsWith("https://")) throw new Error(`Missing official provenance for ${item.id}`);
+    for (const capability of ["identityReadable", "spotPriceReadable", "reservesReadable", "liquidityExactlyReadable", "providerEnrichmentRequired"]) {
+      if (typeof item.capabilities?.[capability] !== "boolean") throw new Error(`Missing ${capability} capability for ${item.id}`);
+    }
     if (ids.has(item.id)) throw new Error(`Duplicate registry id: ${item.id}`);
     const binding = `${item.address}:${item.eventTopic}`;
     if (bindings.has(binding)) throw new Error(`Duplicate registry binding: ${binding}`);

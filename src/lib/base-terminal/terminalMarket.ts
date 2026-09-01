@@ -79,12 +79,13 @@ export function buildOpportunityLanes(current: BasePair[], previous: BasePair[] 
 export function buildTokenOpportunityLanes(snapshot: MarketTerminalSnapshot, limit = 6): TokenOpportunityLane[] {
   const pairsById = new Map(snapshot.allPairs.map((pair) => [pair.id, pair]));
   const eligible = snapshot.opportunities.filter((opportunity) => opportunity.quality !== "expired");
+  const rankedEligible = eligible.filter((opportunity) => opportunity.canonicalPrice.tier !== "UNPRICED" && opportunity.freshness.stalePoolCount === 0);
   const newCandidates = eligible
     .filter((opportunity) => opportunity.categoryEligibility.newlyCreated)
     .map((opportunity) => ({ opportunity, score: opportunity.newestPoolCreatedAt ? Date.parse(opportunity.newestPoolCreatedAt) : Number.NEGATIVE_INFINITY }))
     .filter((entry) => Number.isFinite(entry.score))
     .sort(descendingCandidate);
-  const movingCandidates = eligible
+  const movingCandidates = rankedEligible
     .filter((opportunity) => opportunity.quality === "active")
     .flatMap((opportunity) => {
       const pair = pairsById.get(opportunity.primaryMarketId);
@@ -92,7 +93,7 @@ export function buildTokenOpportunityLanes(snapshot: MarketTerminalSnapshot, lim
       return score === undefined ? [] : [{ opportunity, score }];
     })
     .sort(descendingCandidate);
-  const surgeCandidates = eligible
+  const surgeCandidates = rankedEligible
     .filter((opportunity) => opportunity.quality === "active")
     .flatMap((opportunity) => {
       const current = opportunity.aggregate.volumes?.h1;
@@ -103,11 +104,11 @@ export function buildTokenOpportunityLanes(snapshot: MarketTerminalSnapshot, lim
     })
     .filter((entry) => entry.score >= 1.8)
     .sort(descendingCandidate);
-  const volumeLeaders = eligible
+  const volumeLeaders = rankedEligible
     .filter((opportunity) => opportunity.quality === "active")
     .flatMap((opportunity) => opportunity.aggregate.volumes?.h24 === undefined ? [] : [{ opportunity, score: opportunity.aggregate.volumes.h24 }])
     .sort(descendingCandidate);
-  const liquidityCandidates = eligible
+  const liquidityCandidates = rankedEligible
     .filter((opportunity) => opportunity.quality === "active")
     .flatMap((opportunity) => opportunity.aggregate.liquidityUsd === undefined ? [] : [{ opportunity, score: opportunity.aggregate.liquidityUsd }])
     .sort(descendingCandidate);

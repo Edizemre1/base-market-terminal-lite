@@ -69,6 +69,21 @@ export type MarketTerminalSnapshot = {
     }>;
   };
   providerCoverage?: MarketDataProvider["coverage"];
+  onchainPricing?: {
+    available: boolean;
+    reasonCode?: string;
+    wethUsdcAnchor?: Record<string, unknown> & {
+      status?: string;
+      value?: number;
+      observedAt?: string;
+      freshness?: string;
+      reasonCode?: string;
+      sourcePoolCount?: number;
+      selectedPool?: string;
+      consensusPools?: string[];
+      deviation?: number;
+    };
+  };
   newPairs: BasePair[];
   volumeInflows: BasePair[];
   momentumPairs: BasePair[];

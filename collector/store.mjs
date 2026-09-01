@@ -20,6 +20,7 @@ export class DurableDiscoveryStore {
     this.state = undefined;
     this.lockHandle = undefined;
     this.closed = false;
+    this.transactionTail = Promise.resolve();
   }
 
   async open() {
@@ -41,6 +42,12 @@ export class DurableDiscoveryStore {
   }
 
   async transact(reason, mutator) {
+    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator));
+    this.transactionTail = operation.catch(() => {});
+    return operation;
+  }
+
+  async performTransaction(reason, mutator) {
     if (!this.state || this.closed) throw new Error("Store is not writable");
     const transactionId = randomUUID();
     const beforeDigest = this.state.integrity.digest;
@@ -51,7 +58,8 @@ export class DurableDiscoveryStore {
     next.collectorVersion = COLLECTOR_VERSION;
     next.updatedAt = new Date().toISOString();
     enforceRetention(next);
-    next.opportunities = buildCanonicalOpportunities(Object.values(next.pools ?? {}), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
+    next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
+    synchronizeDerivedHealth(next);
     next.integrity = createIntegrity(next);
     const prepare = { type: "prepare", transactionId, at: next.updatedAt, reason, beforeDigest, afterDigest: next.integrity.digest };
     await appendDurableLine(this.walPath, prepare);
@@ -141,7 +149,7 @@ export function initialState(now = new Date()) {
     pools: {},
     tokenMetadata: {},
     opportunities: [],
-    priceAnchors: {},
+    priceAnchors: { wethUsdc: { status: "unavailable", reasonCode: "not_initialized", sourcePoolCount: 0, freshness: "unavailable" } },
     marketSnapshots: [],
     history: [],
     reconciliation: [],
@@ -149,7 +157,8 @@ export function initialState(now = new Date()) {
     nextEventSequence: 0,
     provisional: {},
     metadataQueue: [],
-    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0 },
+    enrichmentQueue: [],
+    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0, enrichmentSuccess: 0, enrichmentFailure: 0, providerMatched: 0, providerUnmatched: 0, priceConflict: 0, staleAnchorRejected: 0, dustRejected: 0 },
     health: {
       ready: false,
       mode: "confirmed_polling",
@@ -159,7 +168,9 @@ export function initialState(now = new Date()) {
       lagBlocks: undefined,
       lagSeconds: undefined,
       factories: Object.fromEntries(FACTORY_REGISTRY.map((entry) => [entry.id, { enabled: entry.enabled, healthy: false, cursor: 0 }])),
-      storeIntegrity: "initializing"
+      storeIntegrity: "initializing",
+      enrichmentQueueDepth: 0,
+      anchorStatus: "unavailable"
     },
     integrity: { algorithm: "sha256", digest: "" }
   };
@@ -196,10 +207,36 @@ function enforceRetention(state) {
   state.eventRing = (state.eventRing ?? []).slice(-MAX_EVENT_RING);
   state.marketSnapshots = (state.marketSnapshots ?? []).slice(-MAX_MARKET_SNAPSHOTS);
   state.metadataQueue = (state.metadataQueue ?? []).slice(-256);
+  state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
   state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
   state.pools = keepNewestRecordEntries(state.pools ?? {}, MAX_POOLS, (pool) => pool.blockNumber ?? 0);
   const retainedTokens = new Set(Object.values(state.pools).flatMap((pool) => [pool.token0, pool.token1]));
   state.tokenMetadata = Object.fromEntries(Object.entries(state.tokenMetadata ?? {}).filter(([address]) => retainedTokens.has(address)));
+}
+
+export function pricingPoolsForState(state) {
+  const pools = Object.values(state.pools ?? {});
+  const anchor = state.priceAnchors?.wethUsdc;
+  return anchor?.status === "ready" && anchor.pricingPool ? [...pools, anchor.pricingPool] : pools;
+}
+
+function synchronizeDerivedHealth(state) {
+  state.health ??= {};
+  const pricingTierCounts = { A: 0, B: 0, C: 0, UNPRICED: 0 };
+  for (const opportunity of state.opportunities ?? []) {
+    const tier = opportunity.canonicalPrice?.tier;
+    pricingTierCounts[tier === "A" || tier === "B" || tier === "C" ? tier : "UNPRICED"] += 1;
+  }
+  const anchor = state.priceAnchors?.wethUsdc ?? {};
+  state.health.pricingTierCounts = pricingTierCounts;
+  state.health.pricedOpportunities = pricingTierCounts.A + pricingTierCounts.B + pricingTierCounts.C;
+  state.health.rankedOpportunities = (state.opportunities ?? []).filter((opportunity) => opportunity.ranked).length;
+  state.health.anchorStatus = anchor.status ?? "unavailable";
+  state.health.anchorUsdPrice = anchor.value;
+  state.health.anchorSourcePoolCount = anchor.sourcePoolCount ?? 0;
+  state.health.anchorObservedAt = anchor.observedAt;
+  state.health.anchorFreshness = anchor.freshness ?? "unavailable";
+  state.health.anchorReasonCode = anchor.reasonCode;
 }
 
 function keepNewestRecordEntries(record, maximum, rank) {

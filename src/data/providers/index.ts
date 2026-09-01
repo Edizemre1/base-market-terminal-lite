@@ -1,6 +1,6 @@
 import type { BasePair } from "@/types/baseTerminal";
 import { buildDiscoveryUniverse, mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
-import { mergeOnchainPoolsIntoPairs } from "@/lib/base-terminal/onchainDiscovery";
+import { getOnchainPricingStatus, mergeOnchainPoolsIntoPairs } from "@/lib/base-terminal/onchainDiscovery";
 import { recordDiscoveryHistory } from "@/lib/base-terminal/discoveryHistory";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
@@ -191,6 +191,7 @@ async function buildMarketTerminalSnapshot(
     historyStatus: provider.mode === "mock" ? "static" : "warming",
     comparison: buildOpportunityComparison(provider.mode, previous),
     providerCoverage: provider.coverage,
+    onchainPricing: getOnchainPricingStatus(),
     newPairs,
     volumeInflows,
     momentumPairs,

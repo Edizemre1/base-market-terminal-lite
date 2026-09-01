@@ -15,6 +15,7 @@
     "design:guard": "node scripts/check-design-tokens.mjs",
     "test:design": "node --test tests/design-language-contract.test.mjs",
     "test:onchain": "node --test tests/onchain-discovery-contract.test.mjs",
+    "test:enrichment": "node --test tests/enrichment-contract.test.mjs",
     "test:providers": "playwright test -c playwright.provider.config.ts",
     "test:e2e": "playwright test",
     "test": "npm run test:e2e",

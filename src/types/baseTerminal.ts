@@ -40,9 +40,11 @@ export type BasePair = {
     factoryId: string;
     factoryAddress: string;
     protocolVersion: string;
-    transactionHash: string;
-    logIndex: number;
+    transactionHash?: string;
+    logIndex?: number;
     confirmedAt: string;
+    bindingKind?: "factory_event" | "registered_pool_identity";
+    decimalsVerified?: boolean;
   };
   stale?: boolean;
   staleReason?: string;

@@ -284,6 +284,7 @@ function buildTokenOpportunity(
   const newestAgeMinutes = getPoolAgeMinutes(newestPoolCreatedAt, nowMs);
   const primarySelection = explainPrimarySelection(uniquePairs, primary, previous?.primaryMarketId);
   const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, uniquePairs, new Date(nowMs));
+  const canonicalPriced = canonicalPrice.tier !== "UNPRICED";
   const metadataStatus = metadataQuality(uniquePairs);
   return {
     id: focus.id,
@@ -318,8 +319,8 @@ function buildTokenOpportunity(
     categoryEligibility: {
       newlyCreated: newestAgeMinutes !== undefined && newestAgeMinutes <= NEW_POOL_MAX_AGE_MINUTES,
       justLaunched: newestAgeMinutes !== undefined && newestAgeMinutes <= JUST_LAUNCHED_MAX_AGE_MINUTES,
-      moving: getMovingInputs(primary) !== undefined && quality === "active",
-      liquidity: quality === "active" && (buildAggregate(uniquePairs).liquidityUsd ?? 0) > 0
+      moving: canonicalPriced && getMovingInputs(primary) !== undefined && quality === "active",
+      liquidity: canonicalPriced && quality === "active" && (buildAggregate(uniquePairs).liquidityUsd ?? 0) > 0
     }
   };
 }

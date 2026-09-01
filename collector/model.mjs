@@ -168,6 +168,7 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
     const price = calculateCanonicalUsdcPrice(group.tokenAddress, pools, now);
     const tokenMetadata = metadata[group.tokenAddress];
     const observed = group.pools.map((pool) => pool.observedAt ?? pool.confirmedAt).filter(Boolean).sort();
+    const ranked = price.tier !== "UNPRICED" && group.pools.some((pool) => isUsableRankedPool(pool, now));
     return {
       id: group.id,
       chainId: BASE_CHAIN_ID,
@@ -182,7 +183,9 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
       primarySelection: selection.reason,
       canonicalPrice: price,
       freshness: observed.at(-1) ?? now.toISOString(),
-      lifecycle: price.tier === "UNPRICED" ? "unpriced" : "priced",
+      lifecycle: price.tier === "UNPRICED" ? "unpriced" : ranked ? "active" : "priced",
+      ranked,
+      activationReason: price.tier === "UNPRICED" ? price.reasonCode : ranked ? "priced_fresh_usable_liquidity" : "ranking_metrics_pending",
       tradeability: "market_data_only",
       aggregate: aggregateVerifiedMetrics(group.pools)
     };
@@ -230,19 +233,25 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     if (relevant.some(({ reason }) => reason === "dust_liquidity")) return unpriced("dust_liquidity");
     return unpriced(graph.has(token) ? "no_bounded_usdc_path" : "no_trustworthy_usdc_path");
   }
-  candidates.sort((left, right) => comparePricePaths(left.path, right.path));
-  const winner = candidates[0];
+  const preferredTier = Math.min(...candidates.map((candidate) => priceTierRank(candidate.path)));
+  const comparable = candidates.filter((candidate) => priceTierRank(candidate.path) === preferredTier);
+  const consensus = selectPriceConsensus(comparable);
+  const winner = consensus.representative;
   const intermediates = winner.path.slice(0, -1).map((edge) => edge.to);
   const tier = winner.path.length === 1 ? "A" : winner.path.length === 2 && intermediates[0] === BASE_WETH ? "B" : "C";
   return {
-    value: winner.value,
+    value: consensus.value,
+    rawValue: canonicalRawValue(consensus.value),
     tier,
     kind: tier === "A" ? "direct" : "converted",
-    sourcePoolKeys: winner.path.map((edge) => edge.poolKey),
+    sourcePoolKeys: [...new Set(consensus.members.flatMap((candidate) => candidate.path.flatMap((edge) => edge.sourcePoolKeys ?? [edge.poolKey])))].sort(),
     anchor: tier === "B" ? BASE_WETH : winner.path.at(-1)?.from,
     observedAt: winner.observedAt,
     blockNumber: winner.blockNumber,
     freshness: "fresh",
+    qualityStatus: consensus.members.length > 1 ? "consensus" : "single_path",
+    selectionReason: consensus.members.length > 1 ? "bounded_liquidity_consensus" : "highest_quality_verified_path",
+    maximumDeviation: consensus.maximumDeviation,
     reasonCode: tier === "A" ? "direct_usdc_pool" : tier === "B" ? "weth_usdc_anchor" : "bounded_verified_conversion"
   };
 }
@@ -385,8 +394,9 @@ function buildPriceGraph(pools) {
   const graph = new Map();
   for (const pool of pools) {
     const rate = pool.priceToken1PerToken0;
-    addEdge(graph, pool.token0, { to: pool.token1, from: pool.token0, rate, poolKey: pool.poolKey, observedAt: pool.observedAt ?? pool.confirmedAt, blockNumber: pool.blockNumber, liquidityUsd: pool.liquidityUsd });
-    addEdge(graph, pool.token1, { to: pool.token0, from: pool.token1, rate: 1 / rate, poolKey: pool.poolKey, observedAt: pool.observedAt ?? pool.confirmedAt, blockNumber: pool.blockNumber, liquidityUsd: pool.liquidityUsd });
+    const provenance = { poolKey: pool.poolKey, sourcePoolKeys: pool.sourcePoolKeys, observedAt: pool.observedAt ?? pool.confirmedAt, blockNumber: pool.blockNumber, liquidityUsd: pool.liquidityUsd };
+    addEdge(graph, pool.token0, { to: pool.token1, from: pool.token0, rate, ...provenance });
+    addEdge(graph, pool.token1, { to: pool.token0, from: pool.token1, rate: 1 / rate, ...provenance });
   }
   return graph;
 }
@@ -403,6 +413,27 @@ function comparePricePaths(left, right) {
     || Number(right[0]?.to === BASE_WETH) - Number(left[0]?.to === BASE_WETH)
     || Math.min(...right.map((edge) => edge.liquidityUsd)) - Math.min(...left.map((edge) => edge.liquidityUsd))
     || left.map((edge) => edge.poolKey).join(":").localeCompare(right.map((edge) => edge.poolKey).join(":"));
+}
+
+function priceTierRank(path) {
+  if (path.length === 1) return 0;
+  return path.length === 2 && path[0]?.to === BASE_WETH ? 1 : 2 + path.length;
+}
+
+function selectPriceConsensus(candidates) {
+  const ordered = [...candidates].sort((left, right) => left.value - right.value || comparePricePaths(left.path, right.path));
+  const median = ordered[Math.floor(ordered.length / 2)]?.value;
+  let members = ordered.filter((candidate) => relativeDistance(candidate.value, median) <= 0.15);
+  if (!members.length) members = [ordered.sort((left, right) => comparePricePaths(left.path, right.path))[0]];
+  const rawWeights = members.map((candidate) => Math.sqrt(Math.max(1, Math.min(...candidate.path.map((edge) => edge.liquidityUsd)))));
+  const orderedWeights = [...rawWeights].sort((left, right) => left - right);
+  const medianWeight = orderedWeights[Math.floor(orderedWeights.length / 2)] || 1;
+  const weights = rawWeights.map((weight) => Math.min(weight, medianWeight * 4));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  const value = members.reduce((sum, candidate, index) => sum + candidate.value * weights[index], 0) / totalWeight;
+  const representative = [...members].sort((left, right) => comparePricePaths(left.path, right.path))[0];
+  const values = members.map((candidate) => candidate.value);
+  return { value, members, representative, maximumDeviation: values.length > 1 ? Math.max(...values.map((item) => relativeDistance(item, value))) : 0 };
 }
 
 function unpriced(reasonCode) {
@@ -439,6 +470,14 @@ function completeSum(pools, key) {
 function opportunityRank(opportunity) {
   return (opportunity.canonicalPrice.tier === "A" ? 400 : opportunity.canonicalPrice.tier === "B" ? 300 : opportunity.canonicalPrice.tier === "C" ? 200 : 0)
     + Math.log10(Math.max(1, opportunity.aggregate.liquidityUsd ?? 0)) * 10;
+}
+
+function isUsableRankedPool(pool, now) {
+  const observed = Date.parse(pool.observedAt ?? pool.confirmedAt ?? "");
+  return pool.status === "confirmed" && !pool.orphaned && pool.verifiedSource
+    && Number.isFinite(pool.liquidityUsd) && pool.liquidityUsd >= MIN_PRICE_LIQUIDITY_USD
+    && Number.isFinite(pool.priceToken1PerToken0) && pool.priceToken1PerToken0 > 0
+    && Number.isFinite(observed) && observed <= now.getTime() + 5_000 && now.getTime() - observed <= MAX_PRICE_AGE_MS;
 }
 
 function poolCompleteness(pool) {
@@ -482,6 +521,9 @@ function normalizeAddress(value) {
   const normalized = value.toLowerCase();
   return EVM_ADDRESS.test(normalized) ? normalized : undefined;
 }
+
+function relativeDistance(value, reference) { return Number.isFinite(value) && Number.isFinite(reference) && reference > 0 ? Math.abs(value / reference - 1) : Number.POSITIVE_INFINITY; }
+function canonicalRawValue(value) { return Number.isFinite(value) && value > 0 ? value.toPrecision(15) : undefined; }
 
 function normalizeHash(value) {
   if (typeof value !== "string") return undefined;
