@@ -273,7 +273,9 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     }
   }
   if (!candidates.length) {
-    const relevant = rejected.filter(({ pool }) => pool.token0 === token || pool.token1 === token || pool.token0 === BASE_WETH || pool.token1 === BASE_WETH);
+    const tokenRejected = rejected.filter(({ pool }) => pool.token0 === token || pool.token1 === token);
+    const anchorRejected = rejected.filter(({ pool }) => sameTokenPair(pool, BASE_WETH, BASE_USDC));
+    const relevant = tokenRejected.length ? tokenRejected : anchorRejected;
     if (relevant.some(({ reason }) => reason === "future_timestamp")) return unpriced("future_timestamp");
     if (relevant.some(({ reason }) => reason === "conflicting_pool_identity")) return unpriced("conflicting_pool_identity");
     if (relevant.some(({ reason }) => reason === "stale_anchor")) return unpriced("stale_anchor");
@@ -304,6 +306,10 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     maximumDeviation: consensus.maximumDeviation,
     reasonCode: tier === "A" ? "direct_usdc_pool" : tier === "B" ? "weth_usdc_anchor" : "bounded_verified_conversion"
   };
+}
+
+function sameTokenPair(pool, left, right) {
+  return pool.token0 === left && pool.token1 === right || pool.token0 === right && pool.token1 === left;
 }
 
 export function selectPrimaryPool(pools, previousPoolKey, now = new Date()) {

@@ -187,6 +187,16 @@ test("dust liquidity cannot establish a canonical price", () => {
   assert.equal(price.reasonCode, "thin_liquidity");
 });
 
+test("an unrelated zero-liquidity WETH pool cannot mask the token's thin-liquidity reason", () => {
+  const price = calculateCanonicalUsdcPrice(TOKEN_A, [
+    pricingPool({ poolKey: `${POOL_A}:token`, token0: TOKEN_A, token1: BASE_WETH, liquidityUsd: 100 }),
+    pricingPool({ poolKey: `${POOL_A}:anchor`, token0: BASE_WETH, token1: BASE_USDC, priceToken1PerToken0: 3_000 }),
+    pricingPool({ poolKey: `${POOL_A}:unrelated`, token0: TOKEN_B, token1: BASE_WETH, liquidityUsd: 0 })
+  ], NOW);
+  assert.equal(price.tier, "UNPRICED");
+  assert.equal(price.reasonCode, "thin_liquidity");
+});
+
 test("stale WETH anchor cannot establish a Tier B price", () => {
   const stale = new Date(NOW.getTime() - 10 * 60_000).toISOString();
   const price = calculateCanonicalUsdcPrice(TOKEN_A, [
