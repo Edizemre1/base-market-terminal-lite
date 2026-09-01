@@ -197,6 +197,16 @@ test("stale WETH anchor cannot establish a Tier B price", () => {
   assert.equal(price.reasonCode, "stale_anchor");
 });
 
+test("stale TOKEN/WETH pool is not mislabeled as a stale WETH/USDC anchor", () => {
+  const stale = new Date(NOW.getTime() - 10 * 60_000).toISOString();
+  const price = calculateCanonicalUsdcPrice(TOKEN_A, [
+    pricingPool({ poolKey: `${POOL_A}:1`, token0: TOKEN_A, token1: BASE_WETH, priceToken1PerToken0: 0.001, observedAt: stale }),
+    pricingPool({ poolKey: `${POOL_A}:2`, token0: BASE_WETH, token1: BASE_USDC, priceToken1PerToken0: 3_000 })
+  ], NOW);
+  assert.equal(price.tier, "UNPRICED");
+  assert.equal(price.reasonCode, "stale_pool");
+});
+
 test("future timestamp is rejected", () => {
   const future = new Date(NOW.getTime() + 60_000).toISOString();
   const price = calculateCanonicalUsdcPrice(TOKEN_A, [pricingPool({ token0: TOKEN_A, token1: BASE_USDC, observedAt: future })], NOW);

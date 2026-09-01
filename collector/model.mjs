@@ -231,6 +231,7 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     if (relevant.some(({ reason }) => reason === "future_timestamp")) return unpriced("future_timestamp");
     if (relevant.some(({ reason }) => reason === "stale_anchor")) return unpriced("stale_anchor");
     if (relevant.some(({ reason }) => reason === "dust_liquidity")) return unpriced("dust_liquidity");
+    if (relevant.some(({ reason }) => reason === "stale_pool")) return unpriced("stale_pool");
     return unpriced(graph.has(token) ? "no_bounded_usdc_path" : "no_trustworthy_usdc_path");
   }
   const preferredTier = Math.min(...candidates.map((candidate) => priceTierRank(candidate.path)));
@@ -386,7 +387,10 @@ function validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd) {
   const observed = Date.parse(pool.observedAt ?? pool.confirmedAt ?? "");
   if (!Number.isFinite(observed)) return "invalid_timestamp";
   if (observed > nowMs + 5_000) return "future_timestamp";
-  if (nowMs - observed > maxAgeMs) return pool.token0 === BASE_WETH || pool.token1 === BASE_WETH ? "stale_anchor" : "stale_pool";
+  if (nowMs - observed > maxAgeMs) {
+    const exactWethUsdcAnchor = pool.token0 === BASE_WETH && pool.token1 === BASE_USDC || pool.token0 === BASE_USDC && pool.token1 === BASE_WETH;
+    return exactWethUsdcAnchor ? "stale_anchor" : "stale_pool";
+  }
   return undefined;
 }
 
