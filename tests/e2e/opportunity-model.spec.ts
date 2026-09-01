@@ -10,6 +10,7 @@ import {
   mergePoolPairs
 } from "../../src/lib/base-terminal/opportunityModel";
 import { buildTokenOpportunityLanes } from "../../src/lib/base-terminal/terminalMarket";
+import { mergeOnchainPoolsIntoPairs } from "../../src/lib/base-terminal/onchainDiscovery";
 import {
   getDiscoveryHistoryStats,
   recordDiscoveryHistory,
@@ -164,6 +165,42 @@ test.describe("pool market to token opportunity contracts", () => {
     const opportunity = discovery.opportunities.find((item) => item.focusTokenAddress === tokenAddress);
     expect(opportunity?.canonicalPrice.tier).toBe("B");
     expect(opportunity?.canonicalPrice.sourcePoolKeys).toEqual([tokenWeth.id, wethUsdc.id].sort());
+  });
+
+  test("pins the provider WETH/USDC pair to the exact on-chain anchor consensus value", async () => {
+    const template = await fixtureTemplate();
+    const poolAddress = address(770);
+    const providerPair = fixturePool(template, { poolAddress, tokenAddress: WETH, tokenSymbol: "WETH", quoteAddress: USDC, quoteSymbol: "USDC" });
+    providerPair.priceNative = "2400";
+    providerPair.priceUsdValue = 2400;
+    const merged = mergeOnchainPoolsIntoPairs([providerPair], {
+      ok: true,
+      state: {
+        pools: {},
+        priceAnchors: { wethUsdc: { status: "ready", pricingPool: {
+          poolKey: poolAddress,
+          poolAddress,
+          token0: WETH,
+          token1: USDC,
+          factoryId: "uniswap-v3",
+          factoryAddress: address(771),
+          protocolVersion: "v3",
+          observedAt: new Date().toISOString(),
+          blockNumber: 50_000_000,
+          providers: ["dexscreener"],
+          priceToken1PerToken0: 2431.7203029993243,
+          liquidityUsd: 115_000_000,
+          volume24hUsd: 50_000_000,
+          anchorConsensus: true,
+          sourcePoolKeys: [poolAddress]
+        } } },
+        confirmedHead: 50_000_000
+      }
+    } as unknown as NonNullable<Parameters<typeof mergeOnchainPoolsIntoPairs>[1]>);
+    expect(merged[0].priceNative).toBe("2431.72030299932");
+    expect(merged[0].priceUsdValue).toBe(2431.7203029993243);
+    expect(merged[0].liquidityUsd).toBe(115_000_000);
+    expect(merged[0].onchainProvenance?.decimalsVerified).toBeTruthy();
   });
 
   test("holds a healthy primary through small changes and switches on material improvement or staleness", async () => {

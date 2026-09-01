@@ -5,6 +5,7 @@ import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
 export const ONCHAIN_COLLECTOR_VERSION = "base-market-enrichment-v2";
+const BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 
 type StoredPool = {
   poolKey: string;
@@ -33,6 +34,8 @@ type StoredPool = {
   volume24hUsd?: number;
   trades24h?: number;
   decimalsVerified?: boolean;
+  anchorConsensus?: boolean;
+  sourcePoolKeys?: string[];
   providerEnrichment?: { decimalsVerified?: boolean };
 };
 
@@ -79,6 +82,24 @@ export type OnchainStoreState = {
         providers?: string[];
         decimalsVerified?: boolean;
       }>;
+      pricingPool?: Record<string, unknown> & {
+        poolKey?: string;
+        poolAddress?: string;
+        token0?: string;
+        token1?: string;
+        factoryId?: string;
+        factoryAddress?: string;
+        protocolVersion?: string;
+        observedAt?: string;
+        blockNumber?: number;
+        providers?: string[];
+        priceToken1PerToken0?: number;
+        liquidityUsd?: number;
+        volume24hUsd?: number;
+        trades24h?: number;
+        sourcePoolKeys?: string[];
+        anchorConsensus?: boolean;
+      };
     };
   };
   eventRing: Array<{ id: string; type: string; at: string; data: Record<string, unknown> }>;
@@ -112,29 +133,36 @@ export function readOnchainStoreSnapshot(): OnchainStoreReadResult {
 export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = readOnchainStoreSnapshot()) {
   if (!result.ok) return providerPairs;
   const pairsByPool = new Map(providerPairs.map((pair) => [normalizePoolKey(pair.pairAddress ?? pair.id), pair]));
-  const anchorBindings = (result.state.priceAnchors?.wethUsdc?.candidates ?? []).flatMap((candidate) => {
-    if (!candidate.poolAddress || !candidate.token0 || !candidate.token1 || !candidate.factoryId || !candidate.factoryAddress || !candidate.protocolVersion || !candidate.observedAt) return [];
+  const anchor = result.state.priceAnchors?.wethUsdc;
+  const anchorBindings = [anchor?.pricingPool].flatMap((pricingPool) => {
+    if (anchor?.status !== "ready" || !pricingPool?.poolAddress || !pricingPool.token0 || !pricingPool.token1 || !pricingPool.factoryId || !pricingPool.factoryAddress || !pricingPool.protocolVersion || !pricingPool.observedAt || !positive(pricingPool.priceToken1PerToken0)) return [];
     return [{
-      poolKey: candidate.poolAddress,
-      poolAddress: candidate.poolAddress,
+      poolKey: pricingPool.poolAddress,
+      poolAddress: pricingPool.poolAddress,
       chainId: 8453 as const,
-      dexId: candidate.factoryId.split("-")[0],
-      factoryId: candidate.factoryId,
-      factoryAddress: candidate.factoryAddress,
-      protocolVersion: candidate.protocolVersion,
-      token0: candidate.token0,
-      token1: candidate.token1,
+      dexId: pricingPool.factoryId.split("-")[0],
+      factoryId: pricingPool.factoryId,
+      factoryAddress: pricingPool.factoryAddress,
+      protocolVersion: pricingPool.protocolVersion,
+      token0: pricingPool.token0,
+      token1: pricingPool.token1,
       status: "confirmed" as const,
       verifiedSource: true,
       replay: false,
-      firstSeenAt: candidate.observedAt,
-      confirmedAt: candidate.observedAt,
-      observedAt: candidate.observedAt,
-      blockNumber: candidate.blockNumber ?? result.state.confirmedHead,
+      firstSeenAt: pricingPool.observedAt,
+      confirmedAt: pricingPool.observedAt,
+      observedAt: pricingPool.observedAt,
+      blockNumber: pricingPool.blockNumber ?? result.state.confirmedHead,
       transactionHash: undefined,
       logIndex: undefined,
-      providers: [...new Set([...(candidate.providers ?? []), "onchain"])],
-      decimalsVerified: candidate.decimalsVerified === true
+      providers: [...new Set([...(pricingPool.providers ?? []), "onchain"])],
+      decimalsVerified: true,
+      anchorConsensus: true,
+      sourcePoolKeys: pricingPool.sourcePoolKeys,
+      priceToken1PerToken0: pricingPool.priceToken1PerToken0,
+      liquidityUsd: pricingPool.liquidityUsd,
+      volume24hUsd: pricingPool.volume24hUsd,
+      trades24h: pricingPool.trades24h
     } satisfies StoredPool];
   });
   const bindingsByPool = new Map<string, StoredPool>();
@@ -147,12 +175,24 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
     const current = pairsByPool.get(key);
     if (current) {
       const providers = [...new Set([...(current.dataProviders ?? (current.dataSource ? [current.dataSource] : [])), "onchain" as const])];
+      const canonicalAnchorPrice = pool.anchorConsensus ? positive(pool.priceToken1PerToken0) : undefined;
+      const canonicalUsd = canonicalAnchorPrice === undefined ? undefined
+        : pool.token1 === BASE_USDC_ADDRESS ? canonicalAnchorPrice
+          : pool.token0 === BASE_USDC_ADDRESS ? 1 / canonicalAnchorPrice : undefined;
       pairsByPool.set(key, {
         ...current,
         dataProviders: providers,
         firstSeenAt: earliestIso(current.firstSeenAt, pool.firstSeenAt),
+        sourceUpdatedAt: canonicalAnchorPrice === undefined ? current.sourceUpdatedAt : pool.observedAt,
         blockNumber: pool.blockNumber,
-        onchainProvenance: provenance(pool)
+        onchainProvenance: provenance(pool),
+        priceNative: canonicalAnchorPrice === undefined ? current.priceNative : canonicalAnchorPrice.toPrecision(15),
+        priceUsdValue: canonicalUsd ?? current.priceUsdValue,
+        priceUsd: canonicalUsd === undefined ? current.priceUsd : `$${canonicalUsd.toPrecision(10)}`,
+        liquidityUsd: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidityUsd,
+        liquidity: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidity,
+        volume24h: pool.anchorConsensus && pool.volume24hUsd !== undefined ? pool.volume24hUsd : current.volume24h,
+        volumes: pool.anchorConsensus && pool.volume24hUsd !== undefined ? { ...current.volumes, h24: pool.volume24hUsd } : current.volumes
       });
       continue;
     }
@@ -293,3 +333,4 @@ function formatAge(minutes: number) { return minutes < 60 ? `${minutes}m` : minu
 function earliestIso(left: string | undefined, right: string) { return left && Date.parse(left) <= Date.parse(right) ? left : right; }
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException { return Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"); }
 function readPricingTier(value: unknown): "A" | "B" | "C" | "UNPRICED" { if (!value || typeof value !== "object" || !("tier" in value)) return "UNPRICED"; const tier = (value as { tier?: unknown }).tier; return tier === "A" || tier === "B" || tier === "C" ? tier : "UNPRICED"; }
+function positive(value: number | undefined) { return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined; }
