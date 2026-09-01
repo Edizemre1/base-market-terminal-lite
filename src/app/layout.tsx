@@ -37,10 +37,11 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const initialLocale = await getInitialLocale();
+  const initialNow = Date.now();
   return (
     <html lang={initialLocale}>
       <body>
-        <I18nProvider initialLocale={initialLocale}>
+        <I18nProvider initialLocale={initialLocale} initialNow={initialNow}>
           <AppShell>{children}</AppShell>
         </I18nProvider>
       </body>

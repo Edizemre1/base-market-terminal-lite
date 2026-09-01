@@ -22,9 +22,16 @@ type I18nContextValue = {
 
 const I18nContext = createContext<I18nContextValue | undefined>(undefined);
 
-export function I18nProvider({ initialLocale, children }: { initialLocale: Locale; children: ReactNode }) {
+export function I18nProvider({ initialLocale, initialNow, children }: { initialLocale: Locale; initialNow: number; children: ReactNode }) {
   const [locale, updateLocale] = useState<Locale>(initialLocale);
+  const [relativeNow, setRelativeNow] = useState(initialNow);
   const storageCheckedRef = useRef(false);
+
+  useEffect(() => {
+    setRelativeNow(Date.now());
+    const timer = window.setInterval(() => setRelativeNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!storageCheckedRef.current) {
@@ -67,9 +74,9 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
         const parsed = new Date(date);
         return Number.isNaN(parsed.getTime()) ? translate(locale, "common.noData") : new Intl.DateTimeFormat(intlLocale, options).format(parsed);
       },
-      formatRelativeTime: (date) => formatRelative(date, locale)
+      formatRelativeTime: (date) => formatRelative(date, locale, relativeNow)
     };
-  }, [locale, setLocale]);
+  }, [locale, relativeNow, setLocale]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
@@ -80,8 +87,8 @@ export function useI18n() {
   return context;
 }
 
-function formatRelative(value: string | number | Date, locale: Locale) {
-  const milliseconds = Date.now() - new Date(value).getTime();
+function formatRelative(value: string | number | Date, locale: Locale, now: number) {
+  const milliseconds = now - new Date(value).getTime();
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return translate(locale, "common.now");
   if (milliseconds < 60_000) return locale === "tr" ? `${Math.max(1, Math.floor(milliseconds / 1000))} sn önce` : `${Math.max(1, Math.floor(milliseconds / 1000))}s ago`;
   if (milliseconds < 3_600_000) return locale === "tr" ? `${Math.floor(milliseconds / 60_000)} dk önce` : `${Math.floor(milliseconds / 60_000)}m ago`;

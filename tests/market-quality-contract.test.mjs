@@ -208,6 +208,15 @@ test("live wall event times are hydration-stable across server and browser time 
   assert.match(source, /function formatObservedTime[\s\S]*?toLocaleTimeString[\s\S]*?timeZone: "UTC"/);
 });
 
+test("relative event times share the serialized server clock during hydration", async () => {
+  const layout = await readFile(path.resolve("src/app/layout.tsx"), "utf8");
+  const provider = await readFile(path.resolve("src/i18n/I18nProvider.tsx"), "utf8");
+  assert.match(layout, /initialNow=\{initialNow\}/);
+  assert.match(provider, /useState\(initialNow\)/);
+  assert.match(provider, /formatRelative\(date, locale, relativeNow\)/);
+  assert.doesNotMatch(provider, /function formatRelative[\s\S]*?Date\.now\(\) - new Date/);
+});
+
 test("quality labels retain exact TR and EN parity", async () => {
   const source = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
   for (const key of ["qualityView", "thinMarket", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected"]) {
