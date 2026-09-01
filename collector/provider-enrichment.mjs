@@ -375,6 +375,8 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
 export function stabilizeWethUsdcAnchorRefresh(current, candidate, completedAt = new Date(), { maximumAgeMs = 2 * 60_000, emptyRetryMs = 10_000 } = {}) {
   const completedMs = completedAt.getTime();
   const observedMs = Date.parse(current?.observedAt ?? "");
+  const lastTrustedCandidates = current?.lastTrustedCandidates
+    ?? (current?.status === "ready" ? current.candidates : undefined);
   const canRetain = candidate?.status === "unavailable"
     && candidate?.reasonCode === "no_verified_anchor_candidate"
     && current?.status === "ready"
@@ -386,11 +388,13 @@ export function stabilizeWethUsdcAnchorRefresh(current, candidate, completedAt =
       ...current,
       nextRefreshAt: new Date(completedMs + emptyRetryMs).toISOString(),
       lastRefreshReasonCode: candidate.reasonCode,
-      refreshStatus: "retained_last_fresh"
+      refreshStatus: "retained_last_fresh",
+      lastTrustedCandidates
     };
   }
   return {
     ...candidate,
+    lastTrustedCandidates: candidate?.status === "ready" ? candidate.candidates : lastTrustedCandidates,
     nextRefreshAt: new Date(completedMs + ANCHOR_REFRESH_MS).toISOString()
   };
 }

@@ -16,7 +16,7 @@ import {
   stabilizeWethUsdcAnchorRefresh
 } from "../collector/provider-enrichment.mjs";
 import { readSupportedPoolState } from "../collector/rpc.mjs";
-import { OnchainDiscoveryCollector } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, trustedAnchorPoolIdentity } from "../collector/service.mjs";
 import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-01T12:00:00.000Z");
@@ -110,7 +110,25 @@ test("an empty refresh retains a still-fresh anchor and retries quickly", () => 
   assert.equal(retained.nextRefreshAt, new Date(NOW.getTime() + 10_000).toISOString());
 
   const staleCurrent = { ...current, observedAt: new Date(NOW.getTime() - 121_000).toISOString() };
-  assert.equal(stabilizeWethUsdcAnchorRefresh(staleCurrent, empty, NOW).status, "unavailable");
+  const unavailable = stabilizeWethUsdcAnchorRefresh(staleCurrent, empty, NOW);
+  assert.equal(unavailable.status, "unavailable");
+  assert.equal(unavailable.lastTrustedCandidates.length, 1);
+});
+
+test("a previously verified anchor pool reuses only its immutable exact identity", () => {
+  const current = resolveWethUsdcAnchor([anchorCandidate()], NOW);
+  const exact = trustedAnchorPoolIdentity(current, POOL);
+  assert.deepEqual(exact, {
+    poolKey: POOL,
+    poolAddress: POOL,
+    token0: BASE_WETH,
+    token1: BASE_USDC,
+    factoryId: "uniswap-v3",
+    factoryAddress: FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v3").address,
+    protocolVersion: "v3"
+  });
+  assert.equal(trustedAnchorPoolIdentity(current, OTHER), undefined);
+  assert.equal(trustedAnchorPoolIdentity({ ...current, candidates: [{ ...current.candidates[0], registeredFactory: false }] }, POOL), undefined);
 });
 
 test("anchor validation uses lookup completion time after a slow RPC inspection", () => {

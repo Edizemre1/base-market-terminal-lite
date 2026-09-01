@@ -387,17 +387,20 @@ export class OnchainDiscoveryCollector {
         }
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
-        const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest");
-        if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
-        const pool = {
-          poolKey: observation.poolAddress,
-          poolAddress: observation.poolAddress,
-          token0: identity.token0,
-          token1: identity.token1,
-          factoryId: identity.registry.id,
-          factoryAddress: identity.registry.address,
-          protocolVersion: identity.registry.protocolVersion
-        };
+        let pool = trustedAnchorPoolIdentity(current, observation.poolAddress);
+        if (!pool) {
+          const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest");
+          if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
+          pool = {
+            poolKey: observation.poolAddress,
+            poolAddress: observation.poolAddress,
+            token0: identity.token0,
+            token1: identity.token1,
+            factoryId: identity.registry.id,
+            factoryAddress: identity.registry.address,
+            protocolVersion: identity.registry.protocolVersion
+          };
+        }
         const onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest");
         const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
@@ -548,6 +551,26 @@ export class OnchainDiscoveryCollector {
       if (this.config.websocketUrl && this.websocket?.readyState !== WebSocket.OPEN) draft.health.mode = "reconnecting";
     });
   }
+}
+
+export function trustedAnchorPoolIdentity(anchor, poolAddress) {
+  const candidates = [...(anchor?.candidates ?? []), ...(anchor?.lastTrustedCandidates ?? [])];
+  const candidate = candidates.find((item) => item?.poolAddress === poolAddress
+    && item.registeredFactory === true
+    && item.decimalsVerified === true
+    && sameTokenSet(item.token0, item.token1, BASE_WETH, BASE_USDC));
+  if (!candidate) return undefined;
+  const registry = ENABLED.find((item) => item.id === candidate.factoryId && item.address === candidate.factoryAddress);
+  if (!registry) return undefined;
+  return {
+    poolKey: poolAddress,
+    poolAddress,
+    token0: candidate.token0,
+    token1: candidate.token1,
+    factoryId: registry.id,
+    factoryAddress: registry.address,
+    protocolVersion: registry.protocolVersion
+  };
 }
 
 function buildHealth(state, head, confirmedHead, mode) {
