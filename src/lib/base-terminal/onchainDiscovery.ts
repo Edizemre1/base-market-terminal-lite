@@ -5,6 +5,7 @@ import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
 export const ONCHAIN_COLLECTOR_VERSION = "base-market-enrichment-v2";
+const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 const BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 
 type StoredPool = {
@@ -134,6 +135,7 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
   if (!result.ok) return providerPairs;
   const pairsByPool = new Map(providerPairs.map((pair) => [normalizePoolKey(pair.pairAddress ?? pair.id), pair]));
   const anchor = result.state.priceAnchors?.wethUsdc;
+  const anchorUsd = anchor?.status === "ready" ? positive(anchor.value) : undefined;
   const anchorBindings = [anchor?.pricingPool].flatMap((pricingPool) => {
     if (anchor?.status !== "ready" || !pricingPool?.poolAddress || !pricingPool.token0 || !pricingPool.token1 || !pricingPool.factoryId || !pricingPool.factoryAddress || !pricingPool.protocolVersion || !pricingPool.observedAt || !positive(pricingPool.priceToken1PerToken0)) return [];
     return [{
@@ -175,20 +177,12 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
     const current = pairsByPool.get(key);
     if (current) {
       const providers = [...new Set([...(current.dataProviders ?? (current.dataSource ? [current.dataSource] : [])), "onchain" as const])];
-      const canonicalAnchorPrice = pool.anchorConsensus ? positive(pool.priceToken1PerToken0) : undefined;
-      const canonicalUsd = canonicalAnchorPrice === undefined ? undefined
-        : pool.token1 === BASE_USDC_ADDRESS ? canonicalAnchorPrice
-          : pool.token0 === BASE_USDC_ADDRESS ? 1 / canonicalAnchorPrice : undefined;
       pairsByPool.set(key, {
         ...current,
         dataProviders: providers,
         firstSeenAt: earliestIso(current.firstSeenAt, pool.firstSeenAt),
-        sourceUpdatedAt: canonicalAnchorPrice === undefined ? current.sourceUpdatedAt : pool.observedAt,
         blockNumber: pool.blockNumber,
         onchainProvenance: provenance(pool),
-        priceNative: canonicalAnchorPrice === undefined ? current.priceNative : canonicalAnchorPrice.toPrecision(15),
-        priceUsdValue: canonicalUsd ?? current.priceUsdValue,
-        priceUsd: canonicalUsd === undefined ? current.priceUsd : `$${canonicalUsd.toPrecision(10)}`,
         liquidityUsd: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidityUsd,
         liquidity: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidity,
         volume24h: pool.anchorConsensus && pool.volume24hUsd !== undefined ? pool.volume24hUsd : current.volume24h,
@@ -198,7 +192,9 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
     }
     pairsByPool.set(key, toDiscoveryPair(pool, result.state.tokenMetadata));
   }
-  return [...pairsByPool.values()];
+  return [...pairsByPool.values()].map((pair) => anchorUsd === undefined
+    ? pair
+    : applyCanonicalWethUsdcAnchor(pair, anchorUsd, anchor?.observedAt));
 }
 
 export function getOnchainCollectorHealth(sseClients: number) {
@@ -261,6 +257,10 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
   const ageMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(createdAt)) / 60_000));
   const symbol0 = safeLabel(token0?.symbol, pool.token0);
   const symbol1 = safeLabel(token1?.symbol, pool.token1);
+  const nativePrice = positive(pool.priceToken1PerToken0);
+  const directUsd = nativePrice === undefined ? undefined
+    : pool.token1 === BASE_USDC_ADDRESS ? nativePrice
+      : pool.token0 === BASE_USDC_ADDRESS ? 1 : undefined;
   return {
     id: normalizePoolKey(pool.poolAddress ?? pool.poolKey),
     pairAddress: pool.poolAddress,
@@ -287,8 +287,14 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     dex: pool.dexId,
     age: formatAge(ageMinutes),
     ageMinutes,
-    price: "N/A",
-    priceUsd: "N/A",
+    priceNative: nativePrice?.toPrecision(15),
+    price: nativePrice?.toPrecision(8) ?? "N/A",
+    priceUsdValue: directUsd,
+    priceUsd: directUsd === undefined ? "N/A" : `$${directUsd.toPrecision(10)}`,
+    liquidityUsd: pool.liquidityUsd,
+    liquidity: pool.liquidityUsd,
+    volumes: pool.volume24hUsd === undefined ? undefined : { h24: pool.volume24hUsd },
+    volume24h: pool.volume24hUsd,
     poolAge: formatAge(ageMinutes),
     chart: [],
     holders: { top10: "N/A", top50: "N/A", top100: "N/A", total: "N/A", active24h: "N/A" },
@@ -298,6 +304,24 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     riskChecks: [],
     liquidityDetail: { poolLiquidity: "N/A", lpChange: "N/A", depth: "N/A", routeSource: `${pool.factoryId} event` },
     activity: []
+  };
+}
+
+function applyCanonicalWethUsdcAnchor(pair: BasePair, anchorUsd: number, observedAt: string | undefined): BasePair {
+  const base = normalizeAddress(pair.baseTokenAddress);
+  const quote = normalizeAddress(pair.quoteTokenAddress);
+  const direct = base === BASE_WETH_ADDRESS && quote === BASE_USDC_ADDRESS;
+  const inverted = base === BASE_USDC_ADDRESS && quote === BASE_WETH_ADDRESS;
+  if (!direct && !inverted) return pair;
+  const nativePrice = direct ? anchorUsd : 1 / anchorUsd;
+  const baseUsd = direct ? anchorUsd : 1;
+  return {
+    ...pair,
+    sourceUpdatedAt: observedAt ?? pair.sourceUpdatedAt,
+    priceNative: String(nativePrice),
+    price: nativePrice.toPrecision(8),
+    priceUsdValue: baseUsd,
+    priceUsd: `$${baseUsd.toPrecision(10)}`
   };
 }
 
@@ -327,6 +351,7 @@ function sortValue(value: unknown): unknown {
 }
 
 function normalizePoolKey(value: string) { return value.toLowerCase(); }
+function normalizeAddress(value: string | undefined) { return value?.trim().toLowerCase(); }
 function shortAddress(value: string) { return `${value.slice(0, 6)}…${value.slice(-4)}`; }
 function safeLabel(value: string | undefined, address: string) { return value?.trim().slice(0, 24) || shortAddress(address); }
 function formatAge(minutes: number) { return minutes < 60 ? `${minutes}m` : minutes < 1_440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1_440)}d`; }

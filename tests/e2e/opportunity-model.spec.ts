@@ -167,17 +167,21 @@ test.describe("pool market to token opportunity contracts", () => {
     expect(opportunity?.canonicalPrice.sourcePoolKeys).toEqual([tokenWeth.id, wethUsdc.id].sort());
   });
 
-  test("pins the provider WETH/USDC pair to the exact on-chain anchor consensus value", async () => {
+  test("pins direct and inverted WETH/USDC markets to the exact on-chain anchor consensus value", async () => {
     const template = await fixtureTemplate();
     const poolAddress = address(770);
     const providerPair = fixturePool(template, { poolAddress, tokenAddress: WETH, tokenSymbol: "WETH", quoteAddress: USDC, quoteSymbol: "USDC" });
+    const invertedPair = fixturePool(template, { poolAddress: address(772), tokenAddress: WETH, tokenSymbol: "WETH", quoteAddress: USDC, quoteSymbol: "USDC", inverted: true, liquidity: 250_000_000, volume24h: 80_000_000 });
     providerPair.priceNative = "2400";
     providerPair.priceUsdValue = 2400;
-    const merged = mergeOnchainPoolsIntoPairs([providerPair], {
+    invertedPair.priceNative = "0.0004";
+    invertedPair.priceUsdValue = 1;
+    const anchorUsd = 2431.7203029993243;
+    const merged = mergeOnchainPoolsIntoPairs([providerPair, invertedPair], {
       ok: true,
       state: {
         pools: {},
-        priceAnchors: { wethUsdc: { status: "ready", pricingPool: {
+        priceAnchors: { wethUsdc: { status: "ready", value: anchorUsd, pricingPool: {
           poolKey: poolAddress,
           poolAddress,
           token0: WETH,
@@ -188,7 +192,7 @@ test.describe("pool market to token opportunity contracts", () => {
           observedAt: new Date().toISOString(),
           blockNumber: 50_000_000,
           providers: ["dexscreener"],
-          priceToken1PerToken0: 2431.7203029993243,
+          priceToken1PerToken0: anchorUsd,
           liquidityUsd: 115_000_000,
           volume24hUsd: 50_000_000,
           anchorConsensus: true,
@@ -197,10 +201,23 @@ test.describe("pool market to token opportunity contracts", () => {
         confirmedHead: 50_000_000
       }
     } as unknown as NonNullable<Parameters<typeof mergeOnchainPoolsIntoPairs>[1]>);
-    expect(merged[0].priceNative).toBe("2431.72030299932");
-    expect(merged[0].priceUsdValue).toBe(2431.7203029993243);
-    expect(merged[0].liquidityUsd).toBe(115_000_000);
-    expect(merged[0].onchainProvenance?.decimalsVerified).toBeTruthy();
+    const direct = merged.find((pair) => pair.id === poolAddress)!;
+    const inverted = merged.find((pair) => pair.id === invertedPair.id)!;
+    expect(direct.priceNative).toBe(String(anchorUsd));
+    expect(direct.priceUsdValue).toBe(anchorUsd);
+    expect(direct.liquidityUsd).toBe(115_000_000);
+    expect(direct.onchainProvenance?.decimalsVerified).toBeTruthy();
+    expect(Number(inverted.priceNative)).toBeCloseTo(1 / anchorUsd, 15);
+    expect(inverted.priceUsdValue).toBe(1);
+
+    const discovery = buildDiscoveryUniverse(merged, [], new Date());
+    const opportunity = discovery.opportunities.find((item) => item.focusTokenAddress === WETH)!;
+    const primary = discovery.pairs.find((pair) => pair.id === opportunity.primaryMarketId)!;
+    const primaryFocusUsd = primary.baseTokenAddress === WETH
+      ? primary.priceUsdValue
+      : Number(primary.priceNative) > 0 && primary.priceUsdValue ? primary.priceUsdValue / Number(primary.priceNative) : undefined;
+    expect(opportunity.canonicalPrice.value).toBe(anchorUsd);
+    expect(primaryFocusUsd).toBeCloseTo(anchorUsd, 10);
   });
 
   test("holds a healthy primary through small changes and switches on material improvement or staleness", async () => {
