@@ -65,12 +65,12 @@ test.describe("live market wall contracts", () => {
   test("separates liquidity added and removed while filtering tiny denominator anomalies", async () => {
     const warming = await fixture([
       market(31, { symbol: "ADDED", liquidity: 25_000 }),
-      market(32, { symbol: "REMOVED", liquidity: 20_000 }),
+      market(32, { symbol: "REMOVED", liquidity: 25_000 }),
       market(33, { symbol: "TINY", liquidity: 15_000 })
     ]);
     const ready = withComparison(warming, {
       ADDED: { volume: 10_000, liquidity: 20_000 },
-      REMOVED: { volume: 10_000, liquidity: 30_000 },
+      REMOVED: { volume: 10_000, liquidity: 35_000 },
       TINY: { volume: 10_000, liquidity: 100 }
     });
     const added = lane(ready, "liquidity", { allowCrossLaneRepeats: true, liquidityDirection: "added" });
