@@ -82,8 +82,24 @@ export class ProviderEnrichmentClient {
     return { observations, poolInfo, lookupState: observations.length ? "found" : "not_found", receivedAt, failures: failures.map(safeFailure), circuits: this.circuitSnapshot(), cacheHit: false };
   }
 
-  async lookupWethPools({ signal } = {}) {
+  async lookupWethPools({ signal, poolAddresses } = {}) {
     const receivedAt = this.now().toISOString();
+    const exactAddresses = [...new Set((poolAddresses ?? []).map(normalizeAddress).filter(Boolean))].slice(0, ANCHOR_VALIDATION_LIMIT);
+    if (exactAddresses.length) {
+      const settled = await Promise.allSettled(exactAddresses.map((address) => this.request(
+        "dexscreener",
+        `${DEXSCREENER}/latest/dex/pairs/base/${address}`,
+        { signal }
+      )));
+      const observations = settled.flatMap((result) => result.status === "fulfilled" ? parseDexScreenerPayload(result.value, receivedAt) : []);
+      const failures = settled.filter((result) => result.status === "rejected").map((result) => result.reason);
+      if (!observations.length && failures.some((error) => error?.retryable)) {
+        throw new ProviderRequestError("anchor_exact_lookup_transient_failure", { retryable: true, provider: "dexscreener" });
+      }
+      return observations
+        .filter((pool) => exactAddresses.includes(pool.poolAddress) && tokenSetMatches(pool.baseTokenAddress, pool.quoteTokenAddress, BASE_WETH, BASE_USDC))
+        .sort((left, right) => (right.liquidityUsd ?? -1) - (left.liquidityUsd ?? -1) || left.poolAddress.localeCompare(right.poolAddress));
+    }
     const payload = await this.request("dexscreener", `${DEXSCREENER}/token-pairs/v1/base/${BASE_WETH}`, { signal });
     return parseDexScreenerPayload(payload, receivedAt)
       .filter((pool) => tokenSetMatches(pool.baseTokenAddress, pool.quoteTokenAddress, BASE_WETH, BASE_USDC))

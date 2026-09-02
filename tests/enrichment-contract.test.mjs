@@ -230,6 +230,24 @@ test("trusted anchor provider lookup receives the cycle abort signal", async () 
   assert.equal(requestSignal.aborted, true);
 });
 
+test("trusted anchor refresh uses only bounded exact pair endpoints", async () => {
+  const urls = [];
+  const client = new ProviderEnrichmentClient({
+    retries: 0,
+    delayImpl: async () => {},
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return response(200, { pairs: [] });
+    }
+  });
+  await client.lookupWethPools({ poolAddresses: [POOL, OTHER, POOL] });
+  assert.deepEqual(urls.sort(), [
+    `https://api.dexscreener.com/latest/dex/pairs/base/${OTHER}`,
+    `https://api.dexscreener.com/latest/dex/pairs/base/${POOL}`
+  ]);
+  assert.equal(urls.some((url) => url.includes("/token-pairs/")), false);
+});
+
 test("trusted immutable anchor identity refreshes without repeating RPC validation", async () => {
   const now = new Date();
   const observedAt = now.toISOString();
@@ -240,16 +258,19 @@ test("trusted immutable anchor identity refreshes without repeating RPC validati
   let rpcCalls = 0;
   const subject = {
     anchorProvider: {
-      lookupWethPools: async () => [providerObservation({
-        poolAddress: POOL,
-        baseTokenAddress: BASE_WETH,
-        quoteTokenAddress: BASE_USDC,
-        priceNative: 2_400,
-        priceUsd: 2_400,
-        liquidityUsd: 100_000,
-        observedAt,
-        receivedAt: observedAt
-      })]
+      lookupWethPools: async ({ poolAddresses }) => {
+        assert.deepEqual(poolAddresses, [POOL]);
+        return [providerObservation({
+          poolAddress: POOL,
+          baseTokenAddress: BASE_WETH,
+          quoteTokenAddress: BASE_USDC,
+          priceNative: 2_400,
+          priceUsd: 2_400,
+          liquidityUsd: 100_000,
+          observedAt,
+          receivedAt: observedAt
+        })];
+      }
     },
     anchorRpc: new Proxy({}, { get: () => () => { rpcCalls += 1; throw new Error("trusted refresh must not use RPC"); } }),
     provider: { circuitSnapshot: () => ({}) },

@@ -402,7 +402,9 @@ export class OnchainDiscoveryCollector {
     const current = before.priceAnchors?.wethUsdc;
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
     try {
-      const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools({ signal }));
+      const trustedPoolAddresses = [...new Set([...(current?.candidates ?? []), ...(current?.lastTrustedCandidates ?? [])]
+        .flatMap((candidate) => trustedAnchorPoolIdentity(current, candidate?.poolAddress) ? [candidate.poolAddress] : []))];
+      const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools({ signal, poolAddresses: trustedPoolAddresses }));
       const lookupCompletedAt = new Date();
       const blockNumber = before.currentHead || await this.anchorRpc.blockNumber({ signal });
       const metadata = { ...before.tokenMetadata };
