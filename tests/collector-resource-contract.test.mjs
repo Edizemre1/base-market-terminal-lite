@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { appendRelayEvent } from "../collector/model.mjs";
-import { verifyPoolBindings } from "../collector/rpc.mjs";
+import { JsonRpcClient, verifyPoolBindings } from "../collector/rpc.mjs";
 import { nextScanDelayMs, OnchainDiscoveryCollector, resolveCollectorConfig } from "../collector/service.mjs";
 import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
 
@@ -18,17 +18,17 @@ test("normal collector cadence is measured start-to-start", () => {
   assert.equal(config.pollIntervalMs, 10_000);
   assert.equal(config.onchainStateIntervalMs, 30_000);
   assert.equal(config.enrichmentIntervalMs, 30_000);
-  assert.equal(config.discoveryBatchPaceMs, 2_000);
+  assert.equal(config.discoveryBatchPaceMs, 3_000);
 
   const bounded = resolveCollectorConfig({
     BASE_RPC_HTTP_URL: "https://mainnet.base.org",
     ONCHAIN_STATE_INTERVAL_MS: "120000",
     ONCHAIN_ENRICHMENT_INTERVAL_MS: "120000",
-    ONCHAIN_DISCOVERY_BATCH_PACE_MS: "3000"
+    ONCHAIN_DISCOVERY_BATCH_PACE_MS: "4000"
   });
   assert.equal(bounded.onchainStateIntervalMs, 120_000);
   assert.equal(bounded.enrichmentIntervalMs, 120_000);
-  assert.equal(bounded.discoveryBatchPaceMs, 3_000);
+  assert.equal(bounded.discoveryBatchPaceMs, 4_000);
   assert.equal(nextScanDelayMs(config.pollIntervalMs, 2_500), 7_500);
   assert.equal(nextScanDelayMs(config.pollIntervalMs, 12_000), 3_000);
 });
@@ -48,7 +48,25 @@ test("discovery verification has an isolated bounded RPC client", () => {
   const defaultCollector = new OnchainDiscoveryCollector(resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }));
   assert.equal(defaultCollector.discoveryRpc.retries, 3);
   assert.equal(defaultCollector.discoveryRpc.timeoutMs, 8_000);
-  assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 2_000);
+  assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 3_000);
+});
+
+test("public RPC pacing measures the interval between batch starts", async () => {
+  let nowMs = NOW.getTime();
+  const delays = [];
+  const rpc = new JsonRpcClient("https://mainnet.base.org", {
+    batchPaceMs: 3_000,
+    now: () => new Date(nowMs),
+    delayImpl: async (waitMs) => { delays.push(waitMs); nowMs += waitMs; }
+  });
+
+  await rpc.paceBatch();
+  nowMs += 1_000;
+  await rpc.paceBatch();
+  nowMs += 4_000;
+  await rpc.paceBatch();
+
+  assert.deepEqual(delays, [2_000]);
 });
 
 test("pool binding verification paces each public RPC batch", async () => {

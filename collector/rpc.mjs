@@ -22,6 +22,7 @@ export class JsonRpcClient {
     this.circuitFailureThreshold = circuitFailureThreshold;
     this.circuitCooldownMs = circuitCooldownMs;
     this.batchPaceMs = Number.isFinite(batchPaceMs) ? Math.max(0, batchPaceMs) : 0;
+    this.lastBatchStartedAt = undefined;
     this.now = now;
     this.fetchImpl = fetchImpl;
     this.delayImpl = delayImpl;
@@ -117,8 +118,12 @@ export class JsonRpcClient {
   async paceBatch({ signal } = {}) {
     if (this.batchPaceMs <= 0) return;
     if (signal?.aborted) throw signal.reason ?? new Error("rpc_batch_pacing_aborted");
-    await this.delayImpl(this.batchPaceMs);
+    const nowMs = this.now().getTime();
+    const elapsedMs = Number.isFinite(this.lastBatchStartedAt) ? nowMs - this.lastBatchStartedAt : this.batchPaceMs;
+    const waitMs = Math.max(0, this.batchPaceMs - elapsedMs);
+    if (waitMs > 0) await this.delayImpl(waitMs);
     if (signal?.aborted) throw signal.reason ?? new Error("rpc_batch_pacing_aborted");
+    this.lastBatchStartedAt = this.now().getTime();
   }
 
   async blockNumber(options = {}) {
