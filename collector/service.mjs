@@ -108,6 +108,7 @@ export class OnchainDiscoveryCollector {
 
     let cursor = Math.min(...ENABLED.map((entry) => state.cursors[entry.id].blockNumber));
     let chunks = 0;
+    const windows = [];
     while (cursor < confirmedHead && chunks < this.config.maximumChunksPerPass) {
       const maximumChunk = Math.min(...ENABLED.map((entry) => entry.confirmationPolicy.maximumChunkBlocks));
       const overlap = Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.overlapBlocks));
@@ -122,10 +123,18 @@ export class OnchainDiscoveryCollector {
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
       const confirmed = await verifyFactoryEvents(this.rpc, decoded);
+      windows.push({ confirmed, fromBlock, toBlock, malformedCount });
+      cursor = toBlock;
+      chunks += 1;
+    }
+    if (windows.length) {
       state = await this.store.transact("confirmed-log-reconciliation", (draft) => {
-        const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock);
+        let next = draft;
+        for (const window of windows) next = reconcileCanonicalWindow(next, window.confirmed, window.fromBlock, window.toBlock);
+        const confirmed = windows.flatMap((window) => window.confirmed);
+        const committedAt = new Date();
         for (const token of confirmed.flatMap((event) => [event.token0, event.token1])) {
-          if (!next.tokenMetadata[token]) next.metadataQueue = coalesceBoundedQueue(next.metadataQueue, [{ poolKey: token, tokenAddress: token, blockNumber: toBlock }], 256);
+          if (!next.tokenMetadata[token]) next.metadataQueue = coalesceBoundedQueue(next.metadataQueue, [{ poolKey: token, tokenAddress: token, blockNumber: cursor }], 256);
         }
         ensureEnrichmentState(next);
         const enrichmentJobs = confirmed.flatMap((event) => event.poolAddress ? [{
@@ -133,21 +142,19 @@ export class OnchainDiscoveryCollector {
           poolAddress: event.poolAddress,
           priority: 100,
           attempts: 0,
-          createdAt: new Date().toISOString(),
-          nextAttemptAt: new Date().toISOString()
+          createdAt: committedAt.toISOString(),
+          nextAttemptAt: committedAt.toISOString()
         }] : []);
         next.enrichmentQueue = coalesceEnrichmentQueue(next.enrichmentQueue, enrichmentJobs);
-        seedMetadataQueue(next, new Date());
-        seedOnchainQueue(next, new Date());
-        for (const entry of ENABLED) next.cursors[entry.id] = { blockNumber: toBlock, blockHash: undefined, updatedAt: new Date().toISOString() };
+        seedMetadataQueue(next, committedAt);
+        seedOnchainQueue(next, committedAt);
+        for (const entry of ENABLED) next.cursors[entry.id] = { blockNumber: cursor, blockHash: undefined, updatedAt: committedAt.toISOString() };
         next.currentHead = head;
         next.confirmedHead = confirmedHead;
-        next.counters.malformedRejected += malformedCount;
+        next.counters.malformedRejected += windows.reduce((total, window) => total + window.malformedCount, 0);
         next.health = buildHealth(next, head, confirmedHead, this.config.websocketUrl ? (this.websocket?.readyState === WebSocket.OPEN ? "websocket" : "reconnecting") : "confirmed_polling");
         return next;
       });
-      cursor = toBlock;
-      chunks += 1;
     }
     await this.drainMetadata();
     return this.store.read();

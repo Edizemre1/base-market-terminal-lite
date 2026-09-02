@@ -240,6 +240,42 @@ test("factory event verification is bounded and reuses block evidence", async ()
   assert.ok(verified.every((event) => event.blockTimestamp === "1970-01-01T00:01:40.000Z"));
 });
 
+test("one bounded scan pass commits all fetched windows atomically", async () => {
+  const state = initialState(NOW);
+  for (const cursor of Object.values(state.cursors)) cursor.blockNumber = 500;
+  let transactions = 0;
+  const ranges = [];
+  const store = {
+    read: () => structuredClone(state),
+    transact: async (_reason, mutator) => {
+      transactions += 1;
+      const next = await mutator(structuredClone(state));
+      Object.assign(state, next);
+      return structuredClone(state);
+    }
+  };
+  const subject = {
+    rpc: {
+      blockNumber: async () => 1_000,
+      getLogs: async ({ fromBlock, toBlock }) => {
+        ranges.push([fromBlock, toBlock]);
+        return [];
+      }
+    },
+    store,
+    config: { maximumChunksPerPass: 3 },
+    drainMetadata: async () => {},
+    websocket: undefined
+  };
+
+  await OnchainDiscoveryCollector.prototype.scanOnce.call(subject);
+
+  assert.deepEqual(ranges, [[485, 750], [735, 998]]);
+  assert.equal(transactions, 1);
+  assert.ok(Object.values(state.cursors).every((cursor) => cursor.blockNumber === 998));
+  assert.equal(state.health.backfillState, "caught_up");
+});
+
 function poolRecord(factoryId) {
   const registry = FACTORY_REGISTRY.find((entry) => entry.id === factoryId);
   return { poolKey: POOL, poolAddress: POOL, token0: TOKEN, token1: BASE_USDC, factoryId, factoryAddress: registry.address, status: "confirmed", verifiedSource: true, orphaned: false, observedAt: NOW.toISOString(), confirmedAt: NOW.toISOString(), blockNumber: 50_000_000, providers: ["onchain"] };
