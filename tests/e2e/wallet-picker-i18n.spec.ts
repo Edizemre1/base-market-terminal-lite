@@ -26,14 +26,19 @@ test.describe("wallet picker and terminal localization", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByTestId("live-wall-lane-new")).toContainText("New on Base");
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect/ }).click();
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
     await page.getByTestId("context-inspector").getByRole("button", { name: "Buy", exact: true }).click();
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
     await expect(page.getByTestId("trade-dock")).toContainText("Trade Dock");
     await page.keyboard.press("Escape");
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "none");
     await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(page.getByTestId("live-wall-lane-new")).toContainText("Base'te Yeni");
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /incele/i }).click();
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
     await page.getByTestId("context-inspector").getByRole("button", { name: "Al", exact: true }).click();
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
     await expect(page.getByTestId("trade-dock")).toContainText("İşlem Alanı");
   });
 
