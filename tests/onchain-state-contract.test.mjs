@@ -12,7 +12,7 @@ import {
   resolveOnchainPoolEvidence
 } from "../collector/onchain-state.mjs";
 import { enrichTokenMetadata, JsonRpcClient } from "../collector/rpc.mjs";
-import { OnchainDiscoveryCollector, verifyFactoryEvents } from "../collector/service.mjs";
+import { derivedCyclesReady, OnchainDiscoveryCollector, verifyFactoryEvents } from "../collector/service.mjs";
 import { initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-02T12:00:00.000Z");
@@ -300,6 +300,12 @@ test("one bounded scan pass commits all fetched windows atomically", async () =>
   assert.equal(transactions, 1);
   assert.ok(Object.values(state.cursors).every((cursor) => cursor.blockNumber === 998));
   assert.equal(state.health.backfillState, "caught_up");
+});
+
+test("derived pricing cycles wait for confirmed discovery catch-up", () => {
+  assert.equal(derivedCyclesReady({ health: { backfillState: "retrying" } }), false);
+  assert.equal(derivedCyclesReady({ health: { backfillState: "catching_up" } }), false);
+  assert.equal(derivedCyclesReady({ health: { backfillState: "caught_up" } }), true);
 });
 
 test("factory identity and block evidence use bounded RPC batches", async () => {

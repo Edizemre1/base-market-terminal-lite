@@ -18,6 +18,11 @@ import {
 
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
 const PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT = 8;
+const DERIVED_CYCLE_BACKFILL_DELAY_MS = 1_000;
+
+export function derivedCyclesReady(state) {
+  return state?.health?.backfillState === "caught_up";
+}
 
 export function resolveCollectorConfig(environment = process.env) {
   const httpUrl = environment.BASE_RPC_HTTP_URL?.trim() || "https://mainnet.base.org";
@@ -157,7 +162,7 @@ export class OnchainDiscoveryCollector {
         return next;
       });
     }
-    await this.drainMetadata();
+    if (derivedCyclesReady(state)) await this.drainMetadata();
     return this.store.read();
   }
 
@@ -240,6 +245,10 @@ export class OnchainDiscoveryCollector {
 
   async runOnchainStateLoop(signal) {
     while (this.running && !signal?.aborted) {
+      if (!derivedCyclesReady(this.store.state)) {
+        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
+        continue;
+      }
       const startedAt = Date.now();
       try { await this.runOnchainStateCycle(new Date(), signal); }
       catch (error) {
@@ -323,6 +332,10 @@ export class OnchainDiscoveryCollector {
 
   async runEnrichmentLoop(signal) {
     while (this.running && !signal?.aborted) {
+      if (!derivedCyclesReady(this.store.state)) {
+        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
+        continue;
+      }
       const startedAt = Date.now();
       try { await this.runEnrichmentCycle(); }
       catch (error) {
@@ -461,6 +474,10 @@ export class OnchainDiscoveryCollector {
 
   async runAnchorLoop(signal) {
     while (this.running && !signal?.aborted) {
+      if (!derivedCyclesReady(this.store.state)) {
+        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
+        continue;
+      }
       const startedAt = Date.now();
       const cycleController = new AbortController();
       const cycleSignal = signal ? AbortSignal.any([signal, cycleController.signal]) : cycleController.signal;
