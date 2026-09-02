@@ -207,7 +207,7 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
         firstSeenAt: earliestIso(current.firstSeenAt, pool.firstSeenAt),
         blockNumber: pool.blockNumber,
         onchainProvenance: provenance(pool),
-        metadataVerificationState: metadataVerification(result.state.tokenMetadata[pool.token0], result.state.tokenMetadata[pool.token1]),
+        metadataVerificationState: metadataVerification(result.state.tokenMetadata?.[pool.token0], result.state.tokenMetadata?.[pool.token1]),
         observedPriceUsd: onchainObserved ?? positive(pool.observedPricesUsd?.[currentBase]),
         observedPriceProvider: onchainObserved ? "onchain" : pool.providerEnrichment?.selectedProvider,
         observedPricePoolAddress: pool.poolAddress,

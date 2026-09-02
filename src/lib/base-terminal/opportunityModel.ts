@@ -340,7 +340,7 @@ function buildTokenOpportunity(
     : uniquePairs.some((pair) => pair.providerDiscoveryState === "pending") ? "pending"
       : uniquePairs.some((pair) => pair.providerDiscoveryState === "conflicting") ? "conflicting"
         : uniquePairs.some((pair) => pair.providerDiscoveryState === "not_found") ? "not_found" : "detected";
-  const metadataVerified = uniquePairs.some((pair) => pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified");
+  const metadataVerified = uniquePairs.some((pair) => pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified" || pair.onchainProvenance?.decimalsVerified === true);
   const priceConflict = uniquePairs.some((pair) => pair.priceReconciliation?.status === "conflict");
   const ranked = metadataVerified && !priceConflict && canonicalPriced && !primary.stale && bestLiquidityUsd !== undefined && bestLiquidityUsd >= MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd;
   const exclusionReason = priceConflict ? "price_conflict" : liquidityState === "conflicting_liquidity" || liquidityState === "stale_liquidity" ? liquidityState : !metadataVerified ? "token_metadata_pending" : canonicalPrice.reasonCode;
