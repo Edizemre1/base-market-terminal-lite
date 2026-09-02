@@ -223,10 +223,9 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
-export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal } = {}) {
+export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal, managerCodeEvidence = new Map() } = {}) {
   if (typeof rpc?.batchOutcomes !== "function") return Promise.all(pools.map((pool) => verifyPoolBinding(rpc, pool, pool.blockNumber)));
   const results = [];
-  const managerCodeEvidence = new Map();
   const boundedBatchSize = Math.min(2, Math.max(1, batchSize));
   for (let offset = 0; offset < pools.length; offset += boundedBatchSize) {
     const batch = pools.slice(offset, offset + boundedBatchSize);

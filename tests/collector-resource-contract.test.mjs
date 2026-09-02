@@ -91,7 +91,7 @@ test("pool binding verification paces each public RPC batch", async () => {
   assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
 });
 
-test("manager PoolId events reuse one factory bytecode proof per scan", async () => {
+test("manager PoolId events reuse one factory bytecode proof across live scans", async () => {
   let requests = 0;
   let calls = 0;
   let pacing = 0;
@@ -109,14 +109,17 @@ test("manager PoolId events reuse one factory bytecode proof per scan", async ()
     factoryAddress,
     blockNumber: 50_000_000 + index
   }));
+  const managerCodeEvidence = new Map();
 
-  const results = await verifyPoolBindings(rpc, pools);
+  const first = await verifyPoolBindings(rpc, pools, { managerCodeEvidence });
+  const second = await verifyPoolBindings(rpc, pools, { managerCodeEvidence });
 
   assert.equal(requests, 1);
   assert.equal(calls, 1);
   assert.equal(pacing, 1);
-  assert.equal(results.length, pools.length);
-  assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
+  assert.equal(first.length, pools.length);
+  assert.equal(second.length, pools.length);
+  assert.ok([...first, ...second].every((result) => result.ok && result.kind === "manager_pool_id"));
 });
 
 test("retryable getter failures retain verified factory-event and bytecode evidence", async () => {

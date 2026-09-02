@@ -88,6 +88,7 @@ export class OnchainDiscoveryCollector {
     this.websocketRequestId = 1;
     this.lastObservedHead = undefined;
     this.lastObservedConfirmedHead = undefined;
+    this.managerCodeEvidence = new Map();
   }
 
   async open() {
@@ -150,7 +151,7 @@ export class OnchainDiscoveryCollector {
       });
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
-      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded);
+      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 4, { managerCodeEvidence: this.managerCodeEvidence });
       windows.push({ confirmed, fromBlock, toBlock, malformedCount });
       cursor = toBlock;
       chunks += 1;
@@ -1035,9 +1036,9 @@ async function mapWithConcurrency(items, concurrency, operation) {
   return results;
 }
 
-export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal } = {}) {
+export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal, managerCodeEvidence } = {}) {
   if (typeof rpc?.batchOutcomes === "function") {
-    const bindings = await verifyPoolBindings(rpc, events, { signal });
+    const bindings = await verifyPoolBindings(rpc, events, { signal, managerCodeEvidence });
     if (bindings.some((binding) => !binding.ok && binding.retryable)) throw new Error("factory_binding_verification_unavailable");
     const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
     const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
