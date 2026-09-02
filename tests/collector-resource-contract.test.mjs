@@ -96,6 +96,28 @@ test("manager PoolId events reuse one factory bytecode proof per scan", async ()
   assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
 });
 
+test("retryable getter failures retain verified factory-event and bytecode evidence", async () => {
+  const rpc = {
+    async batchOutcomes(calls) {
+      return calls.map((call) => call.method === "eth_getCode"
+        ? { ok: true, value: "0x01" }
+        : { ok: false, reasonCode: "rpc_error_-32016", retryable: true });
+    }
+  };
+  const pool = {
+    poolAddress: `0x${"a".repeat(40)}`,
+    factoryAddress: `0x${"f".repeat(40)}`,
+    token0: TOKEN0,
+    token1: TOKEN1,
+    blockNumber: 50_000_000
+  };
+
+  const [result] = await verifyPoolBindings(rpc, [pool]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, "factory_event_and_code");
+});
+
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
   let requests = 0;
   const signal = AbortSignal.timeout(1_000);

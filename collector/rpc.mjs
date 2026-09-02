@@ -247,7 +247,9 @@ export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal } =
     });
     if (calls.length) await rpc.paceBatch?.({ signal });
     const outcomes = calls.length ? await rpc.batchOutcomes(calls, { signal }) : [];
-    const retryableFailure = outcomes.find((outcome) => !outcome?.ok && outcome?.retryable !== false);
+    const retryableFailure = layouts
+      .flatMap((layout) => layout.cachedCode ? [] : [outcomes[layout.codeIndex]])
+      .find((outcome) => !outcome?.ok && outcome?.retryable !== false);
     if (retryableFailure) {
       const reason = retryableFailure.reasonCode ?? "factory_binding_verification_unavailable";
       for (let index = offset; index < pools.length; index += 1) results.push({ ok: false, reason, retryable: true });
