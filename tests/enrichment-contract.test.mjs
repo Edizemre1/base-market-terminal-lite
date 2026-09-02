@@ -173,6 +173,22 @@ test("trusted anchor refresh has a dedicated loop independent of pool enrichment
   assert.equal(refreshes, 1);
 });
 
+test("trusted anchor loop survives an unexpected refresh rejection", async () => {
+  let refreshes = 0;
+  const subject = {
+    running: true,
+    provider: { circuitSnapshot: () => ({}) },
+    store: { transact: async (_reason, mutator) => { await mutator({ health: {}, priceAnchors: { wethUsdc: {} }, counters: { enrichmentFailure: 0 }, pools: {}, opportunities: [], enrichmentQueue: [] }); } },
+    refreshAnchorIfDue: async () => {
+      refreshes += 1;
+      if (refreshes === 1) throw new Error("transient store failure");
+      subject.running = false;
+    }
+  };
+  await OnchainDiscoveryCollector.prototype.runAnchorLoop.call(subject, new AbortController().signal);
+  assert.equal(refreshes, 2);
+});
+
 test("trusted anchor owns isolated provider and bounded RPC clients", () => {
   const providerClient = { circuitSnapshot: () => ({}) };
   const anchorProviderClient = { lookupWethPools: async () => [] };

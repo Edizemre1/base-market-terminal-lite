@@ -363,7 +363,18 @@ export class OnchainDiscoveryCollector {
   async runAnchorLoop(signal) {
     while (this.running && !signal?.aborted) {
       const startedAt = Date.now();
-      await this.refreshAnchorIfDue(new Date());
+      try {
+        await this.refreshAnchorIfDue(new Date());
+      } catch (error) {
+        await this.store.transact("trusted-anchor-loop-failure", (draft) => {
+          ensureEnrichmentState(draft);
+          const failedAt = new Date();
+          draft.health.lastAnchorLoopFailure = safeError(error);
+          draft.priceAnchors.wethUsdc.nextRefreshAt = new Date(failedAt.getTime() + 10_000).toISOString();
+          draft.counters.enrichmentFailure += 1;
+          refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
+        }).catch(() => {});
+      }
       if (!this.running || signal?.aborted) break;
       await delay(Math.max(250, 5_000 - (Date.now() - startedAt)), signal);
     }
@@ -797,7 +808,13 @@ function safeError(error) {
 
 function delay(milliseconds, signal) {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener("abort", finish, { once: true });
   });
 }
