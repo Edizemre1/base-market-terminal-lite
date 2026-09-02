@@ -19,6 +19,7 @@ import {
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
 const PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT = 8;
 const DERIVED_CYCLE_BACKFILL_DELAY_MS = 1_000;
+const MINIMUM_DISCOVERY_IDLE_MS = 3_000;
 const NORMAL_POLL_INTERVAL_MS = 10_000;
 const NORMAL_DERIVED_INTERVAL_MS = 30_000;
 
@@ -27,7 +28,7 @@ export function derivedCyclesReady(state) {
 }
 
 export function nextScanDelayMs(pollIntervalMs, elapsedMs) {
-  return Math.max(50, pollIntervalMs - Math.max(0, elapsedMs));
+  return Math.max(MINIMUM_DISCOVERY_IDLE_MS, pollIntervalMs - Math.max(0, elapsedMs));
 }
 
 function storeDerivedCyclesReady(store) {

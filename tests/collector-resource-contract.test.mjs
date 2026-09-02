@@ -30,7 +30,7 @@ test("normal collector cadence is measured start-to-start", () => {
   assert.equal(bounded.enrichmentIntervalMs, 120_000);
   assert.equal(bounded.discoveryBatchPaceMs, 3_000);
   assert.equal(nextScanDelayMs(config.pollIntervalMs, 2_500), 7_500);
-  assert.equal(nextScanDelayMs(config.pollIntervalMs, 12_000), 50);
+  assert.equal(nextScanDelayMs(config.pollIntervalMs, 12_000), 3_000);
 });
 
 test("discovery verification has an isolated bounded RPC client", () => {
