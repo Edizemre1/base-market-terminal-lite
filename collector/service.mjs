@@ -55,6 +55,12 @@ export class OnchainDiscoveryCollector {
   constructor(config = resolveCollectorConfig()) {
     this.config = config;
     this.rpc = new JsonRpcClient(config.httpUrl);
+    this.discoveryRpc = config.discoveryRpcClient ?? new JsonRpcClient(config.httpUrl, {
+      timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000),
+      retries: 1,
+      circuitFailureThreshold: 2,
+      circuitCooldownMs: 5_000
+    });
     this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
     // Anchor availability is a pricing safety boundary. Keep its provider
@@ -73,6 +79,8 @@ export class OnchainDiscoveryCollector {
     this.websocket = undefined;
     this.websocketReconnectTimer = undefined;
     this.websocketRequestId = 1;
+    this.lastObservedHead = undefined;
+    this.lastObservedConfirmedHead = undefined;
   }
 
   async open() {
@@ -104,6 +112,8 @@ export class OnchainDiscoveryCollector {
     const head = await this.rpc.blockNumber();
     const confirmations = Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.confirmations));
     const confirmedHead = Math.max(0, head - confirmations);
+    this.lastObservedHead = head;
+    this.lastObservedConfirmedHead = confirmedHead;
     let state = this.store.read();
     const cursors = ENABLED.map((entry) => state.cursors?.[entry.id]?.blockNumber ?? 0);
     if (cursors.some((cursor) => cursor <= 0)) {
@@ -132,7 +142,7 @@ export class OnchainDiscoveryCollector {
       });
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
-      const confirmed = await verifyFactoryEvents(this.rpc, decoded);
+      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded);
       windows.push({ confirmed, fromBlock, toBlock, malformedCount });
       cursor = toBlock;
       chunks += 1;
@@ -163,6 +173,7 @@ export class OnchainDiscoveryCollector {
         next.confirmedHead = confirmedHead;
         next.counters.malformedRejected += windows.reduce((total, window) => total + window.malformedCount, 0);
         next.health = buildHealth(next, head, confirmedHead, this.config.websocketUrl ? (this.websocket?.readyState === WebSocket.OPEN ? "websocket" : "reconnecting") : "confirmed_polling");
+        next.health.lastFailure = undefined;
         return next;
       });
     }
@@ -654,9 +665,18 @@ export class OnchainDiscoveryCollector {
 
   async recordFailure(error) {
     await this.store.transact("collector-scan-failure", (draft) => {
+      if (Number.isInteger(this.lastObservedHead)) draft.currentHead = this.lastObservedHead;
+      if (Number.isInteger(this.lastObservedConfirmedHead)) draft.confirmedHead = this.lastObservedConfirmedHead;
+      const cursors = ENABLED.map((entry) => draft.cursors?.[entry.id]?.blockNumber ?? 0);
+      const cursor = cursors.length ? Math.min(...cursors) : 0;
+      const lagBlocks = Math.max(0, (draft.confirmedHead ?? 0) - cursor);
       draft.health.ready = false;
       draft.health.backfillState = "retrying";
       draft.health.lastFailure = safeError(error);
+      draft.health.currentHead = draft.currentHead;
+      draft.health.confirmedCursor = cursor;
+      draft.health.lagBlocks = lagBlocks;
+      draft.health.lagSeconds = lagBlocks * 2;
       if (this.config.websocketUrl && this.websocket?.readyState !== WebSocket.OPEN) draft.health.mode = "reconnecting";
     });
   }
@@ -1007,16 +1027,16 @@ async function mapWithConcurrency(items, concurrency, operation) {
   return results;
 }
 
-export async function verifyFactoryEvents(rpc, events, concurrency = 4) {
+export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal } = {}) {
   if (typeof rpc?.batchOutcomes === "function") {
-    const bindings = await verifyPoolBindings(rpc, events);
+    const bindings = await verifyPoolBindings(rpc, events, { signal });
     if (bindings.some((binding) => !binding.ok && binding.retryable)) throw new Error("factory_binding_verification_unavailable");
     const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
     const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
     const blockRows = new Map();
     for (let offset = 0; offset < blockNumbers.length; offset += PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT) {
       const numbers = blockNumbers.slice(offset, offset + PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT);
-      const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })));
+      const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })), { signal });
       if (outcomes.some((outcome) => !outcome.ok)) throw new Error("factory_block_evidence_unavailable");
       for (let index = 0; index < numbers.length; index += 1) blockRows.set(numbers[index], outcomes[index].value);
     }

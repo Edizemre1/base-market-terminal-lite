@@ -210,7 +210,7 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
-export async function verifyPoolBindings(rpc, pools, { batchSize = 2 } = {}) {
+export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal } = {}) {
   if (typeof rpc?.batchOutcomes !== "function") return Promise.all(pools.map((pool) => verifyPoolBinding(rpc, pool, pool.blockNumber)));
   const results = [];
   const boundedBatchSize = Math.min(2, Math.max(1, batchSize));
@@ -225,7 +225,13 @@ export async function verifyPoolBindings(rpc, pools, { batchSize = 2 } = {}) {
       const factoryIndex = calls.push({ method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.factory }, toHex(pool.blockNumber)] }) - 1;
       return { codeIndex, token0Index, token1Index, factoryIndex };
     });
-    const outcomes = await rpc.batchOutcomes(calls);
+    const outcomes = await rpc.batchOutcomes(calls, { signal });
+    const retryableFailure = outcomes.find((outcome) => !outcome?.ok && outcome?.retryable !== false);
+    if (retryableFailure) {
+      const reason = retryableFailure.reasonCode ?? "factory_binding_verification_unavailable";
+      for (let index = offset; index < pools.length; index += 1) results.push({ ok: false, reason, retryable: true });
+      break;
+    }
     for (let index = 0; index < batch.length; index += 1) {
       const pool = batch[index];
       const layout = layouts[index];
