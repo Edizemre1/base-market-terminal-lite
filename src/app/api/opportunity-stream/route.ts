@@ -11,6 +11,7 @@ export function GET(request: Request) {
     return Response.json({ ok: false, error: "Opportunity stream is at its bounded client limit." }, { status: 503, headers: { "Retry-After": "5" } });
   }
   let lastEventId = request.headers.get("last-event-id")?.trim() || undefined;
+  let initialPushTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let release = () => {};
@@ -23,6 +24,7 @@ export function GET(request: Request) {
       const close = () => {
         if (closed) return;
         closed = true;
+        if (initialPushTimer) clearTimeout(initialPushTimer);
         if (pollTimer) clearInterval(pollTimer);
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         release();
@@ -58,7 +60,11 @@ export function GET(request: Request) {
         }
       };
       controller.enqueue(encoder.encode("retry: 3000\n\n"));
-      push();
+      // Return the SSE response and flush its headers before reading and
+      // integrity-checking the bounded durable snapshot. A busy collector can
+      // make that synchronous verification expensive, but it must never block
+      // the stream handshake.
+      initialPushTimer = setTimeout(push, 0);
       pollTimer = setInterval(push, 1_000);
       heartbeatTimer = setInterval(() => {
         if (!closed) controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`));
@@ -67,6 +73,7 @@ export function GET(request: Request) {
     },
     cancel() {
       closed = true;
+      if (initialPushTimer) clearTimeout(initialPushTimer);
       if (pollTimer) clearInterval(pollTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       release();
