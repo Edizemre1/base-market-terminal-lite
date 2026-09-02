@@ -12,7 +12,7 @@ import {
   resolveOnchainPoolEvidence
 } from "../collector/onchain-state.mjs";
 import { enrichTokenMetadata, JsonRpcClient } from "../collector/rpc.mjs";
-import { OnchainDiscoveryCollector } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, verifyFactoryEvents } from "../collector/service.mjs";
 import { initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-02T12:00:00.000Z");
@@ -199,6 +199,45 @@ test("new semantic SSE transitions emit once and Last-Event-ID identity stays st
   for (const type of ["pool_onchain_state_observed", "opportunity_observed_price", "opportunity_canonical_price", "opportunity_liquidity_resolved", "opportunity_band_changed"]) assert.equal(relay.eventRing.filter((event) => event.type === type).length, 1, type);
   const ids = relay.eventRing.map((event) => Number(event.id));
   assert.deepEqual(ids, [...ids].sort((left, right) => left - right));
+});
+
+test("factory event verification is bounded and reuses block evidence", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let blockCalls = 0;
+  const rpc = {
+    async getCode() {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return "0x01";
+    },
+    async batch() {
+      throw new Error("getter surface unavailable");
+    },
+    async getBlock() {
+      blockCalls += 1;
+      return { timestamp: "0x64" };
+    }
+  };
+  const factoryAddress = FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v2").address;
+  const events = Array.from({ length: 9 }, (_, index) => ({
+    poolKey: `pool-${index}`,
+    poolAddress: `0x${String(index + 1).padStart(40, "0")}`,
+    factoryAddress,
+    token0: TOKEN,
+    token1: BASE_USDC,
+    blockNumber: 123
+  }));
+
+  const verified = await verifyFactoryEvents(rpc, events, 4);
+
+  assert.equal(verified.length, events.length);
+  assert.equal(blockCalls, 1);
+  assert.ok(maximumActive > 1);
+  assert.ok(maximumActive <= 4);
+  assert.ok(verified.every((event) => event.blockTimestamp === "1970-01-01T00:01:40.000Z"));
 });
 
 function poolRecord(factoryId) {

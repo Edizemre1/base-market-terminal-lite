@@ -121,19 +121,7 @@ export class OnchainDiscoveryCollector {
       });
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
-      const confirmed = [];
-      for (const event of decoded) {
-        const binding = await verifyPoolBinding(this.rpc, event, event.blockNumber);
-        if (!binding.ok) continue;
-        const block = await this.rpc.getBlock(event.blockNumber);
-        const timestampSeconds = block?.timestamp ? Number.parseInt(block.timestamp, 16) : undefined;
-        confirmed.push({
-          ...event,
-          provisional: false,
-          verifiedBinding: binding.kind,
-          blockTimestamp: Number.isFinite(timestampSeconds) ? new Date(timestampSeconds * 1_000).toISOString() : undefined
-        });
-      }
+      const confirmed = await verifyFactoryEvents(this.rpc, decoded);
       state = await this.store.transact("confirmed-log-reconciliation", (draft) => {
         const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock);
         for (const token of confirmed.flatMap((event) => [event.token0, event.token1])) {
@@ -995,6 +983,28 @@ async function mapWithConcurrency(items, concurrency, operation) {
   });
   await Promise.all(workers);
   return results;
+}
+
+export async function verifyFactoryEvents(rpc, events, concurrency = 4) {
+  const blockCache = new Map();
+  const verified = await mapWithConcurrency(events, concurrency, async (event) => {
+    const binding = await verifyPoolBinding(rpc, event, event.blockNumber);
+    if (!binding.ok) return undefined;
+    let blockPromise = blockCache.get(event.blockNumber);
+    if (!blockPromise) {
+      blockPromise = rpc.getBlock(event.blockNumber);
+      blockCache.set(event.blockNumber, blockPromise);
+    }
+    const block = await blockPromise;
+    const timestampSeconds = block?.timestamp ? Number.parseInt(block.timestamp, 16) : undefined;
+    return {
+      ...event,
+      provisional: false,
+      verifiedBinding: binding.kind,
+      blockTimestamp: Number.isFinite(timestampSeconds) ? new Date(timestampSeconds * 1_000).toISOString() : undefined
+    };
+  });
+  return verified.filter(Boolean);
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {
