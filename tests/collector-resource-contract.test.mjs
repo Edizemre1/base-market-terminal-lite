@@ -68,6 +68,34 @@ test("pool binding verification paces each public RPC batch", async () => {
   assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
 });
 
+test("manager PoolId events reuse one factory bytecode proof per scan", async () => {
+  let requests = 0;
+  let calls = 0;
+  let pacing = 0;
+  const factoryAddress = `0x${"f".repeat(40)}`;
+  const rpc = {
+    async paceBatch() { pacing += 1; },
+    async batchOutcomes(batch) {
+      requests += 1;
+      calls += batch.length;
+      return batch.map(() => ({ ok: true, value: "0x01" }));
+    }
+  };
+  const pools = Array.from({ length: 6 }, (_, index) => ({
+    poolKey: `manager-pool-${index}`,
+    factoryAddress,
+    blockNumber: 50_000_000 + index
+  }));
+
+  const results = await verifyPoolBindings(rpc, pools);
+
+  assert.equal(requests, 1);
+  assert.equal(calls, 1);
+  assert.equal(pacing, 1);
+  assert.equal(results.length, pools.length);
+  assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
+});
+
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
   let requests = 0;
   const signal = AbortSignal.timeout(1_000);
