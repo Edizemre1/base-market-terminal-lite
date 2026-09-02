@@ -199,6 +199,55 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
+export async function verifyPoolBindings(rpc, pools, { batchSize = 12 } = {}) {
+  if (typeof rpc?.batchOutcomes !== "function") return Promise.all(pools.map((pool) => verifyPoolBinding(rpc, pool, pool.blockNumber)));
+  const results = [];
+  const boundedBatchSize = Math.min(12, Math.max(1, batchSize));
+  for (let offset = 0; offset < pools.length; offset += boundedBatchSize) {
+    const batch = pools.slice(offset, offset + boundedBatchSize);
+    const calls = [];
+    const layouts = batch.map((pool) => {
+      const codeIndex = calls.push({ method: "eth_getCode", params: [pool.poolAddress ?? pool.factoryAddress, toHex(pool.blockNumber)] }) - 1;
+      if (!pool.poolAddress) return { codeIndex };
+      const token0Index = calls.push({ method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.token0 }, toHex(pool.blockNumber)] }) - 1;
+      const token1Index = calls.push({ method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.token1 }, toHex(pool.blockNumber)] }) - 1;
+      const factoryIndex = calls.push({ method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.factory }, toHex(pool.blockNumber)] }) - 1;
+      return { codeIndex, token0Index, token1Index, factoryIndex };
+    });
+    const outcomes = await rpc.batchOutcomes(calls);
+    for (let index = 0; index < batch.length; index += 1) {
+      const pool = batch[index];
+      const layout = layouts[index];
+      const code = outcomes[layout.codeIndex];
+      if (!code?.ok) {
+        results.push({ ok: false, reason: code?.reasonCode ?? "contract_code_unavailable", retryable: code?.retryable !== false });
+        continue;
+      }
+      if (!code.value || code.value === "0x") {
+        results.push({ ok: false, reason: "contract_code_missing", retryable: false });
+        continue;
+      }
+      if (!pool.poolAddress) {
+        results.push({ ok: true, kind: "manager_pool_id" });
+        continue;
+      }
+      const getters = [outcomes[layout.token0Index], outcomes[layout.token1Index], outcomes[layout.factoryIndex]];
+      if (getters.some((outcome) => !outcome?.ok)) {
+        results.push({ ok: true, kind: "factory_event_and_code" });
+        continue;
+      }
+      const token0 = decodeAbiAddress(getters[0].value);
+      const token1 = decodeAbiAddress(getters[1].value);
+      const factory = decodeAbiAddress(getters[2].value);
+      if (token0 && token0 !== pool.token0) results.push({ ok: false, reason: "token0_mismatch", retryable: false });
+      else if (token1 && token1 !== pool.token1) results.push({ ok: false, reason: "token1_mismatch", retryable: false });
+      else if (factory && factory !== pool.factoryAddress) results.push({ ok: false, reason: "factory_mismatch", retryable: false });
+      else results.push({ ok: true, kind: "pool_contract", token0, token1, factory });
+    }
+  }
+  return results;
+}
+
 export async function inspectRegisteredPool(rpc, poolAddress, block = "latest", options = {}) {
   const address = normalizeAddress(poolAddress);
   if (!address) return { ok: false, reason: "malformed_pool_address", retryable: false };

@@ -276,6 +276,39 @@ test("one bounded scan pass commits all fetched windows atomically", async () =>
   assert.equal(state.health.backfillState, "caught_up");
 });
 
+test("factory identity and block evidence use bounded RPC batches", async () => {
+  const factoryAddress = FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v2").address;
+  const events = Array.from({ length: 15 }, (_, index) => ({
+    poolKey: `batched-pool-${index}`,
+    poolAddress: `0x${String(index + 101).padStart(40, "0")}`,
+    factoryAddress,
+    token0: TOKEN,
+    token1: BASE_USDC,
+    blockNumber: 200 + index
+  }));
+  const requestSizes = [];
+  const rpc = {
+    async batchOutcomes(calls) {
+      requestSizes.push(calls.length);
+      return calls.map((call) => {
+        if (call.method === "eth_getCode") return { ok: true, value: "0x01" };
+        if (call.method === "eth_getBlockByNumber") return { ok: true, value: { timestamp: "0x64" } };
+        const selector = call.params[0].data;
+        const value = selector === "0x0dfe1681" ? addressWord(TOKEN)
+          : selector === "0xd21220a7" ? addressWord(BASE_USDC)
+            : addressWord(factoryAddress);
+        return { ok: true, value: `0x${value}` };
+      });
+    }
+  };
+
+  const verified = await verifyFactoryEvents(rpc, events);
+
+  assert.equal(verified.length, events.length);
+  assert.deepEqual(requestSizes, [48, 12, 15]);
+  assert.ok(requestSizes.every((size) => size <= 50));
+});
+
 function poolRecord(factoryId) {
   const registry = FACTORY_REGISTRY.find((entry) => entry.id === factoryId);
   return { poolKey: POOL, poolAddress: POOL, token0: TOKEN, token1: BASE_USDC, factoryId, factoryAddress: registry.address, status: "confirmed", verifiedSource: true, orphaned: false, observedAt: NOW.toISOString(), confirmedAt: NOW.toISOString(), blockNumber: 50_000_000, providers: ["onchain"] };

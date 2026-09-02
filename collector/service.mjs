@@ -1,6 +1,6 @@
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
 import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, coalesceBoundedQueue, decodeFactoryLog, reconcileCanonicalWindow } from "./model.mjs";
-import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding } from "./rpc.mjs";
+import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
 import { ONCHAIN_STATE_REFRESH_MS, acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState } from "./onchain-state.mjs";
 import {
@@ -993,6 +993,29 @@ async function mapWithConcurrency(items, concurrency, operation) {
 }
 
 export async function verifyFactoryEvents(rpc, events, concurrency = 4) {
+  if (typeof rpc?.batchOutcomes === "function") {
+    const bindings = await verifyPoolBindings(rpc, events);
+    if (bindings.some((binding) => !binding.ok && binding.retryable)) throw new Error("factory_binding_verification_unavailable");
+    const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
+    const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
+    const blockRows = new Map();
+    for (let offset = 0; offset < blockNumbers.length; offset += 50) {
+      const numbers = blockNumbers.slice(offset, offset + 50);
+      const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })));
+      if (outcomes.some((outcome) => !outcome.ok)) throw new Error("factory_block_evidence_unavailable");
+      for (let index = 0; index < numbers.length; index += 1) blockRows.set(numbers[index], outcomes[index].value);
+    }
+    return accepted.map(({ event, binding }) => {
+      const block = blockRows.get(event.blockNumber);
+      const timestampSeconds = block?.timestamp ? Number.parseInt(block.timestamp, 16) : undefined;
+      return {
+        ...event,
+        provisional: false,
+        verifiedBinding: binding.kind,
+        blockTimestamp: Number.isFinite(timestampSeconds) ? new Date(timestampSeconds * 1_000).toISOString() : undefined
+      };
+    });
+  }
   const blockCache = new Map();
   const verified = await mapWithConcurrency(events, concurrency, async (event) => {
     const binding = await verifyPoolBinding(rpc, event, event.blockNumber);
