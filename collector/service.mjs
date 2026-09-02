@@ -416,6 +416,7 @@ export class OnchainDiscoveryCollector {
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
         let pool = trustedAnchorPoolIdentity(current, observation.poolAddress);
+        let onchainState;
         if (!pool) {
           const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest", { signal });
           if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
@@ -428,8 +429,8 @@ export class OnchainDiscoveryCollector {
             factoryAddress: identity.registry.address,
             protocolVersion: identity.registry.protocolVersion
           };
+          onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest", { signal });
         }
-        const onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest", { signal });
         const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
         const canonicalRate = pool.token0 === BASE_WETH ? joined.priceToken1PerToken0 : joined.priceToken1PerToken0 > 0 ? 1 / joined.priceToken1PerToken0 : undefined;

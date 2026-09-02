@@ -230,6 +230,46 @@ test("trusted anchor provider lookup receives the cycle abort signal", async () 
   assert.equal(requestSignal.aborted, true);
 });
 
+test("trusted immutable anchor identity refreshes without repeating RPC validation", async () => {
+  const now = new Date();
+  const observedAt = now.toISOString();
+  let state = initialState(now);
+  state.currentHead = 1;
+  state.tokenMetadata = { [BASE_WETH]: { decimals: 18 }, [BASE_USDC]: { decimals: 6 } };
+  state.priceAnchors.wethUsdc = resolveWethUsdcAnchor([anchorCandidate({ observedAt })], now);
+  let rpcCalls = 0;
+  const subject = {
+    anchorProvider: {
+      lookupWethPools: async () => [providerObservation({
+        poolAddress: POOL,
+        baseTokenAddress: BASE_WETH,
+        quoteTokenAddress: BASE_USDC,
+        priceNative: 2_400,
+        priceUsd: 2_400,
+        liquidityUsd: 100_000,
+        observedAt,
+        receivedAt: observedAt
+      })]
+    },
+    anchorRpc: new Proxy({}, { get: () => () => { rpcCalls += 1; throw new Error("trusted refresh must not use RPC"); } }),
+    provider: { circuitSnapshot: () => ({}) },
+    store: {
+      read: () => structuredClone(state),
+      transact: async (_reason, mutator) => {
+        const draft = structuredClone(state);
+        await mutator(draft);
+        state = draft;
+        return structuredClone(state);
+      }
+    },
+    publishSemanticDeltas: async (_before, after) => after
+  };
+  await OnchainDiscoveryCollector.prototype.refreshAnchorIfDue.call(subject, now);
+  assert.equal(rpcCalls, 0);
+  assert.equal(state.priceAnchors.wethUsdc.status, "ready");
+  assert.equal(state.priceAnchors.wethUsdc.observedAt, observedAt);
+});
+
 test("trusted anchor owns isolated provider and bounded RPC clients", () => {
   const providerClient = { circuitSnapshot: () => ({}) };
   const anchorProviderClient = { lookupWethPools: async () => [] };
