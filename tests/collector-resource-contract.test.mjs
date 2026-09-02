@@ -6,14 +6,14 @@ import path from "node:path";
 import { FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { appendRelayEvent } from "../collector/model.mjs";
 import { verifyPoolBindings } from "../collector/rpc.mjs";
-import { OnchainDiscoveryCollector, resolveCollectorConfig } from "../collector/service.mjs";
+import { nextScanDelayMs, OnchainDiscoveryCollector, resolveCollectorConfig } from "../collector/service.mjs";
 import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-02T20:00:00.000Z");
 const TOKEN0 = "0x1111111111111111111111111111111111111111";
 const TOKEN1 = "0x2222222222222222222222222222222222222222";
 
-test("normal collector cadence leaves an idle window after durable work", () => {
+test("normal collector cadence is measured start-to-start", () => {
   const config = resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" });
   assert.equal(config.pollIntervalMs, 10_000);
   assert.equal(config.onchainStateIntervalMs, 30_000);
@@ -29,6 +29,8 @@ test("normal collector cadence leaves an idle window after durable work", () => 
   assert.equal(bounded.onchainStateIntervalMs, 120_000);
   assert.equal(bounded.enrichmentIntervalMs, 120_000);
   assert.equal(bounded.discoveryBatchPaceMs, 3_000);
+  assert.equal(nextScanDelayMs(config.pollIntervalMs, 2_500), 7_500);
+  assert.equal(nextScanDelayMs(config.pollIntervalMs, 12_000), 50);
 });
 
 test("discovery verification has an isolated bounded RPC client", () => {

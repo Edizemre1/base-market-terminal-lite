@@ -26,6 +26,10 @@ export function derivedCyclesReady(state) {
   return state?.health?.backfillState === "caught_up";
 }
 
+export function nextScanDelayMs(pollIntervalMs, elapsedMs) {
+  return Math.max(50, pollIntervalMs - Math.max(0, elapsedMs));
+}
+
 function storeDerivedCyclesReady(store) {
   return store?.state ? derivedCyclesReady(store.state) : true;
 }
@@ -103,9 +107,10 @@ export class OnchainDiscoveryCollector {
     const anchor = this.runAnchorLoop(signal);
     const onchainState = this.runOnchainStateLoop(signal);
     while (this.running && !signal?.aborted) {
+      const scanStartedAt = Date.now();
       try { await this.scanOnce(); }
       catch (error) { await this.recordFailure(error); }
-      await delay(Math.max(50, this.config.pollIntervalMs), signal);
+      await delay(nextScanDelayMs(this.config.pollIntervalMs, Date.now() - scanStartedAt), signal);
     }
     await Promise.all([enrichment, anchor, onchainState]);
   }
