@@ -184,6 +184,32 @@ test("RPC circuit opens on bounded timeout and recovers after cooldown", async (
   assert.equal(client.circuitSnapshot().state, "closed");
 });
 
+test("RPC batch retries retryable JSON-RPC row errors with bounded backoff", async () => {
+  let requests = 0;
+  const delays = [];
+  const client = new JsonRpcClient("https://rpc.invalid", {
+    retries: 2,
+    delayImpl: async (milliseconds) => { delays.push(milliseconds); },
+    fetchImpl: async (_url, request) => {
+      requests += 1;
+      const rows = JSON.parse(request.body);
+      return {
+        ok: true,
+        json: async () => rows.map(({ id }) => requests === 1
+          ? { jsonrpc: "2.0", id, error: { code: -32016, message: "transient execution timeout" } }
+          : { jsonrpc: "2.0", id, result: "0x1" })
+      };
+    }
+  });
+
+  const [outcome] = await client.batchOutcomes([{ method: "eth_blockNumber", params: [] }]);
+
+  assert.equal(outcome.ok, true);
+  assert.equal(requests, 2);
+  assert.deepEqual(delays, [250]);
+  assert.equal(client.circuitSnapshot().retries, 1);
+});
+
 test("new semantic SSE transitions emit once and Last-Event-ID identity stays stable", async () => {
   const before = initialState(NOW);
   before.pools[POOL] = poolRecord("uniswap-v2");
