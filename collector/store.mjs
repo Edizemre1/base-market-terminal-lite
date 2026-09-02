@@ -42,13 +42,13 @@ export class DurableDiscoveryStore {
     return structuredClone(this.state);
   }
 
-  async transact(reason, mutator) {
-    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator));
+  async transact(reason, mutator, afterDerive) {
+    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator, afterDerive));
     this.transactionTail = operation.catch(() => {});
     return operation;
   }
 
-  async performTransaction(reason, mutator) {
+  async performTransaction(reason, mutator, afterDerive) {
     if (!this.state || this.closed) throw new Error("Store is not writable");
     const transactionId = randomUUID();
     const beforeDigest = this.state.integrity.digest;
@@ -63,6 +63,8 @@ export class DurableDiscoveryStore {
     resolveOnchainPoolEvidence(next, new Date(next.updatedAt));
     next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
     synchronizeDerivedHealth(next);
+    if (afterDerive) await afterDerive(next);
+    enforceRetention(next);
     next.integrity = createIntegrity(next);
     const prepare = { type: "prepare", transactionId, at: next.updatedAt, reason, beforeDigest, afterDigest: next.integrity.digest };
     await appendDurableLine(this.walPath, prepare);

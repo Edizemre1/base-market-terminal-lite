@@ -19,6 +19,8 @@ import {
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
 const PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT = 8;
 const DERIVED_CYCLE_BACKFILL_DELAY_MS = 1_000;
+const NORMAL_POLL_INTERVAL_MS = 10_000;
+const NORMAL_DERIVED_INTERVAL_MS = 30_000;
 
 export function derivedCyclesReady(state) {
   return state?.health?.backfillState === "caught_up";
@@ -35,14 +37,14 @@ export function resolveCollectorConfig(environment = process.env) {
     httpUrl,
     websocketUrl: websocketUrl && /^wss?:\/\//i.test(websocketUrl) ? websocketUrl : undefined,
     storeDirectory: environment.ONCHAIN_STORE_PATH?.trim() || ".data/onchain-discovery",
-    pollIntervalMs: boundedInteger(environment.ONCHAIN_POLL_INTERVAL_MS, 3_000, 1_000, 60_000),
+    pollIntervalMs: boundedInteger(environment.ONCHAIN_POLL_INTERVAL_MS, NORMAL_POLL_INTERVAL_MS, 1_000, 60_000),
     bootstrapBlocks: boundedInteger(environment.ONCHAIN_BOOTSTRAP_BLOCKS, 2_000, 64, 10_000),
     maximumChunksPerPass: boundedInteger(environment.ONCHAIN_MAX_CHUNKS_PER_PASS, 4, 1, 16),
     metadataBatchSize: boundedInteger(environment.ONCHAIN_METADATA_BATCH_SIZE, 12, 1, 32),
     onchainStateBatchSize: boundedInteger(environment.ONCHAIN_STATE_BATCH_SIZE, 4, 1, 12),
-    onchainStateIntervalMs: boundedInteger(environment.ONCHAIN_STATE_INTERVAL_MS, 2_000, 500, 30_000),
+    onchainStateIntervalMs: boundedInteger(environment.ONCHAIN_STATE_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
     enrichmentBatchSize: boundedInteger(environment.ONCHAIN_ENRICHMENT_BATCH_SIZE, 4, 1, 8),
-    enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, 2_000, 500, 30_000),
+    enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
     providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
     anchorCycleTimeoutMs: boundedInteger(environment.ONCHAIN_ANCHOR_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
     anchorLoopIntervalMs: 5_000
@@ -91,11 +93,9 @@ export class OnchainDiscoveryCollector {
     const anchor = this.runAnchorLoop(signal);
     const onchainState = this.runOnchainStateLoop(signal);
     while (this.running && !signal?.aborted) {
-      const startedAt = Date.now();
       try { await this.scanOnce(); }
       catch (error) { await this.recordFailure(error); }
-      const remaining = Math.max(50, this.config.pollIntervalMs - (Date.now() - startedAt));
-      await delay(remaining, signal);
+      await delay(Math.max(50, this.config.pollIntervalMs), signal);
     }
     await Promise.all([enrichment, anchor, onchainState]);
   }
@@ -253,7 +253,6 @@ export class OnchainDiscoveryCollector {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
-      const startedAt = Date.now();
       try { await this.runOnchainStateCycle(new Date(), signal); }
       catch (error) {
         await this.store.transact("onchain-state-cycle-failure", (draft) => {
@@ -263,7 +262,7 @@ export class OnchainDiscoveryCollector {
           draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
         }).catch(() => {});
       }
-      await delay(Math.max(50, this.config.onchainStateIntervalMs - (Date.now() - startedAt)), signal);
+      await delay(Math.max(50, this.config.onchainStateIntervalMs), signal);
     }
   }
 
@@ -294,6 +293,7 @@ export class OnchainDiscoveryCollector {
         return { item, state: { ...unsupportedOnchainState(pool, now), status: "retryable", adapterFamily: adapter.adapterFamily, protocolFamily: adapter.protocolFamily, confidence: "unavailable", reasonCode: error?.reasonCode ?? "onchain_state_read_failed", retryable: true } };
       }
     }));
+    const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
     const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
       ensureEnrichmentState(draft);
       const remove = new Set();
@@ -329,9 +329,8 @@ export class OnchainDiscoveryCollector {
       draft.health.onchainQueueDepth = draft.onchainQueue.length;
       draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
       draft.health.lastOnchainStateCycle = now.toISOString();
-    });
-    await this.publishSemanticDeltas(before, after, outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]));
-    return this.store.read();
+    }, (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
+    return after;
   }
 
   async runEnrichmentLoop(signal) {
@@ -340,7 +339,6 @@ export class OnchainDiscoveryCollector {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
-      const startedAt = Date.now();
       try { await this.runEnrichmentCycle(); }
       catch (error) {
         await this.store.transact("enrichment-cycle-failure", (draft) => {
@@ -350,7 +348,7 @@ export class OnchainDiscoveryCollector {
           refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
         }).catch(() => {});
       }
-      await delay(Math.max(50, this.config.enrichmentIntervalMs - (Date.now() - startedAt)), signal);
+      await delay(Math.max(50, this.config.enrichmentIntervalMs), signal);
     }
   }
 
@@ -390,6 +388,7 @@ export class OnchainDiscoveryCollector {
         return { item, status: "failed", reasonCode: error?.reasonCode ?? "enrichment_failure", retryable: Boolean(error?.retryable) };
       }
     }));
+    const touchedPoolKeys = outcomes.map((outcome) => outcome.item.poolKey);
     const after = await this.store.transact("bounded-pool-financial-enrichment", (draft) => {
       ensureEnrichmentState(draft);
       const completed = new Set();
@@ -471,9 +470,8 @@ export class OnchainDiscoveryCollector {
       }
       draft.enrichmentQueue = draft.enrichmentQueue.filter((item) => !completed.has(item.poolKey));
       refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-    });
-    await this.publishSemanticDeltas(before, after, outcomes.map((outcome) => outcome.item.poolKey));
-    return this.store.read();
+    }, (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
+    return after;
   }
 
   async runAnchorLoop(signal) {
@@ -579,8 +577,7 @@ export class OnchainDiscoveryCollector {
         draft.counters.staleAnchorRejected += anchor.rejected.filter((item) => item.reasonCode === "stale_anchor").length;
         draft.counters.dustRejected += anchor.rejected.filter((item) => item.reasonCode === "dust_anchor_liquidity").length;
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-      });
-      await this.publishSemanticDeltas(before, after, []);
+      }, (draft) => appendSemanticDeltas(draft, before, []));
       return after;
     } catch (error) {
       return this.store.transact("trusted-anchor-refresh-failure", (draft) => {
@@ -598,48 +595,8 @@ export class OnchainDiscoveryCollector {
     }
   }
 
-  async publishSemanticDeltas(before, after, touchedPoolKeys) {
-    const events = [];
-    for (const poolKey of touchedPoolKeys) {
-      const previousPool = before.pools?.[poolKey];
-      const currentPool = after.pools?.[poolKey];
-      const previous = before.pools?.[poolKey]?.providerEnrichment?.status;
-      const current = after.pools?.[poolKey]?.providerEnrichment?.status;
-      if (previous !== "matched" && current === "matched") {
-        events.push({ type: "pool_enriched", data: { poolKey, providers: after.pools[poolKey].providerEnrichment.providers } });
-        events.push({ type: "provider_pool_found", data: { poolKey, providerIndexedAt: after.pools[poolKey].providerIndexedAt } });
-      }
-      if (previous !== "pending" && current === "pending") events.push({ type: "provider_pool_pending", data: { poolKey, reasonCode: after.pools[poolKey].providerEnrichment.reasonCode } });
-      if (semanticOnchainState(previousPool?.onchainState) !== semanticOnchainState(currentPool?.onchainState)) {
-        events.push({ type: "pool_onchain_state_observed", data: { poolKey, adapterFamily: currentPool?.onchainState?.adapterFamily, status: currentPool?.onchainState?.status, reasonCode: currentPool?.onchainState?.reasonCode, blockNumber: currentPool?.onchainState?.blockNumber, blockHash: currentPool?.onchainState?.blockHash } });
-      }
-      if (previousPool?.priceReconciliation?.status !== "conflict" && currentPool?.priceReconciliation?.status === "conflict") {
-        events.push({ type: "price_conflict_detected", data: { poolKey, ...currentPool.priceReconciliation, providerObservedAt: currentPool.marketObservedAt, onchainObservedAt: currentPool.onchainState?.observedAt, blockNumber: currentPool.onchainState?.blockNumber } });
-      }
-    }
-    const beforeAnchor = semanticAnchor(before.priceAnchors?.wethUsdc);
-    const afterAnchor = semanticAnchor(after.priceAnchors?.wethUsdc);
-    if (beforeAnchor !== afterAnchor) events.push({ type: "anchor_updated", data: { anchor: BASE_WETH, quote: BASE_USDC, status: after.priceAnchors?.wethUsdc?.status, value: after.priceAnchors?.wethUsdc?.value, sourcePoolCount: after.priceAnchors?.wethUsdc?.sourcePoolCount } });
-    const previousById = new Map((before.opportunities ?? []).map((item) => [item.id, item]));
-    for (const opportunity of after.opportunities ?? []) {
-      const previous = previousById.get(opportunity.id);
-      if (previous?.canonicalPrice?.tier === "UNPRICED" && opportunity.canonicalPrice.tier !== "UNPRICED") events.push({ type: "opportunity_priced", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value } });
-      if (previous && semanticCanonicalPrice(previous.canonicalPrice) !== semanticCanonicalPrice(opportunity.canonicalPrice)) events.push({ type: "opportunity_canonical_price", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value, sourcePoolKeys: opportunity.canonicalPrice.sourcePoolKeys, reasonCode: opportunity.canonicalPrice.reasonCode } });
-      if (previous?.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
-      if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
-      if (previous && semanticObservedPrice(previous.observedPriceUsd) !== semanticObservedPrice(opportunity.observedPriceUsd)) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd?.value, provider: opportunity.observedPriceUsd?.provider, poolAddress: opportunity.observedPriceUsd?.poolAddress, reasonCode: opportunity.observedPriceUsd?.reasonCode } });
-      if (previous && (previous.liquidityState !== opportunity.liquidityState || previous.bestLiquidityUsd !== opportunity.bestLiquidityUsd)) events.push({ type: "opportunity_liquidity_resolved", data: { opportunityId: opportunity.id, liquidityState: opportunity.liquidityState, bestLiquidityUsd: opportunity.bestLiquidityUsd } });
-      if (previous && previous.qualityBand !== opportunity.qualityBand) events.push({ type: "opportunity_band_changed", data: { opportunityId: opportunity.id, previousBand: previous.qualityBand, band: opportunity.qualityBand } });
-      if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
-      if (previous?.ranked && !opportunity.ranked) events.push({ type: "opportunity_unranked", data: { opportunityId: opportunity.id, reasonCode: opportunity.exclusionReason } });
-      if (previous && semanticMetrics(previous) !== semanticMetrics(opportunity)) events.push({ type: "metrics_updated", data: { opportunityId: opportunity.id, aggregate: opportunity.aggregate } });
-    }
-    if (!events.length) return after;
-    return this.store.transact("semantic-enrichment-deltas", (draft) => {
-      const at = new Date().toISOString();
-      for (const event of events) appendRelayEvent(draft, event.type, event.data, at);
-      draft.counters.bandTransitions += events.filter((event) => event.type === "opportunity_band_changed").length;
-    });
+  async publishSemanticDeltas(before, _after, touchedPoolKeys) {
+    return this.store.transact("semantic-enrichment-deltas", (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
   }
 
   startWebsocket() {
@@ -710,6 +667,49 @@ export class OnchainDiscoveryCollector {
       if (this.config.websocketUrl && this.websocket?.readyState !== WebSocket.OPEN) draft.health.mode = "reconnecting";
     });
   }
+}
+
+function appendSemanticDeltas(draft, before, touchedPoolKeys) {
+  const events = [];
+  for (const poolKey of touchedPoolKeys) {
+    const previousPool = before.pools?.[poolKey];
+    const currentPool = draft.pools?.[poolKey];
+    const previous = previousPool?.providerEnrichment?.status;
+    const current = currentPool?.providerEnrichment?.status;
+    if (previous !== "matched" && current === "matched") {
+      events.push({ type: "pool_enriched", data: { poolKey, providers: currentPool.providerEnrichment.providers } });
+      events.push({ type: "provider_pool_found", data: { poolKey, providerIndexedAt: currentPool.providerIndexedAt } });
+    }
+    if (previous !== "pending" && current === "pending") events.push({ type: "provider_pool_pending", data: { poolKey, reasonCode: currentPool.providerEnrichment.reasonCode } });
+    if (semanticOnchainState(previousPool?.onchainState) !== semanticOnchainState(currentPool?.onchainState)) {
+      events.push({ type: "pool_onchain_state_observed", data: { poolKey, adapterFamily: currentPool?.onchainState?.adapterFamily, status: currentPool?.onchainState?.status, reasonCode: currentPool?.onchainState?.reasonCode, blockNumber: currentPool?.onchainState?.blockNumber, blockHash: currentPool?.onchainState?.blockHash } });
+    }
+    if (previousPool?.priceReconciliation?.status !== "conflict" && currentPool?.priceReconciliation?.status === "conflict") {
+      events.push({ type: "price_conflict_detected", data: { poolKey, ...currentPool.priceReconciliation, providerObservedAt: currentPool.marketObservedAt, onchainObservedAt: currentPool.onchainState?.observedAt, blockNumber: currentPool.onchainState?.blockNumber } });
+    }
+  }
+  const beforeAnchor = semanticAnchor(before.priceAnchors?.wethUsdc);
+  const afterAnchor = semanticAnchor(draft.priceAnchors?.wethUsdc);
+  if (beforeAnchor !== afterAnchor) events.push({ type: "anchor_updated", data: { anchor: BASE_WETH, quote: BASE_USDC, status: draft.priceAnchors?.wethUsdc?.status, value: draft.priceAnchors?.wethUsdc?.value, sourcePoolCount: draft.priceAnchors?.wethUsdc?.sourcePoolCount } });
+  const previousById = new Map((before.opportunities ?? []).map((item) => [item.id, item]));
+  for (const opportunity of draft.opportunities ?? []) {
+    const previous = previousById.get(opportunity.id);
+    if (previous?.canonicalPrice?.tier === "UNPRICED" && opportunity.canonicalPrice.tier !== "UNPRICED") events.push({ type: "opportunity_priced", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value } });
+    if (previous && semanticCanonicalPrice(previous.canonicalPrice) !== semanticCanonicalPrice(opportunity.canonicalPrice)) events.push({ type: "opportunity_canonical_price", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value, sourcePoolKeys: opportunity.canonicalPrice.sourcePoolKeys, reasonCode: opportunity.canonicalPrice.reasonCode } });
+    if (previous?.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
+    if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
+    if (previous && semanticObservedPrice(previous.observedPriceUsd) !== semanticObservedPrice(opportunity.observedPriceUsd)) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd?.value, provider: opportunity.observedPriceUsd?.provider, poolAddress: opportunity.observedPriceUsd?.poolAddress, reasonCode: opportunity.observedPriceUsd?.reasonCode } });
+    if (previous && (previous.liquidityState !== opportunity.liquidityState || previous.bestLiquidityUsd !== opportunity.bestLiquidityUsd)) events.push({ type: "opportunity_liquidity_resolved", data: { opportunityId: opportunity.id, liquidityState: opportunity.liquidityState, bestLiquidityUsd: opportunity.bestLiquidityUsd } });
+    if (previous && previous.qualityBand !== opportunity.qualityBand) events.push({ type: "opportunity_band_changed", data: { opportunityId: opportunity.id, previousBand: previous.qualityBand, band: opportunity.qualityBand } });
+    if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
+    if (previous?.ranked && !opportunity.ranked) events.push({ type: "opportunity_unranked", data: { opportunityId: opportunity.id, reasonCode: opportunity.exclusionReason } });
+    if (previous && semanticMetrics(previous) !== semanticMetrics(opportunity)) events.push({ type: "metrics_updated", data: { opportunityId: opportunity.id, aggregate: opportunity.aggregate } });
+  }
+  const at = new Date().toISOString();
+  for (const event of events) appendRelayEvent(draft, event.type, event.data, at);
+  draft.counters.bandTransitions += events.filter((event) => event.type === "opportunity_band_changed").length;
+  draft.health.bandTransitions = draft.counters.bandTransitions;
+  return draft;
 }
 
 export function trustedAnchorPoolIdentity(anchor, poolAddress) {
