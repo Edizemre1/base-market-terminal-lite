@@ -82,9 +82,9 @@ export class ProviderEnrichmentClient {
     return { observations, poolInfo, lookupState: observations.length ? "found" : "not_found", receivedAt, failures: failures.map(safeFailure), circuits: this.circuitSnapshot(), cacheHit: false };
   }
 
-  async lookupWethPools() {
+  async lookupWethPools({ signal } = {}) {
     const receivedAt = this.now().toISOString();
-    const payload = await this.request("dexscreener", `${DEXSCREENER}/token-pairs/v1/base/${BASE_WETH}`);
+    const payload = await this.request("dexscreener", `${DEXSCREENER}/token-pairs/v1/base/${BASE_WETH}`, { signal });
     return parseDexScreenerPayload(payload, receivedAt)
       .filter((pool) => tokenSetMatches(pool.baseTokenAddress, pool.quoteTokenAddress, BASE_WETH, BASE_USDC))
       .sort((left, right) => (right.liquidityUsd ?? -1) - (left.liquidityUsd ?? -1) || left.poolAddress.localeCompare(right.poolAddress))
@@ -101,15 +101,16 @@ export class ProviderEnrichmentClient {
     }]));
   }
 
-  async request(provider, url) {
+  async request(provider, url, { signal } = {}) {
     const circuit = this.circuits[provider];
     if (this.now().getTime() < circuit.openUntil) throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
         await this.waitForProviderSlot(provider);
+        const timeoutSignal = AbortSignal.timeout(this.providerTimeoutMs[provider] ?? 8_000);
         const response = await this.fetchImpl(url, {
           headers: { accept: "application/json", "user-agent": "Mergen-Base-Terminal/2.0" },
-          signal: AbortSignal.timeout(this.providerTimeoutMs[provider] ?? 8_000)
+          signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
         });
         if (!response?.ok) {
           const status = Number(response?.status);

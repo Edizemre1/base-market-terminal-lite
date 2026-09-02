@@ -177,6 +177,7 @@ test("trusted anchor loop survives an unexpected refresh rejection", async () =>
   let refreshes = 0;
   const subject = {
     running: true,
+    config: { anchorCycleTimeoutMs: 50, anchorLoopIntervalMs: 1 },
     provider: { circuitSnapshot: () => ({}) },
     store: { transact: async (_reason, mutator) => { await mutator({ health: {}, priceAnchors: { wethUsdc: {} }, counters: { enrichmentFailure: 0 }, pools: {}, opportunities: [], enrichmentQueue: [] }); } },
     refreshAnchorIfDue: async () => {
@@ -187,6 +188,46 @@ test("trusted anchor loop survives an unexpected refresh rejection", async () =>
   };
   await OnchainDiscoveryCollector.prototype.runAnchorLoop.call(subject, new AbortController().signal);
   assert.equal(refreshes, 2);
+});
+
+test("trusted anchor loop aborts a stuck refresh and advances to the next cycle", async () => {
+  let refreshes = 0;
+  let aborted = false;
+  const subject = {
+    running: true,
+    config: { anchorCycleTimeoutMs: 5, anchorLoopIntervalMs: 1 },
+    provider: { circuitSnapshot: () => ({}) },
+    store: { transact: async (_reason, mutator) => { await mutator({ health: {}, priceAnchors: { wethUsdc: {} }, counters: { enrichmentFailure: 0 }, pools: {}, opportunities: [], enrichmentQueue: [] }); } },
+    refreshAnchorIfDue: async (_now, signal) => {
+      refreshes += 1;
+      if (refreshes > 1) {
+        subject.running = false;
+        return;
+      }
+      signal.addEventListener("abort", () => {
+        aborted = true;
+      }, { once: true });
+      await new Promise(() => {});
+    }
+  };
+  await OnchainDiscoveryCollector.prototype.runAnchorLoop.call(subject, new AbortController().signal);
+  assert.equal(aborted, true);
+  assert.equal(refreshes, 2);
+});
+
+test("trusted anchor provider lookup receives the cycle abort signal", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let requestSignal;
+  const client = new ProviderEnrichmentClient({
+    retries: 0,
+    fetchImpl: async (_url, options) => {
+      requestSignal = options.signal;
+      throw new DOMException("aborted", "AbortError");
+    }
+  });
+  await assert.rejects(client.lookupWethPools({ signal: controller.signal }));
+  assert.equal(requestSignal.aborted, true);
 });
 
 test("trusted anchor owns isolated provider and bounded RPC clients", () => {

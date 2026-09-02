@@ -30,7 +30,9 @@ export function resolveCollectorConfig(environment = process.env) {
     metadataBatchSize: boundedInteger(environment.ONCHAIN_METADATA_BATCH_SIZE, 12, 1, 32),
     enrichmentBatchSize: boundedInteger(environment.ONCHAIN_ENRICHMENT_BATCH_SIZE, 4, 1, 8),
     enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, 2_000, 500, 30_000),
-    providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000)
+    providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
+    anchorCycleTimeoutMs: boundedInteger(environment.ONCHAIN_ANCHOR_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
+    anchorLoopIntervalMs: 5_000
   };
 }
 
@@ -363,8 +365,20 @@ export class OnchainDiscoveryCollector {
   async runAnchorLoop(signal) {
     while (this.running && !signal?.aborted) {
       const startedAt = Date.now();
+      const cycleController = new AbortController();
+      const cycleSignal = signal ? AbortSignal.any([signal, cycleController.signal]) : cycleController.signal;
+      let deadline;
       try {
-        await this.refreshAnchorIfDue(new Date());
+        const timeoutMs = this.config?.anchorCycleTimeoutMs ?? 45_000;
+        const timeout = new Promise((_, reject) => {
+          deadline = setTimeout(() => {
+            cycleController.abort();
+            const error = new Error("anchor_refresh_deadline_exceeded");
+            error.reasonCode = "anchor_refresh_deadline_exceeded";
+            reject(error);
+          }, timeoutMs);
+        });
+        await Promise.race([this.refreshAnchorIfDue(new Date(), cycleSignal), timeout]);
       } catch (error) {
         await this.store.transact("trusted-anchor-loop-failure", (draft) => {
           ensureEnrichmentState(draft);
@@ -374,33 +388,36 @@ export class OnchainDiscoveryCollector {
           draft.counters.enrichmentFailure += 1;
           refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
         }).catch(() => {});
+      } finally {
+        clearTimeout(deadline);
       }
       if (!this.running || signal?.aborted) break;
-      await delay(Math.max(250, 5_000 - (Date.now() - startedAt)), signal);
+      const intervalMs = this.config?.anchorLoopIntervalMs ?? 5_000;
+      await delay(Math.max(1, intervalMs - (Date.now() - startedAt)), signal);
     }
   }
 
-  async refreshAnchorIfDue(now = new Date()) {
+  async refreshAnchorIfDue(now = new Date(), signal) {
     const before = this.store.read();
     const current = before.priceAnchors?.wethUsdc;
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
     try {
-      const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools());
+      const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools({ signal }));
       const lookupCompletedAt = new Date();
-      const blockNumber = before.currentHead || await this.anchorRpc.blockNumber();
+      const blockNumber = before.currentHead || await this.anchorRpc.blockNumber({ signal });
       const metadata = { ...before.tokenMetadata };
       for (const token of [BASE_WETH, BASE_USDC]) {
         if (!Number.isInteger(metadata[token]?.decimals)) {
-          const exactDecimals = await readTokenDecimals(this.anchorRpc, token, "latest");
+          const exactDecimals = await readTokenDecimals(this.anchorRpc, token, "latest", { signal });
           metadata[token] = exactDecimals.ok
             ? { ...metadata[token], address: token, decimals: exactDecimals.decimals, codeExists: true, observedAt: exactDecimals.observedAt, blockNumber, status: metadata[token]?.name && metadata[token]?.symbol ? "complete" : "partial" }
-            : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now);
+            : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now, { signal });
         }
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
         let pool = trustedAnchorPoolIdentity(current, observation.poolAddress);
         if (!pool) {
-          const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest");
+          const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest", { signal });
           if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
           pool = {
             poolKey: observation.poolAddress,
@@ -412,7 +429,7 @@ export class OnchainDiscoveryCollector {
             protocolVersion: identity.registry.protocolVersion
           };
         }
-        const onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest");
+        const onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest", { signal });
         const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
         const canonicalRate = pool.token0 === BASE_WETH ? joined.priceToken1PerToken0 : joined.priceToken1PerToken0 > 0 ? 1 / joined.priceToken1PerToken0 : undefined;

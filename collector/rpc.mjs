@@ -21,20 +21,21 @@ export class JsonRpcClient {
     this.nextId = 1;
   }
 
-  async request(method, params = []) {
-    return (await this.batch([{ method, params }]))[0];
+  async request(method, params = [], options = {}) {
+    return (await this.batch([{ method, params }], options))[0];
   }
 
-  async batch(calls) {
+  async batch(calls, { signal } = {}) {
     if (!calls.length) return [];
     const requests = calls.map((call) => ({ jsonrpc: "2.0", id: this.nextId++, method: call.method, params: call.params ?? [] }));
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
+        const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
         const response = await fetch(this.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(requests),
-          signal: AbortSignal.timeout(this.timeoutMs)
+          signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
         });
         if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
         const payload = await response.json();
@@ -54,8 +55,8 @@ export class JsonRpcClient {
     throw new Error("RPC retry exhausted");
   }
 
-  async blockNumber() {
-    return hexToSafeNumber(await this.request("eth_blockNumber"));
+  async blockNumber(options = {}) {
+    return hexToSafeNumber(await this.request("eth_blockNumber", [], options));
   }
 
   async getLogs({ fromBlock, toBlock, addresses, topics }) {
@@ -73,16 +74,16 @@ export class JsonRpcClient {
     return this.request("eth_getBlockByNumber", [toHex(blockNumber), false]);
   }
 
-  async getCode(address, block = "latest") {
-    return this.request("eth_getCode", [address, typeof block === "number" ? toHex(block) : block]);
+  async getCode(address, block = "latest", options = {}) {
+    return this.request("eth_getCode", [address, typeof block === "number" ? toHex(block) : block], options);
   }
 
-  async call(address, data, block = "latest") {
-    return this.request("eth_call", [{ to: address, data }, typeof block === "number" ? toHex(block) : block]);
+  async call(address, data, block = "latest", options = {}) {
+    return this.request("eth_call", [{ to: address, data }, typeof block === "number" ? toHex(block) : block], options);
   }
 }
 
-export async function enrichTokenMetadata(rpc, tokenAddress, blockNumber, now = new Date()) {
+export async function enrichTokenMetadata(rpc, tokenAddress, blockNumber, now = new Date(), options = {}) {
   const fallback = {
     address: tokenAddress,
     name: undefined,
@@ -94,10 +95,10 @@ export async function enrichTokenMetadata(rpc, tokenAddress, blockNumber, now = 
     blockNumber
   };
   try {
-    const code = await rpc.getCode(tokenAddress, blockNumber);
+    const code = await rpc.getCode(tokenAddress, blockNumber, options);
     if (!code || code === "0x") return fallback;
     const calls = [SELECTOR.name, SELECTOR.symbol, SELECTOR.decimals].map((data) => ({ method: "eth_call", params: [{ to: tokenAddress, data }, toHex(blockNumber)] }));
-    const results = await rpc.batch(calls.map((call) => call));
+    const results = await rpc.batch(calls.map((call) => call), options);
     const name = decodeAbiText(results[0]);
     const symbol = decodeAbiText(results[1]);
     const decimals = decodeAbiUint(results[2]);
@@ -141,16 +142,16 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
-export async function inspectRegisteredPool(rpc, poolAddress, block = "latest") {
+export async function inspectRegisteredPool(rpc, poolAddress, block = "latest", options = {}) {
   const address = normalizeAddress(poolAddress);
   if (!address) return { ok: false, reason: "malformed_pool_address", retryable: false };
   try {
-    const code = await rpc.getCode(address, block);
+    const code = await rpc.getCode(address, block, options);
     if (!code || code === "0x") return { ok: false, reason: "contract_code_missing", retryable: false };
     const [token0Raw, token1Raw, factoryRaw] = await Promise.all([
-      rpc.call(address, SELECTOR.token0, block),
-      rpc.call(address, SELECTOR.token1, block),
-      rpc.call(address, SELECTOR.factory, block)
+      rpc.call(address, SELECTOR.token0, block, options),
+      rpc.call(address, SELECTOR.token1, block, options),
+      rpc.call(address, SELECTOR.factory, block, options)
     ]);
     const token0 = decodeAbiAddress(token0Raw);
     const token1 = decodeAbiAddress(token1Raw);
@@ -164,13 +165,13 @@ export async function inspectRegisteredPool(rpc, poolAddress, block = "latest") 
   }
 }
 
-export async function readTokenDecimals(rpc, tokenAddress, block = "latest") {
+export async function readTokenDecimals(rpc, tokenAddress, block = "latest", options = {}) {
   const address = normalizeAddress(tokenAddress);
   if (!address) return { ok: false, reasonCode: "malformed_token_address", retryable: false };
   try {
-    const code = await rpc.getCode(address, block);
+    const code = await rpc.getCode(address, block, options);
     if (!code || code === "0x") return { ok: false, reasonCode: "token_code_missing", retryable: false };
-    const decimals = decodeAbiUint(await rpc.call(address, SELECTOR.decimals, block));
+    const decimals = decodeAbiUint(await rpc.call(address, SELECTOR.decimals, block, options));
     return validDecimals(decimals)
       ? { ok: true, decimals, observedAt: new Date().toISOString() }
       : { ok: false, reasonCode: "invalid_decimals", retryable: false };
@@ -179,7 +180,7 @@ export async function readTokenDecimals(rpc, tokenAddress, block = "latest") {
   }
 }
 
-export async function readSupportedPoolState(rpc, pool, metadata = {}, block = "latest") {
+export async function readSupportedPoolState(rpc, pool, metadata = {}, block = "latest", options = {}) {
   const registry = FACTORY_REGISTRY.find((entry) => entry.id === pool?.factoryId);
   if (!registry || !pool?.poolAddress) return { status: "unsupported", reasonCode: "provider_enrichment_required" };
   const capabilities = registry.capabilities;
@@ -192,7 +193,7 @@ export async function readSupportedPoolState(rpc, pool, metadata = {}, block = "
   try {
     const tag = blockTag(block);
     if (capabilities.reservesReadable) {
-      const raw = await rpc.call(pool.poolAddress, SELECTOR.getReserves, block);
+      const raw = await rpc.call(pool.poolAddress, SELECTOR.getReserves, block, options);
       const reserve0 = decodeAbiBigUint(raw, 0);
       const reserve1 = decodeAbiBigUint(raw, 1);
       if (reserve0 === undefined || reserve1 === undefined) return { status: "rejected", reasonCode: "malformed_reserves", retryable: false, capabilities };
@@ -207,7 +208,7 @@ export async function readSupportedPoolState(rpc, pool, metadata = {}, block = "
       const [slot0Raw, liquidityRaw] = await rpc.batch([
         { method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.slot0 }, tag] },
         { method: "eth_call", params: [{ to: pool.poolAddress, data: SELECTOR.liquidity }, tag] }
-      ]);
+      ], options);
       const sqrtPriceX96 = decodeAbiBigUint(slot0Raw, 0);
       const inRangeLiquidity = decodeAbiBigUint(liquidityRaw, 0);
       if (!sqrtPriceX96 || sqrtPriceX96 <= 0n) return { status: "rejected", reasonCode: "invalid_slot0", retryable: false, capabilities };
