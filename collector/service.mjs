@@ -60,7 +60,7 @@ export class OnchainDiscoveryCollector {
       retries: 3,
       circuitFailureThreshold: 2,
       circuitCooldownMs: 5_000,
-      batchPaceMs: 500
+      batchPaceMs: 3_000
     });
     this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
