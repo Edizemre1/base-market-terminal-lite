@@ -42,6 +42,8 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await openWalletPicker(page);
     await page.getByTestId("wallet-provider-legacy:injected").click();
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
+    await expect(page.getByTestId("wallet-picker")).toHaveCount(0);
     await openTradeDrawer(page);
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wrong_network");
     await page.screenshot({ path: testInfo.outputPath("trade-wrong-network-1440.png"), fullPage: false });
