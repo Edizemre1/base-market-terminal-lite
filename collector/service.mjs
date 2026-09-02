@@ -57,7 +57,7 @@ export class OnchainDiscoveryCollector {
     this.rpc = new JsonRpcClient(config.httpUrl);
     this.discoveryRpc = config.discoveryRpcClient ?? new JsonRpcClient(config.httpUrl, {
       timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000),
-      retries: 1,
+      retries: 3,
       circuitFailureThreshold: 2,
       circuitCooldownMs: 5_000
     });

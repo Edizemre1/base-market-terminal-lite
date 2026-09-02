@@ -39,6 +39,10 @@ test("discovery verification has an isolated bounded RPC client", () => {
 
   assert.equal(collector.discoveryRpc, discoveryRpcClient);
   assert.notEqual(collector.discoveryRpc, collector.rpc);
+
+  const defaultCollector = new OnchainDiscoveryCollector(resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }));
+  assert.equal(defaultCollector.discoveryRpc.retries, 3);
+  assert.equal(defaultCollector.discoveryRpc.timeoutMs, 8_000);
 });
 
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
