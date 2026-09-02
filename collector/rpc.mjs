@@ -13,7 +13,7 @@ const SELECTOR = Object.freeze({
 import { FACTORY_REGISTRY } from "./factory-registry.mjs";
 
 export class JsonRpcClient {
-  constructor(url, { timeoutMs = 12_000, retries = 3, circuitFailureThreshold = 4, circuitCooldownMs = 15_000, now = () => new Date(), fetchImpl = fetch, delayImpl = delay } = {}) {
+  constructor(url, { timeoutMs = 12_000, retries = 3, circuitFailureThreshold = 4, circuitCooldownMs = 15_000, batchPaceMs = 0, now = () => new Date(), fetchImpl = fetch, delayImpl = delay } = {}) {
     if (!/^https?:\/\//i.test(url ?? "")) throw new Error("A valid HTTP RPC URL is required");
     this.url = url;
     this.timeoutMs = timeoutMs;
@@ -21,6 +21,7 @@ export class JsonRpcClient {
     this.nextId = 1;
     this.circuitFailureThreshold = circuitFailureThreshold;
     this.circuitCooldownMs = circuitCooldownMs;
+    this.batchPaceMs = Number.isFinite(batchPaceMs) ? Math.max(0, batchPaceMs) : 0;
     this.now = now;
     this.fetchImpl = fetchImpl;
     this.delayImpl = delayImpl;
@@ -111,6 +112,13 @@ export class JsonRpcClient {
       consecutiveFailures: this.consecutiveFailures,
       ...this.metrics
     };
+  }
+
+  async paceBatch({ signal } = {}) {
+    if (this.batchPaceMs <= 0) return;
+    if (signal?.aborted) throw signal.reason ?? new Error("rpc_batch_pacing_aborted");
+    await this.delayImpl(this.batchPaceMs);
+    if (signal?.aborted) throw signal.reason ?? new Error("rpc_batch_pacing_aborted");
   }
 
   async blockNumber(options = {}) {
@@ -215,6 +223,7 @@ export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal } =
   const results = [];
   const boundedBatchSize = Math.min(2, Math.max(1, batchSize));
   for (let offset = 0; offset < pools.length; offset += boundedBatchSize) {
+    await rpc.paceBatch?.({ signal });
     const batch = pools.slice(offset, offset + boundedBatchSize);
     const calls = [];
     const layouts = batch.map((pool) => {

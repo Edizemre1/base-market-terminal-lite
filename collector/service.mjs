@@ -59,7 +59,8 @@ export class OnchainDiscoveryCollector {
       timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000),
       retries: 3,
       circuitFailureThreshold: 2,
-      circuitCooldownMs: 5_000
+      circuitCooldownMs: 5_000,
+      batchPaceMs: 500
     });
     this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
@@ -1035,6 +1036,7 @@ export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal
     const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
     const blockRows = new Map();
     for (let offset = 0; offset < blockNumbers.length; offset += PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT) {
+      await rpc.paceBatch?.({ signal });
       const numbers = blockNumbers.slice(offset, offset + PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT);
       const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })), { signal });
       if (outcomes.some((outcome) => !outcome.ok)) throw new Error("factory_block_evidence_unavailable");

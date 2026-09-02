@@ -43,6 +43,29 @@ test("discovery verification has an isolated bounded RPC client", () => {
   const defaultCollector = new OnchainDiscoveryCollector(resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }));
   assert.equal(defaultCollector.discoveryRpc.retries, 3);
   assert.equal(defaultCollector.discoveryRpc.timeoutMs, 8_000);
+  assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 500);
+});
+
+test("pool binding verification paces each public RPC batch", async () => {
+  let requests = 0;
+  let pacing = 0;
+  const rpc = {
+    async paceBatch() { pacing += 1; },
+    async batchOutcomes(calls) {
+      requests += 1;
+      return calls.map(() => ({ ok: true, value: "0x01" }));
+    }
+  };
+  const pools = Array.from({ length: 5 }, (_, index) => ({
+    factoryAddress: `0x${String(index + 1).padStart(40, "0")}`,
+    blockNumber: 50_000_000
+  }));
+
+  const results = await verifyPoolBindings(rpc, pools);
+
+  assert.equal(requests, 3);
+  assert.equal(pacing, 3);
+  assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
 });
 
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
