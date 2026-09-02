@@ -267,12 +267,10 @@ export class OnchainDiscoveryCollector {
   }
 
   async runOnchainStateCycle(now = new Date(), signal) {
-    const initial = this.store.read();
-    if (hasOnchainSeedCandidate(initial, now)) {
-      await this.store.transact("seed-onchain-state-queue", (draft) => seedOnchainQueue(draft, now));
-    }
     const before = this.store.read();
-    const due = (before.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.onchainStateBatchSize);
+    const scheduled = structuredClone(before);
+    if (hasOnchainSeedCandidate(scheduled, now)) seedOnchainQueue(scheduled, now);
+    const due = (scheduled.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.onchainStateBatchSize);
     if (!due.length) return before;
     const needsRpc = due.some((item) => {
       const pool = before.pools[item.poolKey];
@@ -296,6 +294,7 @@ export class OnchainDiscoveryCollector {
     const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
     const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
       ensureEnrichmentState(draft);
+      seedOnchainQueue(draft, now);
       const remove = new Set();
       for (const outcome of outcomes) {
         const key = outcome.item.poolKey;
@@ -353,20 +352,13 @@ export class OnchainDiscoveryCollector {
   }
 
   async runEnrichmentCycle(now = new Date()) {
-    const initial = this.store.read();
-    if (hasEnrichmentSeedCandidate(initial, now)) {
-      await this.store.transact("seed-bounded-enrichment-queue", (draft) => {
-        ensureEnrichmentState(draft);
-        seedEnrichmentQueue(draft, now);
-        refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-      });
-    }
-    const state = this.store.read();
-    const due = (state.enrichmentQueue ?? [])
+    const before = this.store.read();
+    const scheduled = structuredClone(before);
+    if (hasEnrichmentSeedCandidate(scheduled, now)) seedEnrichmentQueue(scheduled, now);
+    const due = (scheduled.enrichmentQueue ?? [])
       .filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime())
       .slice(0, this.config.enrichmentBatchSize);
-    if (!due.length) return this.store.read();
-    const before = this.store.read();
+    if (!due.length) return before;
     const outcomes = await Promise.all(due.map(async (item) => {
       const pool = before.pools[item.poolKey];
       if (!pool?.poolAddress || pool.status !== "confirmed" || pool.orphaned) return { item, status: "discarded", reasonCode: "pool_no_longer_eligible" };
@@ -391,6 +383,7 @@ export class OnchainDiscoveryCollector {
     const touchedPoolKeys = outcomes.map((outcome) => outcome.item.poolKey);
     const after = await this.store.transact("bounded-pool-financial-enrichment", (draft) => {
       ensureEnrichmentState(draft);
+      seedEnrichmentQueue(draft, now);
       const completed = new Set();
       for (const outcome of outcomes) {
         const key = outcome.item.poolKey;

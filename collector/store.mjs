@@ -186,7 +186,7 @@ export function initialState(now = new Date()) {
 }
 
 export function createIntegrity(state) {
-  const clone = structuredClone(state);
+  const clone = { ...state };
   delete clone.integrity;
   return { algorithm: "sha256", digest: createHash("sha256").update(stableStringify(clone)).digest("hex") };
 }
@@ -291,7 +291,7 @@ async function writeAtomicJson(target, value) {
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o640);
   try {
-    await handle.writeFile(`${stableStringify(value, 2)}\n`, "utf8");
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
     await handle.sync();
   } finally {
     await handle.close();
