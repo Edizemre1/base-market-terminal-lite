@@ -18,14 +18,17 @@ test("normal collector cadence leaves an idle window after durable work", () => 
   assert.equal(config.pollIntervalMs, 10_000);
   assert.equal(config.onchainStateIntervalMs, 30_000);
   assert.equal(config.enrichmentIntervalMs, 30_000);
+  assert.equal(config.discoveryBatchPaceMs, 2_000);
 
   const bounded = resolveCollectorConfig({
     BASE_RPC_HTTP_URL: "https://mainnet.base.org",
     ONCHAIN_STATE_INTERVAL_MS: "120000",
-    ONCHAIN_ENRICHMENT_INTERVAL_MS: "120000"
+    ONCHAIN_ENRICHMENT_INTERVAL_MS: "120000",
+    ONCHAIN_DISCOVERY_BATCH_PACE_MS: "3000"
   });
   assert.equal(bounded.onchainStateIntervalMs, 120_000);
   assert.equal(bounded.enrichmentIntervalMs, 120_000);
+  assert.equal(bounded.discoveryBatchPaceMs, 3_000);
 });
 
 test("discovery verification has an isolated bounded RPC client", () => {
@@ -43,7 +46,7 @@ test("discovery verification has an isolated bounded RPC client", () => {
   const defaultCollector = new OnchainDiscoveryCollector(resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }));
   assert.equal(defaultCollector.discoveryRpc.retries, 3);
   assert.equal(defaultCollector.discoveryRpc.timeoutMs, 8_000);
-  assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 3_000);
+  assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 2_000);
 });
 
 test("pool binding verification paces each public RPC batch", async () => {

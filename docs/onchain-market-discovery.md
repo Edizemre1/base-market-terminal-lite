@@ -86,7 +86,7 @@ The dependency-free schema-v1 store contains factory cursors, canonical events, 
 
 Semantic SSE transitions include `pool_onchain_state_observed`, `token_metadata_verified`, `opportunity_observed_price`, `opportunity_canonical_price`, `opportunity_liquidity_resolved`, `opportunity_band_changed`, and `price_conflict_detected`. Event sequence identity, bounded retention and Last-Event-ID behavior are unchanged. A periodic refresh with unchanged semantic state creates no duplicate transition.
 
-Default limits include 250 blocks per log query, 2,000 bootstrap blocks, four chunks per pass, 2,000 pools, 5,000 canonical events, 256 relay events, 512 history records, 128 reconciliation records, 256 metadata jobs, and 64 SSE clients.
+Default limits include 250 blocks per log query, 2,000 bootstrap blocks, four chunks per pass, a 2,000 ms public-RPC evidence-batch pace, 2,000 pools, 5,000 canonical events, 256 relay events, 512 history records, 128 reconciliation records, 256 metadata jobs, and 64 SSE clients. A staging-only catch-up profile may temporarily raise `ONCHAIN_DISCOVERY_BATCH_PACE_MS` while keeping scan concurrency and durable commits bounded; remove the override before acceptance and verify lag against an independent RPC head.
 
 ## Staging operations
 

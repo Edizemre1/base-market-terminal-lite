@@ -46,6 +46,7 @@ export function resolveCollectorConfig(environment = process.env) {
     enrichmentBatchSize: boundedInteger(environment.ONCHAIN_ENRICHMENT_BATCH_SIZE, 4, 1, 8),
     enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
     providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
+    discoveryBatchPaceMs: boundedInteger(environment.ONCHAIN_DISCOVERY_BATCH_PACE_MS, 2_000, 250, 5_000),
     anchorCycleTimeoutMs: boundedInteger(environment.ONCHAIN_ANCHOR_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
     anchorLoopIntervalMs: 5_000
   };
@@ -60,7 +61,7 @@ export class OnchainDiscoveryCollector {
       retries: 3,
       circuitFailureThreshold: 2,
       circuitCooldownMs: 5_000,
-      batchPaceMs: 3_000
+      batchPaceMs: config.discoveryBatchPaceMs ?? 2_000
     });
     this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
