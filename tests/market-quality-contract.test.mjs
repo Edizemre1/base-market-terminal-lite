@@ -270,7 +270,7 @@ test("quality labels retain exact TR and EN parity", async () => {
 });
 
 function tokenOpportunity(liquidityUsd) {
-  return buildCanonicalOpportunities([collectorPool({ liquidityUsd })], { [TOKEN]: { symbol: "TOKEN", name: "Token", status: "complete" } }, [], NOW).find((item) => item.tokenAddress === TOKEN);
+  return buildCanonicalOpportunities([collectorPool({ liquidityUsd })], { [TOKEN]: { symbol: "TOKEN", name: "Token", decimals: 18, status: "complete", verificationState: "verified" } }, [], NOW).find((item) => item.tokenAddress === TOKEN);
 }
 
 function collectorPool({ liquidityUsd = 500, observedAt = NOW.toISOString(), providerMatched = true, priceToken1PerToken0 = 0.00421 } = {}) {

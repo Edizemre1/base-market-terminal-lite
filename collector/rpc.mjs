@@ -13,12 +13,20 @@ const SELECTOR = Object.freeze({
 import { FACTORY_REGISTRY } from "./factory-registry.mjs";
 
 export class JsonRpcClient {
-  constructor(url, { timeoutMs = 12_000, retries = 3 } = {}) {
+  constructor(url, { timeoutMs = 12_000, retries = 3, circuitFailureThreshold = 4, circuitCooldownMs = 15_000, now = () => new Date(), fetchImpl = fetch, delayImpl = delay } = {}) {
     if (!/^https?:\/\//i.test(url ?? "")) throw new Error("A valid HTTP RPC URL is required");
     this.url = url;
     this.timeoutMs = timeoutMs;
     this.retries = retries;
     this.nextId = 1;
+    this.circuitFailureThreshold = circuitFailureThreshold;
+    this.circuitCooldownMs = circuitCooldownMs;
+    this.now = now;
+    this.fetchImpl = fetchImpl;
+    this.delayImpl = delayImpl;
+    this.consecutiveFailures = 0;
+    this.openUntil = 0;
+    this.metrics = { requests: 0, calls: 0, retries: 0, timeouts: 0, failures: 0, successes: 0, circuitOpens: 0 };
   }
 
   async request(method, params = [], options = {}) {
@@ -26,33 +34,72 @@ export class JsonRpcClient {
   }
 
   async batch(calls, { signal } = {}) {
+    const outcomes = await this.batchOutcomes(calls, { signal });
+    const failure = outcomes.find((outcome) => !outcome.ok);
+    if (failure) throw new JsonRpcRequestError(failure.reasonCode, failure);
+    return outcomes.map((outcome) => outcome.value);
+  }
+
+  async batchOutcomes(calls, { signal } = {}) {
     if (!calls.length) return [];
+    this.metrics.calls += calls.length;
+    if (this.now().getTime() < this.openUntil) {
+      return calls.map(() => ({ ok: false, reasonCode: "rpc_circuit_open", retryable: true, retryAt: new Date(this.openUntil).toISOString() }));
+    }
     const requests = calls.map((call) => ({ jsonrpc: "2.0", id: this.nextId++, method: call.method, params: call.params ?? [] }));
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
+        this.metrics.requests += 1;
         const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
-        const response = await fetch(this.url, {
+        const response = await this.fetchImpl(this.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(requests),
           signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
         });
-        if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
+        if (!response.ok) throw new JsonRpcRequestError(`rpc_http_${response.status}`, { retryable: response.status === 408 || response.status === 429 || response.status >= 500 });
         const payload = await response.json();
         const rows = Array.isArray(payload) ? payload : [payload];
         const byId = new Map(rows.map((row) => [row.id, row]));
-        return requests.map((request) => {
+        const outcomes = requests.map((request) => {
           const row = byId.get(request.id);
-          if (!row) throw new Error(`RPC response missing for ${request.method}`);
-          if (row.error) throw new Error(`RPC ${request.method} failed (${row.error.code})`);
-          return row.result;
+          if (!row) return { ok: false, reasonCode: "rpc_response_missing", retryable: true, method: request.method };
+          if (row.error) return { ok: false, reasonCode: classifyRpcError(row.error), retryable: isRetryableRpcError(row.error), method: request.method, rpcCode: row.error.code };
+          if (typeof row.result !== "string" && request.method === "eth_call") return { ok: false, reasonCode: "rpc_malformed_response", retryable: false, method: request.method };
+          if (row.result === "0x" && request.method === "eth_call") return { ok: false, reasonCode: "rpc_empty_response", retryable: false, method: request.method };
+          return { ok: true, value: row.result, method: request.method };
         });
+        this.consecutiveFailures = 0;
+        this.openUntil = 0;
+        this.metrics.successes += outcomes.filter((outcome) => outcome.ok).length;
+        this.metrics.failures += outcomes.filter((outcome) => !outcome.ok).length;
+        return outcomes;
       } catch (error) {
-        if (attempt === this.retries) throw error;
-        await delay(Math.min(2_000, 250 * 2 ** attempt));
+        const reasonCode = classifyTransportError(error);
+        if (reasonCode === "rpc_timeout") this.metrics.timeouts += 1;
+        if (attempt === this.retries || error?.retryable === false) {
+          this.metrics.failures += calls.length;
+          this.consecutiveFailures += 1;
+          if (this.consecutiveFailures >= this.circuitFailureThreshold) {
+            this.openUntil = this.now().getTime() + this.circuitCooldownMs;
+            this.metrics.circuitOpens += 1;
+          }
+          return calls.map(() => ({ ok: false, reasonCode, retryable: error?.retryable !== false }));
+        }
+        this.metrics.retries += 1;
+        await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
       }
     }
-    throw new Error("RPC retry exhausted");
+    return calls.map(() => ({ ok: false, reasonCode: "rpc_retry_exhausted", retryable: true }));
+  }
+
+  circuitSnapshot() {
+    return {
+      state: this.now().getTime() < this.openUntil ? "open" : "closed",
+      openUntil: this.openUntil ? new Date(this.openUntil).toISOString() : undefined,
+      consecutiveFailures: this.consecutiveFailures,
+      ...this.metrics
+    };
   }
 
   async blockNumber(options = {}) {
@@ -70,8 +117,8 @@ export class JsonRpcClient {
     return Array.isArray(logs) ? logs : [];
   }
 
-  async getBlock(blockNumber) {
-    return this.request("eth_getBlockByNumber", [toHex(blockNumber), false]);
+  async getBlock(blockNumber, options = {}) {
+    return this.request("eth_getBlockByNumber", [toHex(blockNumber), false], options);
   }
 
   async getCode(address, block = "latest", options = {}) {
@@ -90,30 +137,40 @@ export async function enrichTokenMetadata(rpc, tokenAddress, blockNumber, now = 
     symbol: undefined,
     decimals: undefined,
     status: "unavailable",
+    source: "erc20_contract",
+    verificationState: "pending",
     codeExists: false,
     observedAt: now.toISOString(),
     blockNumber
   };
   try {
     const code = await rpc.getCode(tokenAddress, blockNumber, options);
-    if (!code || code === "0x") return fallback;
+    if (!code || code === "0x") return { ...fallback, failureReason: "token_code_missing", verificationState: "rejected", retryable: false };
     const calls = [SELECTOR.name, SELECTOR.symbol, SELECTOR.decimals].map((data) => ({ method: "eth_call", params: [{ to: tokenAddress, data }, toHex(blockNumber)] }));
-    const results = await rpc.batch(calls.map((call) => call), options);
-    const name = decodeAbiText(results[0]);
-    const symbol = decodeAbiText(results[1]);
-    const decimals = decodeAbiUint(results[2]);
-    const validDecimals = Number.isInteger(decimals) && decimals >= 0 && decimals <= 36 ? decimals : undefined;
+    const outcomes = typeof rpc.batchOutcomes === "function"
+      ? await rpc.batchOutcomes(calls, options)
+      : (await rpc.batch(calls, options)).map((value) => ({ ok: true, value }));
+    const name = outcomes[0]?.ok ? decodeAbiText(outcomes[0].value) : undefined;
+    const symbol = outcomes[1]?.ok ? decodeAbiText(outcomes[1].value) : undefined;
+    const decimals = outcomes[2]?.ok ? decodeAbiUint(outcomes[2].value) : undefined;
+    const validDecimals = validDecimalsValue(decimals) ? decimals : undefined;
     const complete = Boolean(name && symbol && validDecimals !== undefined);
+    const decimalsFailure = metadataDecimalsFailure(outcomes[2], validDecimals);
     return {
       ...fallback,
       name,
       symbol,
       decimals: validDecimals,
       codeExists: true,
-      status: complete ? "complete" : "partial"
+      status: complete ? "complete" : "partial",
+      verificationState: validDecimals !== undefined ? "verified" : decimalsFailure === "invalid_decimals" ? "quarantined" : "pending",
+      failureReason: decimalsFailure,
+      retryable: decimalsFailure ? decimalsFailure !== "invalid_decimals" : false,
+      retryAt: decimalsFailure && decimalsFailure !== "invalid_decimals" ? new Date(now.getTime() + 60_000).toISOString() : undefined
     };
-  } catch {
-    return { ...fallback, codeExists: true, status: "partial" };
+  } catch (error) {
+    const failureReason = classifyTransportError(error);
+    return { ...fallback, codeExists: true, status: "partial", verificationState: "pending", failureReason, retryable: true, retryAt: new Date(now.getTime() + 60_000).toISOString() };
   }
 }
 
@@ -172,7 +229,7 @@ export async function readTokenDecimals(rpc, tokenAddress, block = "latest", opt
     const code = await rpc.getCode(address, block, options);
     if (!code || code === "0x") return { ok: false, reasonCode: "token_code_missing", retryable: false };
     const decimals = decodeAbiUint(await rpc.call(address, SELECTOR.decimals, block, options));
-    return validDecimals(decimals)
+    return validDecimalsValue(decimals)
       ? { ok: true, decimals, observedAt: new Date().toISOString() }
       : { ok: false, reasonCode: "invalid_decimals", retryable: false };
   } catch {
@@ -288,7 +345,8 @@ function rationalToNumber(numerator, denominator) {
   return Number(scaled.toString()) / 1e30;
 }
 
-function validDecimals(value) { return Number.isInteger(value) && value >= 0 && value <= 36; }
+function validDecimals(value) { return validDecimalsValue(value); }
+function validDecimalsValue(value) { return Number.isInteger(value) && value >= 0 && value <= 255; }
 function blockTag(value) { return typeof value === "number" ? toHex(value) : value; }
 function normalizeAddress(value) { const normalized = typeof value === "string" ? value.toLowerCase() : ""; return /^0x[0-9a-f]{40}$/.test(normalized) ? normalized : undefined; }
 
@@ -307,4 +365,46 @@ function sanitizeText(bytes) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export class JsonRpcRequestError extends Error {
+  constructor(reasonCode, { retryable = true, rpcCode } = {}) {
+    super(reasonCode);
+    this.name = "JsonRpcRequestError";
+    this.reasonCode = reasonCode;
+    this.retryable = retryable;
+    this.rpcCode = rpcCode;
+  }
+}
+
+function classifyRpcError(error) {
+  const message = String(error?.message ?? "").toLowerCase();
+  if (message.includes("proxy") || message.includes("implementation")) return "rpc_proxy_mismatch";
+  if (message.includes("revert") || error?.code === 3) return "rpc_execution_reverted";
+  if (message.includes("timeout")) return "rpc_timeout";
+  if (error?.code === -32602) return "rpc_invalid_params";
+  return `rpc_error_${Number.isInteger(error?.code) ? error.code : "unknown"}`;
+}
+
+function metadataDecimalsFailure(outcome, value) {
+  if (outcome?.ok) return value === undefined ? "decimals_malformed_abi" : undefined;
+  const reasons = {
+    rpc_execution_reverted: "decimals_call_reverted",
+    rpc_timeout: "decimals_timeout",
+    rpc_empty_response: "decimals_empty_response",
+    rpc_malformed_response: "decimals_malformed_rpc",
+    rpc_proxy_mismatch: "proxy_mismatch"
+  };
+  return reasons[outcome?.reasonCode] ?? outcome?.reasonCode ?? "decimals_read_failed";
+}
+
+function isRetryableRpcError(error) {
+  return ![3, -32600, -32601, -32602].includes(error?.code);
+}
+
+function classifyTransportError(error) {
+  if (typeof error?.reasonCode === "string") return error.reasonCode;
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") return "rpc_timeout";
+  if (error instanceof SyntaxError) return "rpc_malformed_json";
+  return "rpc_transport_failure";
 }

@@ -352,7 +352,7 @@ test("V3 in-range liquidity is never labeled USD", async () => {
 });
 
 test("invalid decimals reject on-chain spot without retry", async () => {
-  const state = await readSupportedPoolState({}, { ...poolRecord(), factoryId: "uniswap-v2" }, { [TOKEN]: { decimals: 255 }, [BASE_WETH]: { decimals: 18 } });
+  const state = await readSupportedPoolState({}, { ...poolRecord(), factoryId: "uniswap-v2" }, { [TOKEN]: { decimals: 256 }, [BASE_WETH]: { decimals: 18 } });
   assert.equal(state.status, "rejected");
   assert.equal(state.reasonCode, "invalid_decimals");
   assert.equal(state.retryable, false);

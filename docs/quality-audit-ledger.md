@@ -76,3 +76,10 @@ Viewport contract: 1920×1080, 1440×900, 1280×800, 1024×768, 768×1024, 430×
 ## Bounded long-run state
 
 Pulse history, visit snapshots, pins, recent pairs, alert rules, alert triggers, provider polling, chart refresh, copy feedback, and wallet listeners are bounded or cleaned up. Regression coverage includes 100 snapshot updates, 100 pair selections, 50 route transitions, 20 locale transitions, 20 wallet mock cycles, 100 alert evaluations, visibility cycles, storage failure, and fail/recover behavior.
+
+## 2026-09-02 on-chain pricing coverage pass
+
+- The live preflight covered 2,000 confirmed pools and selected reserve pools, Uniswap V3-compatible pools, and Aerodrome Slipstream as the three highest-impact exact state adapters. Singleton V4/Infinity state remains explicitly unsupported.
+- Exact token identity, uint8 decimals, reserve/slot0/balance evidence, block hash/time, direct/reciprocal price, USD-liquidity derivation, and provider reconciliation are retained independently.
+- Tests cover 6/8/18/255 decimals, BigInt range, zero state, stable-invariant rejection, malformed/reverted/timed-out RPC, circuit recovery, agreement/conflict, stale/future evidence, quality upgrades/downgrades, SSE identity/reconnect, reorg/dedup, and durable recovery.
+- UI changes are limited to progressive evidence disclosure in Inspector and Pool Drawer; navigation, layout, typography, colors, responsive behavior, and transaction gates are unchanged.

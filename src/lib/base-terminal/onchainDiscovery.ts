@@ -31,7 +31,22 @@ type StoredPool = {
   logIndex?: number;
   providers?: string[];
   priceToken1PerToken0?: number;
+  providerPriceToken1PerToken0?: number;
+  onchainPriceToken1PerToken0?: number;
   liquidityUsd?: number;
+  providerLiquidityUsd?: number;
+  onchainLiquidityUsd?: number;
+  liquidityResolutionState?: BasePair["liquidityState"];
+  priceReconciliation?: BasePair["priceReconciliation"];
+  liquidityReconciliation?: BasePair["liquidityReconciliation"];
+  onchainObservedPricesUsd?: Record<string, number>;
+  onchainState?: {
+    status?: "complete" | "pending" | "retryable" | "rejected" | "unsupported";
+    adapterFamily?: string; protocolFamily?: string; reasonCode?: string; confidence?: string; sourceMethod?: string;
+    blockNumber?: number; blockHash?: string; observedAt?: string; observedPrice0In1?: number; observedPrice1In0?: number;
+    reserveEvidence?: { reserve0Raw?: string; reserve1Raw?: string };
+    balanceEvidence?: { balance0Raw?: string; balance1Raw?: string };
+  };
   volume24hUsd?: number;
   trades24h?: number;
   transactions?: Partial<Record<"m5" | "h1" | "h6" | "h24", { buys: number; sells: number }>>;
@@ -51,6 +66,7 @@ type StoredMetadata = {
   symbol?: string;
   decimals?: number;
   status: "complete" | "partial" | "unavailable";
+  verificationState?: "verified" | "pending" | "quarantined" | "rejected";
 };
 
 export type OnchainStoreState = {
@@ -182,20 +198,30 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
     const current = pairsByPool.get(key);
     if (current) {
       const providers = [...new Set([...(current.dataProviders ?? (current.dataSource ? [current.dataSource] : [])), "onchain" as const])];
+      const currentBase = normalizeAddress(current.baseTokenAddress) ?? "";
+      const onchainObserved = positive(pool.onchainObservedPricesUsd?.[currentBase]);
+      const resolvedNative = positive(pool.priceToken1PerToken0);
       pairsByPool.set(key, {
         ...current,
         dataProviders: providers,
         firstSeenAt: earliestIso(current.firstSeenAt, pool.firstSeenAt),
         blockNumber: pool.blockNumber,
         onchainProvenance: provenance(pool),
-        observedPriceUsd: positive(pool.observedPricesUsd?.[normalizeAddress(current.baseTokenAddress) ?? ""]),
-        observedPriceProvider: pool.providerEnrichment?.selectedProvider,
+        metadataVerificationState: metadataVerification(result.state.tokenMetadata[pool.token0], result.state.tokenMetadata[pool.token1]),
+        observedPriceUsd: onchainObserved ?? positive(pool.observedPricesUsd?.[currentBase]),
+        observedPriceProvider: onchainObserved ? "onchain" : pool.providerEnrichment?.selectedProvider,
         observedPricePoolAddress: pool.poolAddress,
-        observedPriceAt: pool.providerEnrichment?.observedAt,
+        observedPriceAt: onchainObserved ? pool.onchainState?.observedAt : pool.providerEnrichment?.observedAt,
         providerDiscoveryState: mapProviderDiscoveryState(pool.providerEnrichment?.status),
         providerIndexedAt: pool.providerIndexedAt,
-        liquidityUsd: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidityUsd,
-        liquidity: pool.anchorConsensus && pool.liquidityUsd !== undefined ? pool.liquidityUsd : current.liquidity,
+        priceNative: resolvedNative?.toPrecision(15) ?? current.priceNative,
+        price: resolvedNative?.toPrecision(8) ?? current.price,
+        liquidityUsd: pool.liquidityUsd ?? current.liquidityUsd,
+        liquidity: pool.liquidityUsd ?? current.liquidity,
+        liquidityState: pool.liquidityResolutionState,
+        onchainStateEvidence: stateEvidence(pool),
+        priceReconciliation: pool.priceReconciliation,
+        liquidityReconciliation: pool.liquidityReconciliation,
         volume24h: pool.anchorConsensus && pool.volume24hUsd !== undefined ? pool.volume24hUsd : current.volume24h,
         volumes: pool.anchorConsensus && pool.volume24hUsd !== undefined ? { ...current.volumes, h24: pool.volume24hUsd } : current.volumes
       });
@@ -269,7 +295,7 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
   const symbol0 = safeLabel(token0?.symbol, pool.token0);
   const symbol1 = safeLabel(token1?.symbol, pool.token1);
   const nativePrice = positive(pool.priceToken1PerToken0);
-  const directUsd = positive(pool.observedPricesUsd?.[pool.token0]) ?? (nativePrice === undefined ? undefined
+  const directUsd = positive(pool.onchainObservedPricesUsd?.[pool.token0]) ?? positive(pool.observedPricesUsd?.[pool.token0]) ?? (nativePrice === undefined ? undefined
     : pool.token1 === BASE_USDC_ADDRESS ? nativePrice
       : pool.token0 === BASE_USDC_ADDRESS ? 1 : undefined);
   return {
@@ -288,11 +314,12 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     pairCreatedAtMs: Date.parse(createdAt),
     blockNumber: pool.blockNumber,
     metadataStatus: token0?.status === "complete" && token1?.status === "complete" ? "complete" : token0?.status || token1?.status ? "partial" : "unavailable",
+    metadataVerificationState: metadataVerification(token0, token1),
     onchainProvenance: provenance(pool),
     observedPriceUsd: directUsd,
-    observedPriceProvider: pool.providerEnrichment?.selectedProvider,
+    observedPriceProvider: positive(pool.onchainObservedPricesUsd?.[pool.token0]) ? "onchain" : pool.providerEnrichment?.selectedProvider,
     observedPricePoolAddress: pool.poolAddress,
-    observedPriceAt: pool.providerEnrichment?.observedAt,
+    observedPriceAt: positive(pool.onchainObservedPricesUsd?.[pool.token0]) ? pool.onchainState?.observedAt : pool.providerEnrichment?.observedAt,
     providerDiscoveryState: mapProviderDiscoveryState(pool.providerEnrichment?.status),
     providerIndexedAt: pool.providerIndexedAt,
     pair: `${symbol0} / ${symbol1}`,
@@ -310,6 +337,10 @@ function toDiscoveryPair(pool: StoredPool, metadata: Record<string, StoredMetada
     priceUsd: directUsd === undefined ? "N/A" : `$${directUsd.toPrecision(10)}`,
     liquidityUsd: pool.liquidityUsd,
     liquidity: pool.liquidityUsd,
+    liquidityState: pool.liquidityResolutionState,
+    onchainStateEvidence: stateEvidence(pool),
+    priceReconciliation: pool.priceReconciliation,
+    liquidityReconciliation: pool.liquidityReconciliation,
     volumes: pool.volume24hUsd === undefined ? undefined : { h24: pool.volume24hUsd },
     volume24h: pool.volume24hUsd,
     poolAge: formatAge(ageMinutes),
@@ -353,6 +384,36 @@ function provenance(pool: StoredPool) {
     bindingKind: pool.transactionHash ? "factory_event" as const : "registered_pool_identity" as const,
     decimalsVerified: pool.decimalsVerified === true || pool.providerEnrichment?.decimalsVerified === true
   };
+}
+
+function stateEvidence(pool: StoredPool): BasePair["onchainStateEvidence"] {
+  const state = pool.onchainState;
+  if (!state) return undefined;
+  return {
+    status: state.status,
+    adapterFamily: state.adapterFamily,
+    protocolFamily: state.protocolFamily,
+    reasonCode: state.reasonCode,
+    confidence: state.confidence,
+    sourceMethod: state.sourceMethod,
+    blockNumber: state.blockNumber,
+    blockHash: state.blockHash,
+    observedAt: state.observedAt,
+    observedPrice0In1: state.observedPrice0In1,
+    observedPrice1In0: state.observedPrice1In0,
+    reserve0Raw: state.reserveEvidence?.reserve0Raw,
+    reserve1Raw: state.reserveEvidence?.reserve1Raw,
+    balance0Raw: state.balanceEvidence?.balance0Raw,
+    balance1Raw: state.balanceEvidence?.balance1Raw
+  };
+}
+
+function metadataVerification(left: StoredMetadata | undefined, right: StoredMetadata | undefined): BasePair["metadataVerificationState"] {
+  if (left?.verificationState === "quarantined" || right?.verificationState === "quarantined") return "quarantined";
+  if (left?.verificationState === "rejected" || right?.verificationState === "rejected") return "rejected";
+  if (left?.verificationState === "verified" && right?.verificationState === "verified") return "verified";
+  if (Number.isInteger(left?.decimals) && Number.isInteger(right?.decimals)) return "legacy_verified";
+  return "pending";
 }
 
 function digestState(state: OnchainStoreState) {

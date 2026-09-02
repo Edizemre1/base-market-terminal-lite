@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BASE_CHAIN_ID, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
 import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_PRICE_AGE_MS, MAX_RECONCILIATION_RING } from "./model.mjs";
+import { resolveOnchainPoolEvidence } from "./onchain-state.mjs";
 
 export const STORE_SCHEMA_VERSION = 1;
 export const MAX_CANONICAL_EVENTS = 5_000;
@@ -59,6 +60,7 @@ export class DurableDiscoveryStore {
     next.updatedAt = new Date().toISOString();
     enforceRetention(next);
     expireStalePriceAnchors(next, new Date(next.updatedAt));
+    resolveOnchainPoolEvidence(next, new Date(next.updatedAt));
     next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
     synchronizeDerivedHealth(next);
     next.integrity = createIntegrity(next);
@@ -158,8 +160,9 @@ export function initialState(now = new Date()) {
     nextEventSequence: 0,
     provisional: {},
     metadataQueue: [],
+    onchainQueue: [],
     enrichmentQueue: [],
-    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0, enrichmentSuccess: 0, enrichmentFailure: 0, providerMatched: 0, providerUnmatched: 0, priceConflict: 0, staleAnchorRejected: 0, dustRejected: 0, exactLookupSuccess: 0, exactLookupPending: 0, exactLookupNotFound: 0, bandTransitions: 0 },
+    counters: { reconnectCount: 0, reorgCount: 0, duplicateDropped: 0, malformedRejected: 0, enrichmentSuccess: 0, enrichmentFailure: 0, providerMatched: 0, providerUnmatched: 0, priceConflict: 0, staleAnchorRejected: 0, dustRejected: 0, exactLookupSuccess: 0, exactLookupPending: 0, exactLookupNotFound: 0, bandTransitions: 0, onchainStateSuccess: 0, onchainStateFailure: 0, onchainStateClassified: 0, onchainStateDuplicate: 0, onchainStateOutOfOrder: 0, tokenMetadataVerified: 0 },
     health: {
       ready: false,
       mode: "confirmed_polling",
@@ -171,6 +174,7 @@ export function initialState(now = new Date()) {
       factories: Object.fromEntries(FACTORY_REGISTRY.map((entry) => [entry.id, { enabled: entry.enabled, healthy: false, cursor: 0 }])),
       storeIntegrity: "initializing",
       enrichmentQueueDepth: 0,
+      onchainQueueDepth: 0,
       anchorStatus: "unavailable"
     },
     integrity: { algorithm: "sha256", digest: "" }
@@ -208,6 +212,7 @@ function enforceRetention(state) {
   state.eventRing = (state.eventRing ?? []).slice(-MAX_EVENT_RING);
   state.marketSnapshots = (state.marketSnapshots ?? []).slice(-MAX_MARKET_SNAPSHOTS);
   state.metadataQueue = (state.metadataQueue ?? []).slice(-256);
+  state.onchainQueue = (state.onchainQueue ?? []).slice(0, 512);
   state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
   state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
   state.pools = keepNewestRecordEntries(state.pools ?? {}, MAX_POOLS, (pool) => pool.blockNumber ?? 0);
@@ -249,7 +254,7 @@ function synchronizeDerivedHealth(state) {
   state.health.pricedOpportunities = pricingTierCounts.A + pricingTierCounts.B + pricingTierCounts.C;
   state.health.rankedOpportunities = (state.opportunities ?? []).filter((opportunity) => opportunity.ranked).length;
   const bands = { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 };
-  const liquidity = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0 };
+  const liquidity = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0, conflicting_liquidity: 0, stale_liquidity: 0 };
   for (const opportunity of state.opportunities ?? []) {
     if (Object.hasOwn(bands, opportunity.qualityBand)) bands[opportunity.qualityBand] += 1;
     if (Object.hasOwn(liquidity, opportunity.liquidityState)) liquidity[opportunity.liquidityState] += 1;
@@ -264,6 +269,8 @@ function synchronizeDerivedHealth(state) {
   state.health.thinLiquidityCount = liquidity.thin_liquidity;
   state.health.zeroLiquidityCount = liquidity.zero_liquidity;
   state.health.usableLiquidityCount = liquidity.usable_liquidity;
+  state.health.conflictingLiquidityCount = liquidity.conflicting_liquidity;
+  state.health.staleLiquidityCount = liquidity.stale_liquidity;
   state.health.anchorStatus = anchor.status ?? "unavailable";
   state.health.anchorUsdPrice = anchor.value;
   state.health.anchorSourcePoolCount = anchor.sourcePoolCount ?? 0;

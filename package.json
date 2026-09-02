@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "design:guard": "node scripts/check-design-tokens.mjs",
     "test:design": "node --test tests/design-language-contract.test.mjs",
-    "test:onchain": "node --test tests/onchain-discovery-contract.test.mjs",
+    "test:onchain": "node --test tests/onchain-discovery-contract.test.mjs tests/onchain-state-contract.test.mjs",
     "test:enrichment": "node --test tests/enrichment-contract.test.mjs",
     "test:quality": "node --test tests/market-quality-contract.test.mjs",
     "test:providers": "playwright test -c playwright.provider.config.ts",

@@ -149,6 +149,10 @@ Actions begin with verbs. Empty/loading/error copy follows what happened → why
 - Muted violet is permitted only for volume semantics.
 - Mint is never decorative.
 
+## On-chain evidence disclosure
+
+Observed on-chain state does not add another dashboard layer. The main Wall and Board keep their existing density and hierarchy. Protocol adapter, exact source block/time, raw reserve/balance evidence, reason codes, and provider/on-chain reconciliation live behind native disclosure controls in Inspector → Pools and the Pool Drawer. Conflict and unavailable copy uses semantic trust/freshness colors already in the system; it does not introduce a new accent. Finding an on-chain price never enables Buy/Sell by itself.
+
 ## Static guard
 
 `npm run design:guard` scans product source and fails on:

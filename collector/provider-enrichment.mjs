@@ -286,8 +286,7 @@ export function joinExactProviderPools(pool, observations, { onchainState, now =
   if (!accepted.length) return { status: "conflicting", reasonCode: "token_identity_conflict", retryable: false, poolAddress, rejected };
   accepted.sort(compareObservations);
   const selected = accepted[0];
-  const onchainRate = positive(onchainState?.priceToken1PerToken0);
-  const priceToken1PerToken0 = onchainRate ?? positive(selected.priceToken1PerToken0);
+  const providerPriceToken1PerToken0 = positive(selected.priceToken1PerToken0);
   const providers = [...new Set(accepted.map((item) => item.provider))].sort();
   const observedAt = newestIso(accepted.map((item) => item.observedAt)) ?? now.toISOString();
   const observedPricesUsd = Object.fromEntries([token0, token1].flatMap((token) => {
@@ -301,7 +300,7 @@ export function joinExactProviderPools(pool, observations, { onchainState, now =
   }));
   return {
     status: "matched",
-    reasonCode: onchainRate ? onchainState.reasonCode : "exact_provider_pool_match",
+    reasonCode: "exact_provider_pool_match",
     retryable: false,
     poolAddress,
     orientation: selected.orientation,
@@ -309,8 +308,9 @@ export function joinExactProviderPools(pool, observations, { onchainState, now =
     selectedProvider: selected.provider,
     observedAt,
     receivedAt: selected.receivedAt,
-    priceToken1PerToken0,
-    rawPriceRatio: onchainState?.rawPriceRatio,
+    priceToken1PerToken0: providerPriceToken1PerToken0,
+    providerPriceToken1PerToken0,
+    providerLiquidityUsd: selected.liquidityUsd,
     priceUsd: selected.priceUsd,
     observedPricesUsd,
     liquidityUsd: selected.liquidityUsd,

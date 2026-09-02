@@ -11,7 +11,7 @@ export const MARKET_QUALITY_THRESHOLDS = Object.freeze({
 });
 
 export const QUALITY_BANDS = Object.freeze(["RANKED", "EMERGING", "DETECTED", "REJECTED"]);
-export const LIQUIDITY_STATES = Object.freeze(["usable_liquidity", "thin_liquidity", "liquidity_unknown", "zero_liquidity"]);
+export const LIQUIDITY_STATES = Object.freeze(["usable_liquidity", "thin_liquidity", "liquidity_unknown", "zero_liquidity", "conflicting_liquidity", "stale_liquidity"]);
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const REJECTED_REASONS = new Set([
@@ -22,7 +22,10 @@ const REJECTED_REASONS = new Set([
   "non_finite_price",
   "future_timestamp",
   "cycle_detected",
-  "conflicting_pool_identity"
+  "conflicting_pool_identity",
+  "price_conflict",
+  "conflicting_liquidity",
+  "stale_liquidity"
 ]);
 
 export function classifyLiquidityState(values, minimumLiquidityUsd = MARKET_QUALITY_THRESHOLDS.canonicalPriceMinimumLiquidityUsd) {
@@ -42,9 +45,30 @@ export function buildObservedPriceUsd(tokenAddress, pools, now = new Date(), {
   const nowMs = now.getTime();
   const candidates = [];
   for (const pool of pools ?? []) {
-    if (pool?.status !== "confirmed" || pool.orphaned || pool?.providerEnrichment?.status !== "matched") continue;
+    if (pool?.status !== "confirmed" || pool.orphaned) continue;
     const poolAddress = normalizeAddress(pool.poolAddress);
     if (!poolAddress) continue;
+    const onchainValue = positive(pool.onchainObservedPricesUsd?.[token]);
+    const onchainObservedAt = validIso(pool.onchainState?.observedAt) ? pool.onchainState.observedAt : undefined;
+    if (onchainValue && onchainObservedAt && pool.priceReconciliation?.status !== "conflict") {
+      const observedMs = Date.parse(onchainObservedAt);
+      if (observedMs <= nowMs + 5_000 && nowMs - observedMs <= maximumAgeMs) candidates.push({
+        value: onchainValue,
+        rawValue: Number(onchainValue).toPrecision(15),
+        provider: "onchain",
+        poolKey: pool.poolKey,
+        poolAddress,
+        observedAt: onchainObservedAt,
+        freshness: nowMs - observedMs <= freshMaximumAgeMs ? "fresh" : "delayed",
+        liquidityUsd: finiteNonNegative(pool.onchainLiquidityUsd),
+        reasonCode: "exact_onchain_observed_price",
+        executable: false,
+        blockNumber: pool.onchainState?.blockNumber,
+        blockHash: pool.onchainState?.blockHash,
+        sourceMethod: pool.onchainState?.sourceMethod
+      });
+    }
+    if (pool?.providerEnrichment?.status !== "matched") continue;
     for (const row of pool.providerSnapshots ?? []) {
       const base = normalizeAddress(row.baseTokenAddress);
       const quote = normalizeAddress(row.quoteTokenAddress);

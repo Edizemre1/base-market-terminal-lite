@@ -8,7 +8,7 @@ export const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 
 export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: BasePair[], now = new Date()): CanonicalPrice {
   const pricingPools = pairs.flatMap((pair) => {
-    if (pair.providerDiscoveryState === "conflicting") return [];
+    if (pair.providerDiscoveryState === "conflicting" || pair.priceReconciliation?.status === "conflict") return [];
     const token0 = normalizeAddress(pair.baseTokenAddress);
     const token1 = normalizeAddress(pair.quoteTokenAddress);
     const poolKey = (pair.pairAddress ?? pair.id).toLowerCase();
@@ -22,9 +22,11 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
       token1,
       status: "confirmed",
       orphaned: false,
-      verifiedSource: Boolean(pair.pairAddress && pair.onchainProvenance?.decimalsVerified && pair.dataProviders?.includes("onchain")),
+      verifiedSource: Boolean(pair.pairAddress && pair.dataProviders?.includes("onchain") && (pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified" || pair.onchainProvenance?.decimalsVerified)),
       priceToken1PerToken0: rate,
       liquidityUsd: nonNegative(pair.liquidityUsd),
+      priceReconciliation: pair.priceReconciliation,
+      liquidityResolutionState: pair.liquidityState,
       volume24hUsd: nonNegative(pair.volumes?.h24),
       trades24h: pair.txns?.h24 ? pair.txns.h24.buys + pair.txns.h24.sells : undefined,
       observedAt,

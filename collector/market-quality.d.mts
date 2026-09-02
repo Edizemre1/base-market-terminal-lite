@@ -1,5 +1,5 @@
 export type QualityBand = "RANKED" | "EMERGING" | "DETECTED" | "REJECTED";
-export type LiquidityState = "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity";
+export type LiquidityState = "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity" | "conflicting_liquidity" | "stale_liquidity";
 export type ObservedPriceUsd = {
   value: number;
   rawValue: string;
@@ -10,7 +10,10 @@ export type ObservedPriceUsd = {
   receivedAt?: string;
   freshness: "fresh" | "delayed";
   liquidityUsd?: number;
-  reasonCode: "exact_provider_observed_price";
+  reasonCode: "exact_provider_observed_price" | "exact_onchain_observed_price";
+  blockNumber?: number;
+  blockHash?: string;
+  sourceMethod?: string;
   executable: false;
 };
 export const MARKET_QUALITY_THRESHOLDS: Readonly<Record<string, number>>;

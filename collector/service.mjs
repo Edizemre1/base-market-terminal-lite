@@ -2,6 +2,7 @@ import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH, COLLECTOR_VERSION, FACTORY_REGISTR
 import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, coalesceBoundedQueue, decodeFactoryLog, reconcileCanonicalWindow } from "./model.mjs";
 import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding } from "./rpc.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
+import { ONCHAIN_STATE_REFRESH_MS, acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState } from "./onchain-state.mjs";
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ProviderEnrichmentClient,
@@ -28,6 +29,8 @@ export function resolveCollectorConfig(environment = process.env) {
     bootstrapBlocks: boundedInteger(environment.ONCHAIN_BOOTSTRAP_BLOCKS, 2_000, 64, 10_000),
     maximumChunksPerPass: boundedInteger(environment.ONCHAIN_MAX_CHUNKS_PER_PASS, 4, 1, 16),
     metadataBatchSize: boundedInteger(environment.ONCHAIN_METADATA_BATCH_SIZE, 12, 1, 32),
+    onchainStateBatchSize: boundedInteger(environment.ONCHAIN_STATE_BATCH_SIZE, 4, 1, 12),
+    onchainStateIntervalMs: boundedInteger(environment.ONCHAIN_STATE_INTERVAL_MS, 2_000, 500, 30_000),
     enrichmentBatchSize: boundedInteger(environment.ONCHAIN_ENRICHMENT_BATCH_SIZE, 4, 1, 8),
     enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, 2_000, 500, 30_000),
     providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
@@ -40,6 +43,7 @@ export class OnchainDiscoveryCollector {
   constructor(config = resolveCollectorConfig()) {
     this.config = config;
     this.rpc = new JsonRpcClient(config.httpUrl);
+    this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
     // Anchor availability is a pricing safety boundary. Keep its provider
     // request and bounded RPC validation independent from the normal exact-pool
@@ -64,6 +68,8 @@ export class OnchainDiscoveryCollector {
     const state = await this.store.transact("initialize-enrichment-state", (draft) => {
       ensureEnrichmentState(draft);
       seedEnrichmentQueue(draft, new Date());
+      seedMetadataQueue(draft, new Date());
+      seedOnchainQueue(draft, new Date());
     });
     if (this.config.websocketUrl) this.startWebsocket();
     return state;
@@ -73,6 +79,7 @@ export class OnchainDiscoveryCollector {
     this.running = true;
     const enrichment = this.runEnrichmentLoop(signal);
     const anchor = this.runAnchorLoop(signal);
+    const onchainState = this.runOnchainStateLoop(signal);
     while (this.running && !signal?.aborted) {
       const startedAt = Date.now();
       try { await this.scanOnce(); }
@@ -80,7 +87,7 @@ export class OnchainDiscoveryCollector {
       const remaining = Math.max(50, this.config.pollIntervalMs - (Date.now() - startedAt));
       await delay(remaining, signal);
     }
-    await Promise.all([enrichment, anchor]);
+    await Promise.all([enrichment, anchor, onchainState]);
   }
 
   async scanOnce() {
@@ -142,6 +149,8 @@ export class OnchainDiscoveryCollector {
           nextAttemptAt: new Date().toISOString()
         }] : []);
         next.enrichmentQueue = coalesceEnrichmentQueue(next.enrichmentQueue, enrichmentJobs);
+        seedMetadataQueue(next, new Date());
+        seedOnchainQueue(next, new Date());
         for (const entry of ENABLED) next.cursors[entry.id] = { blockNumber: toBlock, blockHash: undefined, updatedAt: new Date().toISOString() };
         next.currentHead = head;
         next.confirmedHead = confirmedHead;
@@ -204,18 +213,116 @@ export class OnchainDiscoveryCollector {
 
   async drainMetadata() {
     const state = this.store.read();
-    const batch = (state.metadataQueue ?? []).slice(0, this.config.metadataBatchSize);
+    const now = new Date();
+    const batch = (state.metadataQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.metadataBatchSize);
     if (!batch.length) return;
-    const results = {};
-    for (const item of batch) {
-      results[item.tokenAddress] = await enrichTokenMetadata(this.rpc, item.tokenAddress, item.blockNumber);
-    }
+    const results = Object.fromEntries(await Promise.all(batch.map(async (item) => [item.tokenAddress, await enrichTokenMetadata(this.rpc, item.tokenAddress, item.blockNumber, now)])));
     await this.store.transact("bounded-token-metadata-enrichment", (draft) => {
-      draft.tokenMetadata = { ...draft.tokenMetadata, ...results };
-      const completed = new Set(batch.map((item) => item.tokenAddress));
+      const completed = new Set();
+      for (const item of batch) {
+        const previous = draft.tokenMetadata[item.tokenAddress];
+        const result = results[item.tokenAddress];
+        if (previous?.verificationState === "verified") { completed.add(item.tokenAddress); continue; }
+        draft.tokenMetadata[item.tokenAddress] = result;
+        if (result.verificationState === "verified") {
+          completed.add(item.tokenAddress);
+          draft.counters.tokenMetadataVerified += 1;
+          appendRelayEvent(draft, "token_metadata_verified", { tokenAddress: item.tokenAddress, decimals: result.decimals, blockNumber: result.blockNumber }, result.observedAt);
+        } else if (!result.retryable || (item.attempts ?? 0) >= 5) {
+          completed.add(item.tokenAddress);
+        } else {
+          const queued = draft.metadataQueue.find((row) => row.tokenAddress === item.tokenAddress);
+          const attempts = (item.attempts ?? 0) + 1;
+          if (queued) Object.assign(queued, { attempts, nextAttemptAt: new Date(now.getTime() + Math.min(15 * 60_000, 15_000 * 2 ** attempts)).toISOString(), lastReason: result.failureReason });
+        }
+      }
       draft.metadataQueue = draft.metadataQueue.filter((item) => !completed.has(item.tokenAddress));
+      seedMetadataQueue(draft, now);
       draft.health.metadataQueueDepth = draft.metadataQueue.length;
     });
+  }
+
+  async runOnchainStateLoop(signal) {
+    while (this.running && !signal?.aborted) {
+      const startedAt = Date.now();
+      try { await this.runOnchainStateCycle(new Date(), signal); }
+      catch (error) {
+        await this.store.transact("onchain-state-cycle-failure", (draft) => {
+          ensureEnrichmentState(draft);
+          draft.counters.onchainStateFailure += 1;
+          draft.health.lastOnchainStateFailure = safeError(error);
+          draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
+        }).catch(() => {});
+      }
+      await delay(Math.max(50, this.config.onchainStateIntervalMs - (Date.now() - startedAt)), signal);
+    }
+  }
+
+  async runOnchainStateCycle(now = new Date(), signal) {
+    const initial = this.store.read();
+    if (hasOnchainSeedCandidate(initial, now)) {
+      await this.store.transact("seed-onchain-state-queue", (draft) => seedOnchainQueue(draft, now));
+    }
+    const before = this.store.read();
+    const due = (before.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.onchainStateBatchSize);
+    if (!due.length) return before;
+    const needsRpc = due.some((item) => {
+      const pool = before.pools[item.poolKey];
+      return Boolean(pool?.poolAddress && resolveOnchainAdapter(pool));
+    });
+    const blockNumber = needsRpc ? await this.stateRpc.blockNumber({ signal }) : before.confirmedHead;
+    const blockRow = needsRpc ? await this.stateRpc.getBlock(blockNumber, { signal }) : undefined;
+    const blockTime = blockRow?.timestamp ? Number.parseInt(blockRow.timestamp, 16) * 1_000 : now.getTime();
+    const block = { number: blockNumber, hash: blockRow?.hash?.toLowerCase(), observedAt: Number.isFinite(blockTime) ? new Date(blockTime).toISOString() : now.toISOString() };
+    const outcomes = await Promise.all(due.map(async (item) => {
+      const pool = before.pools[item.poolKey];
+      if (!pool || pool.status !== "confirmed" || pool.orphaned || pool.replay) return { item, state: undefined, remove: true };
+      const adapter = resolveOnchainAdapter(pool);
+      if (!adapter) return { item, state: unsupportedOnchainState(pool, now) };
+      try {
+        return { item, state: await readPoolOnchainState(this.stateRpc, pool, before.tokenMetadata, block, { signal }) };
+      } catch (error) {
+        return { item, state: { ...unsupportedOnchainState(pool, now), status: "retryable", adapterFamily: adapter.adapterFamily, protocolFamily: adapter.protocolFamily, confidence: "unavailable", reasonCode: error?.reasonCode ?? "onchain_state_read_failed", retryable: true } };
+      }
+    }));
+    const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
+      ensureEnrichmentState(draft);
+      const remove = new Set();
+      for (const outcome of outcomes) {
+        const key = outcome.item.poolKey;
+        const pool = draft.pools[key];
+        if (!pool || outcome.remove) { remove.add(key); continue; }
+        const observed = outcome.state;
+        const acceptance = acceptOnchainStateUpdate(pool.onchainState, observed);
+        if (!acceptance.accepted) {
+          if (acceptance.reasonCode === "duplicate_state_snapshot") draft.counters.onchainStateDuplicate += 1;
+          else draft.counters.onchainStateOutOfOrder += 1;
+          if (pool.onchainState) draft.pools[key] = { ...pool, onchainState: { ...pool.onchainState, nextRetryAt: new Date(now.getTime() + ONCHAIN_STATE_REFRESH_MS).toISOString(), lastRejectedUpdate: acceptance.reasonCode } };
+          remove.add(key);
+          continue;
+        }
+        const queued = draft.onchainQueue.find((item) => item.poolKey === key);
+        const attempts = observed.status === "retryable" || observed.status === "pending" ? (outcome.item.attempts ?? 0) + 1 : 0;
+        const refreshMs = observed.status === "complete" ? ONCHAIN_STATE_REFRESH_MS
+          : observed.status === "unsupported" ? 6 * 60 * 60_000
+            : observed.status === "rejected" ? observed.reasonCode === "zero_liquidity" ? ONCHAIN_STATE_REFRESH_MS : 60 * 60_000
+              : Math.min(15 * 60_000, 15_000 * 2 ** Math.min(attempts, 6));
+        const nextRetryAt = new Date(now.getTime() + refreshMs).toISOString();
+        draft.pools[key] = { ...pool, onchainState: { ...observed, nextRetryAt }, decimalsVerified: Number.isInteger(observed.decimals0) && Number.isInteger(observed.decimals1) };
+        if (queued) Object.assign(queued, { attempts, nextAttemptAt: nextRetryAt, lastReason: observed.reasonCode });
+        if (observed.status === "complete") draft.counters.onchainStateSuccess += 1;
+        else draft.counters.onchainStateFailure += 1;
+        draft.counters.onchainStateClassified += 1;
+        remove.add(key);
+      }
+      draft.onchainQueue = draft.onchainQueue.filter((item) => !remove.has(item.poolKey));
+      seedOnchainQueue(draft, now);
+      draft.health.onchainQueueDepth = draft.onchainQueue.length;
+      draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
+      draft.health.lastOnchainStateCycle = now.toISOString();
+    });
+    await this.publishSemanticDeltas(before, after, outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]));
+    return this.store.read();
   }
 
   async runEnrichmentLoop(signal) {
@@ -254,17 +361,10 @@ export class OnchainDiscoveryCollector {
       if (!pool?.poolAddress || pool.status !== "confirmed" || pool.orphaned) return { item, status: "discarded", reasonCode: "pool_no_longer_eligible" };
       try {
         const lookup = await this.provider.lookupPool(pool.poolAddress);
-        const metadata = { ...before.tokenMetadata };
+        const metadata = before.tokenMetadata;
         const metadataUpdates = {};
-        for (const token of [pool.token0, pool.token1]) {
-          if (Number.isInteger(metadata[token]?.decimals)) continue;
-          const exactDecimals = await readTokenDecimals(this.rpc, token, "latest");
-          if (!exactDecimals.ok) continue;
-          metadataUpdates[token] = { ...metadata[token], address: token, decimals: exactDecimals.decimals, codeExists: true, observedAt: exactDecimals.observedAt, blockNumber: before.currentHead, status: metadata[token]?.name && metadata[token]?.symbol ? "complete" : "partial" };
-          metadata[token] = metadataUpdates[token];
-        }
         const decimalsVerified = [pool.token0, pool.token1].every((token) => Number.isInteger(metadata[token]?.decimals));
-        const onchainState = await readSupportedPoolState(this.rpc, pool, metadata, "latest");
+        const onchainState = pool.onchainState;
         const joined = joinExactProviderPools(pool, lookup.observations, { onchainState, now });
         if (joined.status === "matched" && !decimalsVerified) {
           joined.priceToken1PerToken0 = undefined;
@@ -293,10 +393,11 @@ export class OnchainDiscoveryCollector {
             marketObservedAt: joined.observedAt,
             providers: [...new Set([...(pool.providers ?? []), ...joined.providers])].sort(),
             priceToken1PerToken0: joined.priceToken1PerToken0,
-            rawPriceRatio: joined.rawPriceRatio,
+            providerPriceToken1PerToken0: joined.providerPriceToken1PerToken0,
             priceUsd: joined.priceUsd,
             observedPricesUsd: joined.observedPricesUsd,
             liquidityUsd: joined.liquidityUsd,
+            providerLiquidityUsd: joined.providerLiquidityUsd,
             volumes: joined.volumes,
             volume24hUsd: joined.volume24hUsd,
             transactions: joined.transactions,
@@ -483,6 +584,8 @@ export class OnchainDiscoveryCollector {
   async publishSemanticDeltas(before, after, touchedPoolKeys) {
     const events = [];
     for (const poolKey of touchedPoolKeys) {
+      const previousPool = before.pools?.[poolKey];
+      const currentPool = after.pools?.[poolKey];
       const previous = before.pools?.[poolKey]?.providerEnrichment?.status;
       const current = after.pools?.[poolKey]?.providerEnrichment?.status;
       if (previous !== "matched" && current === "matched") {
@@ -490,6 +593,12 @@ export class OnchainDiscoveryCollector {
         events.push({ type: "provider_pool_found", data: { poolKey, providerIndexedAt: after.pools[poolKey].providerIndexedAt } });
       }
       if (previous !== "pending" && current === "pending") events.push({ type: "provider_pool_pending", data: { poolKey, reasonCode: after.pools[poolKey].providerEnrichment.reasonCode } });
+      if (semanticOnchainState(previousPool?.onchainState) !== semanticOnchainState(currentPool?.onchainState)) {
+        events.push({ type: "pool_onchain_state_observed", data: { poolKey, adapterFamily: currentPool?.onchainState?.adapterFamily, status: currentPool?.onchainState?.status, reasonCode: currentPool?.onchainState?.reasonCode, blockNumber: currentPool?.onchainState?.blockNumber, blockHash: currentPool?.onchainState?.blockHash } });
+      }
+      if (previousPool?.priceReconciliation?.status !== "conflict" && currentPool?.priceReconciliation?.status === "conflict") {
+        events.push({ type: "price_conflict_detected", data: { poolKey, ...currentPool.priceReconciliation, providerObservedAt: currentPool.marketObservedAt, onchainObservedAt: currentPool.onchainState?.observedAt, blockNumber: currentPool.onchainState?.blockNumber } });
+      }
     }
     const beforeAnchor = semanticAnchor(before.priceAnchors?.wethUsdc);
     const afterAnchor = semanticAnchor(after.priceAnchors?.wethUsdc);
@@ -498,9 +607,11 @@ export class OnchainDiscoveryCollector {
     for (const opportunity of after.opportunities ?? []) {
       const previous = previousById.get(opportunity.id);
       if (previous?.canonicalPrice?.tier === "UNPRICED" && opportunity.canonicalPrice.tier !== "UNPRICED") events.push({ type: "opportunity_priced", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value } });
+      if (previous && semanticCanonicalPrice(previous.canonicalPrice) !== semanticCanonicalPrice(opportunity.canonicalPrice)) events.push({ type: "opportunity_canonical_price", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value, sourcePoolKeys: opportunity.canonicalPrice.sourcePoolKeys, reasonCode: opportunity.canonicalPrice.reasonCode } });
       if (previous?.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
       if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
-      if (!previous?.observedPriceUsd && opportunity.observedPriceUsd) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd.value, provider: opportunity.observedPriceUsd.provider, poolAddress: opportunity.observedPriceUsd.poolAddress } });
+      if (previous && semanticObservedPrice(previous.observedPriceUsd) !== semanticObservedPrice(opportunity.observedPriceUsd)) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd?.value, provider: opportunity.observedPriceUsd?.provider, poolAddress: opportunity.observedPriceUsd?.poolAddress, reasonCode: opportunity.observedPriceUsd?.reasonCode } });
+      if (previous && (previous.liquidityState !== opportunity.liquidityState || previous.bestLiquidityUsd !== opportunity.bestLiquidityUsd)) events.push({ type: "opportunity_liquidity_resolved", data: { opportunityId: opportunity.id, liquidityState: opportunity.liquidityState, bestLiquidityUsd: opportunity.bestLiquidityUsd } });
       if (previous && previous.qualityBand !== opportunity.qualityBand) events.push({ type: "opportunity_band_changed", data: { opportunityId: opportunity.id, previousBand: previous.qualityBand, band: opportunity.qualityBand } });
       if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
       if (previous?.ranked && !opportunity.ranked) events.push({ type: "opportunity_unranked", data: { opportunityId: opportunity.id, reasonCode: opportunity.exclusionReason } });
@@ -636,13 +747,66 @@ function buildHealth(state, head, confirmedHead, mode) {
 
 function ensureEnrichmentState(state) {
   state.enrichmentQueue ??= [];
+  state.onchainQueue ??= [];
+  state.metadataQueue ??= [];
   state.priceAnchors ??= {};
   state.priceAnchors.wethUsdc ??= { status: "unavailable", reasonCode: "not_initialized", sourcePoolCount: 0, freshness: "unavailable" };
   state.counters ??= {};
-  for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected", "exactLookupSuccess", "exactLookupPending", "exactLookupNotFound", "bandTransitions"]) {
+  for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected", "exactLookupSuccess", "exactLookupPending", "exactLookupNotFound", "bandTransitions", "onchainStateSuccess", "onchainStateFailure", "onchainStateClassified", "onchainStateDuplicate", "onchainStateOutOfOrder", "tokenMetadataVerified"]) {
     if (!Number.isFinite(state.counters[key])) state.counters[key] = 0;
   }
   state.health ??= {};
+  for (const metadata of Object.values(state.tokenMetadata ?? {})) {
+    if (!metadata.verificationState && Number.isInteger(metadata.decimals) && metadata.decimals >= 0 && metadata.decimals <= 255) {
+      metadata.verificationState = "verified";
+      metadata.source ??= "erc20_contract";
+      metadata.retryable = false;
+    }
+  }
+}
+
+function seedMetadataQueue(state, now) {
+  const queued = new Set((state.metadataQueue ?? []).map((item) => item.tokenAddress));
+  const tokens = [...new Set(Object.values(state.pools ?? {}).flatMap((pool) => [pool.token0, pool.token1]))].filter(Boolean).sort();
+  const jobs = [];
+  for (const token of tokens) {
+    const metadata = state.tokenMetadata?.[token];
+    if (metadata?.verificationState === "verified" || metadata?.verificationState === "quarantined" || queued.has(token)) continue;
+    const retryAt = Date.parse(metadata?.retryAt ?? "");
+    if (Number.isFinite(retryAt) && retryAt > now.getTime()) continue;
+    jobs.push({ poolKey: token, tokenAddress: token, blockNumber: state.confirmedHead || state.currentHead, attempts: 0, createdAt: now.toISOString(), nextAttemptAt: now.toISOString() });
+  }
+  state.metadataQueue = coalesceBoundedQueue(state.metadataQueue ?? [], jobs, 256);
+}
+
+function seedOnchainQueue(state, now) {
+  const queued = new Set((state.onchainQueue ?? []).map((item) => item.poolKey));
+  const candidates = Object.values(state.pools ?? {}).filter((pool) => {
+    if (pool.status !== "confirmed" || pool.orphaned || pool.replay || queued.has(pool.poolKey)) return false;
+    const retryAt = Date.parse(pool.onchainState?.nextRetryAt ?? "");
+    return !Number.isFinite(retryAt) || retryAt <= now.getTime();
+  }).sort((left, right) => Number(Boolean(resolveOnchainAdapter(right) && right.poolAddress)) - Number(Boolean(resolveOnchainAdapter(left) && left.poolAddress)) || left.poolKey.localeCompare(right.poolKey));
+  const jobs = candidates.map((pool) => ({
+    poolKey: pool.poolKey,
+    poolAddress: pool.poolAddress,
+    attempts: 0,
+    createdAt: now.toISOString(),
+    nextAttemptAt: now.toISOString()
+  }));
+  const combined = new Map([...(state.onchainQueue ?? []), ...jobs].map((item) => [item.poolKey, item]));
+  state.onchainQueue = [...combined.values()].sort((left, right) => {
+    const leftPool = state.pools?.[left.poolKey];
+    const rightPool = state.pools?.[right.poolKey];
+    return Number(Boolean(resolveOnchainAdapter(rightPool) && rightPool?.poolAddress)) - Number(Boolean(resolveOnchainAdapter(leftPool) && leftPool?.poolAddress)) || left.poolKey.localeCompare(right.poolKey);
+  }).slice(0, 512);
+  state.health ??= {};
+  state.health.onchainQueueDepth = state.onchainQueue.length;
+}
+
+function hasOnchainSeedCandidate(state, now) {
+  const queued = new Set((state.onchainQueue ?? []).map((item) => item.poolKey));
+  return Object.values(state.pools ?? {}).some((pool) => pool.status === "confirmed" && !pool.orphaned && !pool.replay && !queued.has(pool.poolKey)
+    && (!pool.onchainState?.nextRetryAt || Date.parse(pool.onchainState.nextRetryAt) <= now.getTime()));
 }
 
 function seedEnrichmentQueue(state, now) {
@@ -693,7 +857,7 @@ function refreshEnrichmentHealth(state, circuits) {
   for (const opportunity of state.opportunities ?? []) tiers[opportunity.canonicalPrice?.tier ?? "UNPRICED"] += 1;
   const anchor = state.priceAnchors?.wethUsdc ?? {};
   const bands = { RANKED: 0, EMERGING: 0, DETECTED: 0, REJECTED: 0 };
-  const liquidityStates = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0 };
+  const liquidityStates = { liquidity_unknown: 0, thin_liquidity: 0, zero_liquidity: 0, usable_liquidity: 0, conflicting_liquidity: 0, stale_liquidity: 0 };
   const categoryEligibilityCounts = { new: 0, detected: 0, gainersLosers: 0, volume: 0, liquidity: 0, mostTraded: 0 };
   for (const opportunity of state.opportunities ?? []) {
     if (bands[opportunity.qualityBand] !== undefined) bands[opportunity.qualityBand] += 1;
@@ -735,6 +899,8 @@ function refreshEnrichmentHealth(state, circuits) {
     thinLiquidityCount: liquidityStates.thin_liquidity,
     zeroLiquidityCount: liquidityStates.zero_liquidity,
     usableLiquidityCount: liquidityStates.usable_liquidity,
+    conflictingLiquidityCount: liquidityStates.conflicting_liquidity,
+    staleLiquidityCount: liquidityStates.stale_liquidity,
     exactLookupQueueDepth: state.enrichmentQueue?.length ?? 0,
     exactLookupSuccess: matched.length,
     exactLookupPending: pending.length,
@@ -744,6 +910,12 @@ function refreshEnrichmentHealth(state, circuits) {
     categoryEligibilityCounts,
     oldestPendingEnrichment: pendingTimes[0],
     providerCircuits: circuits,
+    onchainRpc: state.health.onchainRpc,
+    onchainQueueDepth: state.onchainQueue?.length ?? 0,
+    onchainSupportedPools: pools.filter((pool) => Boolean(resolveOnchainAdapter(pool))).length,
+    onchainStateStatusCounts: countBy(pools, (pool) => pool.onchainState?.status ?? "not_collected"),
+    onchainStateReasonCounts: countBy(pools, (pool) => pool.onchainState?.reasonCode ?? "not_collected"),
+    metadataVerificationCounts: countBy(Object.values(state.tokenMetadata ?? {}), (metadata) => metadata.verificationState ?? (Number.isInteger(metadata.decimals) ? "legacy_verified" : "pending")),
     priceConflictCount: state.counters.priceConflict,
     staleAnchorRejectionCount: state.counters.staleAnchorRejected,
     dustRejectionCount: state.counters.dustRejected
@@ -753,6 +925,15 @@ function refreshEnrichmentHealth(state, circuits) {
 function semanticAnchor(anchor) {
   return JSON.stringify({ status: anchor?.status, value: Number.isFinite(anchor?.value) ? Number(anchor.value.toPrecision(10)) : undefined, pools: anchor?.consensusPools, reasonCode: anchor?.reasonCode });
 }
+
+function semanticOnchainState(state) {
+  return JSON.stringify({ status: state?.status, adapterFamily: state?.adapterFamily, reasonCode: state?.reasonCode, rate: precision(state?.observedPrice0In1), reserve0: state?.reserveEvidence?.reserve0Raw, reserve1: state?.reserveEvidence?.reserve1Raw, balance0: state?.balanceEvidence?.balance0Raw, balance1: state?.balanceEvidence?.balance1Raw });
+}
+
+function semanticCanonicalPrice(value) { return JSON.stringify({ tier: value?.tier, value: precision(value?.value), reasonCode: value?.reasonCode, sourcePoolKeys: value?.sourcePoolKeys }); }
+function semanticObservedPrice(value) { return JSON.stringify({ value: precision(value?.value), provider: value?.provider, poolAddress: value?.poolAddress, freshness: value?.freshness, reasonCode: value?.reasonCode }); }
+function precision(value) { return Number.isFinite(value) ? Number(value.toPrecision(12)) : undefined; }
+function countBy(values, selector) { const result = {}; for (const value of values) { const key = selector(value); result[key] = (result[key] ?? 0) + 1; } return result; }
 
 function semanticMetrics(opportunity) {
   return JSON.stringify({ aggregate: opportunity?.aggregate, lifecycle: opportunity?.lifecycle, ranked: opportunity?.ranked, qualityBand: opportunity?.qualityBand, observedPriceUsd: opportunity?.observedPriceUsd, liquidityState: opportunity?.liquidityState });

@@ -245,14 +245,15 @@ test("non-finite price is rejected without coercing to zero", () => {
   assert.equal(price.value, undefined);
 });
 
-test("malformed metadata and invalid decimals degrade to partial without throwing", async () => {
+test("malformed display metadata does not discard an exact uint8 decimals value", async () => {
   const rpc = {
     getCode: async () => "0x01",
     batch: async () => ["0xdeadbeef", "0x00", wordNumber(255)]
   };
   const metadata = await enrichTokenMetadata(rpc, TOKEN_A, 50_000_000, NOW);
   assert.equal(metadata.status, "partial");
-  assert.equal(metadata.decimals, undefined);
+  assert.equal(metadata.decimals, 255);
+  assert.equal(metadata.verificationState, "verified");
   assert.equal(metadata.codeExists, true);
 });
 

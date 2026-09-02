@@ -26,7 +26,7 @@ export type BasePair = {
   firstSeenAt?: string;
   qualityTier?: "active" | "thin" | "incomplete" | "expired";
   qualityBand?: "RANKED" | "EMERGING" | "DETECTED" | "REJECTED";
-  liquidityState?: "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity";
+  liquidityState?: "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity" | "conflicting_liquidity" | "stale_liquidity";
   observedPriceUsd?: number;
   observedPriceProvider?: string;
   observedPricePoolAddress?: string;
@@ -43,6 +43,26 @@ export type BasePair = {
   isPrimaryMarket?: boolean;
   poolOrientation?: "direct" | "inverted" | "pair";
   metadataStatus?: "complete" | "partial" | "unavailable";
+  metadataVerificationState?: "verified" | "legacy_verified" | "pending" | "quarantined" | "rejected";
+  onchainStateEvidence?: {
+    status?: "complete" | "pending" | "retryable" | "rejected" | "unsupported";
+    adapterFamily?: string;
+    protocolFamily?: string;
+    reasonCode?: string;
+    confidence?: string;
+    sourceMethod?: string;
+    blockNumber?: number;
+    blockHash?: string;
+    observedAt?: string;
+    observedPrice0In1?: number;
+    observedPrice1In0?: number;
+    reserve0Raw?: string;
+    reserve1Raw?: string;
+    balance0Raw?: string;
+    balance1Raw?: string;
+  };
+  priceReconciliation?: { status?: "agreement" | "conflict" | "provider_only" | "onchain_only" | "unavailable"; provider?: number; onchain?: number; deviation?: number; reasonCode?: string; providerObservedAt?: string; onchainObservedAt?: string; onchainBlockNumber?: number; onchainBlockHash?: string };
+  liquidityReconciliation?: { status?: "agreement" | "conflict" | "provider_only" | "onchain_only" | "unavailable"; provider?: number; onchain?: number; deviation?: number; reasonCode?: string; providerObservedAt?: string; onchainObservedAt?: string; onchainBlockNumber?: number };
   blockNumber?: number;
   onchainProvenance?: {
     factoryId: string;

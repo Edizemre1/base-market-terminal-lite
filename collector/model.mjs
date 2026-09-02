@@ -176,15 +176,20 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
     const price = calculateCanonicalUsdcPrice(group.tokenAddress, pools, now);
     const tokenMetadata = metadata[group.tokenAddress];
     const observed = group.pools.map((pool) => pool.observedAt ?? pool.confirmedAt).filter(Boolean).sort();
-    const ranked = price.tier !== "UNPRICED" && group.pools.some((pool) => isUsableRankedPool(pool, now));
+    const metadataVerified = tokenMetadata?.verificationState === "verified" || Number.isInteger(tokenMetadata?.decimals);
+    const ranked = metadataVerified && price.tier !== "UNPRICED" && group.pools.some((pool) => isUsableRankedPool(pool, now));
     const observedPriceUsd = buildObservedPriceUsd(group.tokenAddress, group.pools, now);
     const bestLiquidityUsd = bestKnownLiquidityUsd(group.pools);
-    const liquidityState = classifyLiquidityState(group.pools.map((pool) => pool.liquidityUsd));
+    const liquidityState = group.pools.some((pool) => pool.liquidityResolutionState === "conflicting_liquidity") ? "conflicting_liquidity"
+      : group.pools.some((pool) => pool.liquidityResolutionState === "stale_liquidity") ? "stale_liquidity"
+        : classifyLiquidityState(group.pools.map((pool) => pool.liquidityUsd));
     const providerState = group.pools.some((pool) => pool.providerEnrichment?.status === "matched") ? "matched"
       : group.pools.some((pool) => pool.providerEnrichment?.status === "pending") ? "pending"
         : group.pools.some((pool) => pool.providerEnrichment?.status === "conflicting") ? "conflicting"
           : group.pools.some((pool) => pool.providerEnrichment?.status === "unmatched") ? "not_found" : "detected";
-    const quality = evaluateOpportunityQuality({ canonicalPrice: price, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState, exclusionReason: price.reasonCode });
+    const reconciliationConflict = group.pools.some((pool) => pool.priceReconciliation?.status === "conflict");
+    const exclusionReason = reconciliationConflict ? "price_conflict" : liquidityState === "conflicting_liquidity" || liquidityState === "stale_liquidity" ? liquidityState : !metadataVerified ? "token_metadata_pending" : price.reasonCode;
+    const quality = evaluateOpportunityQuality({ canonicalPrice: price, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState, exclusionReason });
     const poolCreatedTimes = group.pools.map((pool) => pool.blockTimestamp ?? pool.confirmedAt).filter(Boolean).sort();
     const firstSeenTimes = group.pools.map((pool) => pool.firstSeenAt).filter(Boolean).sort();
     const providerIndexedTimes = group.pools.map((pool) => pool.providerIndexedAt).filter(Boolean).sort();
@@ -199,6 +204,7 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
       symbol: safeTokenLabel(tokenMetadata?.symbol, group.tokenAddress),
       name: safeTokenLabel(tokenMetadata?.name, group.tokenAddress),
       metadataStatus: tokenMetadata?.status ?? "unavailable",
+      metadataVerificationState: tokenMetadata?.verificationState ?? (Number.isInteger(tokenMetadata?.decimals) ? "legacy_verified" : "pending"),
       identiconSeed: group.tokenAddress,
       poolKeys: group.pools.map((pool) => pool.poolKey).sort(),
       poolCount: group.pools.length,
@@ -438,6 +444,9 @@ function opportunityTokens(pool) {
 function validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd) {
   if (pool.status !== "confirmed" || pool.orphaned || !pool.verifiedSource) return "unverified_pool";
   if (pool.providerEnrichment?.status === "conflicting") return "conflicting_pool_identity";
+  if (pool.priceReconciliation?.status === "conflict") return "price_conflict";
+  if (pool.liquidityResolutionState === "conflicting_liquidity") return "conflicting_liquidity";
+  if (pool.liquidityResolutionState === "stale_liquidity") return "stale_liquidity";
   if (!Number.isFinite(pool.priceToken1PerToken0) || pool.priceToken1PerToken0 <= 0) return "invalid_price";
   if (!Number.isFinite(pool.liquidityUsd)) return "liquidity_unknown";
   if (pool.liquidityUsd === 0) return "zero_liquidity";
