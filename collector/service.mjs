@@ -24,6 +24,10 @@ export function derivedCyclesReady(state) {
   return state?.health?.backfillState === "caught_up";
 }
 
+function storeDerivedCyclesReady(store) {
+  return store?.state ? derivedCyclesReady(store.state) : true;
+}
+
 export function resolveCollectorConfig(environment = process.env) {
   const httpUrl = environment.BASE_RPC_HTTP_URL?.trim() || "https://mainnet.base.org";
   const websocketUrl = environment.BASE_RPC_WS_URL?.trim();
@@ -245,7 +249,7 @@ export class OnchainDiscoveryCollector {
 
   async runOnchainStateLoop(signal) {
     while (this.running && !signal?.aborted) {
-      if (!derivedCyclesReady(this.store.state)) {
+      if (!storeDerivedCyclesReady(this.store)) {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
@@ -332,7 +336,7 @@ export class OnchainDiscoveryCollector {
 
   async runEnrichmentLoop(signal) {
     while (this.running && !signal?.aborted) {
-      if (!derivedCyclesReady(this.store.state)) {
+      if (!storeDerivedCyclesReady(this.store)) {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
@@ -474,7 +478,7 @@ export class OnchainDiscoveryCollector {
 
   async runAnchorLoop(signal) {
     while (this.running && !signal?.aborted) {
-      if (!derivedCyclesReady(this.store.state)) {
+      if (!storeDerivedCyclesReady(this.store)) {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
