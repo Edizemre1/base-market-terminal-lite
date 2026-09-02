@@ -305,8 +305,8 @@ test("factory identity and block evidence use bounded RPC batches", async () => 
   const verified = await verifyFactoryEvents(rpc, events);
 
   assert.equal(verified.length, events.length);
-  assert.deepEqual(requestSizes, [48, 12, 15]);
-  assert.ok(requestSizes.every((size) => size <= 50));
+  assert.deepEqual(requestSizes, [16, 16, 16, 12, 15]);
+  assert.ok(requestSizes.every((size) => size <= 16));
 });
 
 function poolRecord(factoryId) {

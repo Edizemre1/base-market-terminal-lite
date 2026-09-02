@@ -199,10 +199,10 @@ export async function verifyPoolBinding(rpc, pool, blockNumber) {
   }
 }
 
-export async function verifyPoolBindings(rpc, pools, { batchSize = 12 } = {}) {
+export async function verifyPoolBindings(rpc, pools, { batchSize = 4 } = {}) {
   if (typeof rpc?.batchOutcomes !== "function") return Promise.all(pools.map((pool) => verifyPoolBinding(rpc, pool, pool.blockNumber)));
   const results = [];
-  const boundedBatchSize = Math.min(12, Math.max(1, batchSize));
+  const boundedBatchSize = Math.min(4, Math.max(1, batchSize));
   for (let offset = 0; offset < pools.length; offset += boundedBatchSize) {
     const batch = pools.slice(offset, offset + boundedBatchSize);
     const calls = [];
