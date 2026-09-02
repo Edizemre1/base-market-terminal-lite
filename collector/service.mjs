@@ -17,6 +17,7 @@ import {
 } from "./provider-enrichment.mjs";
 
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
+const PUBLIC_RPC_BATCH_CALL_LIMIT = 16;
 
 export function resolveCollectorConfig(environment = process.env) {
   const httpUrl = environment.BASE_RPC_HTTP_URL?.trim() || "https://mainnet.base.org";
@@ -999,8 +1000,8 @@ export async function verifyFactoryEvents(rpc, events, concurrency = 4) {
     const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
     const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
     const blockRows = new Map();
-    for (let offset = 0; offset < blockNumbers.length; offset += 50) {
-      const numbers = blockNumbers.slice(offset, offset + 50);
+    for (let offset = 0; offset < blockNumbers.length; offset += PUBLIC_RPC_BATCH_CALL_LIMIT) {
+      const numbers = blockNumbers.slice(offset, offset + PUBLIC_RPC_BATCH_CALL_LIMIT);
       const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })));
       if (outcomes.some((outcome) => !outcome.ok)) throw new Error("factory_block_evidence_unavailable");
       for (let index = 0; index < numbers.length; index += 1) blockRows.set(numbers[index], outcomes[index].value);

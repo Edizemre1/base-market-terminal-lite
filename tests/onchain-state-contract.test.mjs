@@ -278,7 +278,7 @@ test("one bounded scan pass commits all fetched windows atomically", async () =>
 
 test("factory identity and block evidence use bounded RPC batches", async () => {
   const factoryAddress = FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v2").address;
-  const events = Array.from({ length: 15 }, (_, index) => ({
+  const events = Array.from({ length: 20 }, (_, index) => ({
     poolKey: `batched-pool-${index}`,
     poolAddress: `0x${String(index + 101).padStart(40, "0")}`,
     factoryAddress,
@@ -305,7 +305,7 @@ test("factory identity and block evidence use bounded RPC batches", async () => 
   const verified = await verifyFactoryEvents(rpc, events);
 
   assert.equal(verified.length, events.length);
-  assert.deepEqual(requestSizes, [16, 16, 16, 12, 15]);
+  assert.deepEqual(requestSizes, [16, 16, 16, 16, 16, 16, 4]);
   assert.ok(requestSizes.every((size) => size <= 16));
 });
 
