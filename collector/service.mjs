@@ -852,7 +852,9 @@ function seedOnchainQueue(state, now) {
   state.onchainQueue = [...combined.values()].sort((left, right) => {
     const leftPool = state.pools?.[left.poolKey];
     const rightPool = state.pools?.[right.poolKey];
-    return Number(Boolean(resolveOnchainAdapter(rightPool) && rightPool?.poolAddress)) - Number(Boolean(resolveOnchainAdapter(leftPool) && leftPool?.poolAddress)) || left.poolKey.localeCompare(right.poolKey);
+    const adapterPriority = Number(Boolean(resolveOnchainAdapter(rightPool) && rightPool?.poolAddress)) - Number(Boolean(resolveOnchainAdapter(leftPool) && leftPool?.poolAddress));
+    const createdPriority = Date.parse(left.createdAt ?? "") - Date.parse(right.createdAt ?? "");
+    return adapterPriority || (Number.isFinite(createdPriority) ? createdPriority : 0) || left.poolKey.localeCompare(right.poolKey);
   }).slice(0, 512);
   state.health ??= {};
   state.health.onchainQueueDepth = state.onchainQueue.length;

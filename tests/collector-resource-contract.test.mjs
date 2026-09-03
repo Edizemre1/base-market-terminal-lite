@@ -305,3 +305,44 @@ test("metadata-pending supported pools classify locally without spending RPC", a
   assert.equal(rpcRequests, 0);
   assert.deepEqual(Object.values(state.pools).map((pool) => pool.onchainState?.reasonCode), ["token_metadata_pending", "token_metadata_pending", "token_metadata_pending"]);
 });
+
+test("local on-chain classification advances past retryable queue entries", async () => {
+  let state = initialState(NOW);
+  state.health.backfillState = "caught_up";
+  state.confirmedHead = 50_000_000;
+  const registry = FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v2");
+  for (let index = 0; index < 3; index += 1) {
+    const poolKey = `pending-${index}`;
+    state.pools[poolKey] = {
+      poolKey,
+      poolAddress: `0x${String(index + 10).padStart(40, "0")}`,
+      token0: TOKEN0,
+      token1: TOKEN1,
+      factoryId: registry.id,
+      factoryAddress: registry.address,
+      status: "confirmed",
+      orphaned: false,
+      replay: false
+    };
+  }
+  const store = {
+    read: () => structuredClone(state),
+    transact: async (_reason, mutator, afterDerive) => {
+      const draft = structuredClone(state);
+      const result = await mutator(draft);
+      state = result && typeof result === "object" ? result : draft;
+      await afterDerive?.(state);
+      return structuredClone(state);
+    }
+  };
+  const subject = {
+    store,
+    stateRpc: { circuitSnapshot: () => ({ state: "closed" }) },
+    config: { onchainStateBatchSize: 1, onchainLocalClassificationBatchSize: 2 }
+  };
+
+  await OnchainDiscoveryCollector.prototype.runOnchainStateCycle.call(subject, NOW);
+  await OnchainDiscoveryCollector.prototype.runOnchainStateCycle.call(subject, new Date(NOW.getTime() + 30_001));
+
+  assert.deepEqual(Object.values(state.pools).map((pool) => pool.onchainState?.reasonCode), ["token_metadata_pending", "token_metadata_pending", "token_metadata_pending"]);
+});
