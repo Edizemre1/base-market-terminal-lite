@@ -123,6 +123,9 @@ export class ProviderEnrichmentClient {
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
         await this.waitForProviderSlot(provider);
+        if (this.now().getTime() < circuit.openUntil) {
+          throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
+        }
         const timeoutSignal = AbortSignal.timeout(this.providerTimeoutMs[provider] ?? 8_000);
         const response = await this.fetchImpl(url, {
           headers: { accept: "application/json", "user-agent": "Mergen-Base-Terminal/2.0" },
@@ -145,6 +148,7 @@ export class ProviderEnrichmentClient {
       } catch (error) {
         const normalized = normalizeProviderError(error, provider);
         circuit.lastFailureReason = normalized.reasonCode;
+        if (normalized.reasonCode === "provider_circuit_open") throw normalized;
         if (normalized.reasonCode === "provider_http_429") {
           circuit.consecutiveFailures += 1;
           circuit.openUntil = Math.max(circuit.openUntil, this.now().getTime() + Math.max(60_000, normalized.retryAfterMs ?? 0));

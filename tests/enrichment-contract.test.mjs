@@ -350,6 +350,30 @@ test("non-retryable provider failure is attempted once", async () => {
   assert.equal(calls, 1);
 });
 
+test("a queued provider request rechecks a circuit opened while waiting for its slot", async () => {
+  let nowMs = NOW.getTime();
+  let calls = 0;
+  let client;
+  client = new ProviderEnrichmentClient({
+    now: () => new Date(nowMs),
+    delayImpl: async (delayMs) => {
+      nowMs += delayMs;
+      client.circuits.geckoterminal.openUntil = nowMs + 60_000;
+    },
+    fetchImpl: async () => {
+      calls += 1;
+      return response(200, {});
+    }
+  });
+  client.providerNextRequestAt.geckoterminal = nowMs + 6_000;
+
+  await assert.rejects(
+    client.request("geckoterminal", "https://api.geckoterminal.com/test"),
+    (error) => error.reasonCode === "provider_circuit_open" && error.retryable === true
+  );
+  assert.equal(calls, 0);
+});
+
 test("retry backoff is deterministic and bounded", () => {
   assert.equal(nextRetryAt(1, NOW), new Date(NOW.getTime() + 2_000).toISOString());
   assert.equal(nextRetryAt(99, NOW), new Date(NOW.getTime() + 5 * 60_000).toISOString());
