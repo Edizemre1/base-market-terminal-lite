@@ -38,7 +38,7 @@ test("live Pulse stays delayed while its configured collector is behind, then re
   try {
     const route = load("../src/app/api/pulse/route.ts", {
       "next/server": { NextResponse: { json: (value) => Response.json(value) } },
-      "@/data/providers": { resolveUrlMarketDataMode: () => "live", getMarketTerminalSnapshot: async () => ({ mode: "live", allPairs: [{}], universe: {}, recentSignals: [], freshness: "fresh" }) },
+      "@/data/providers": { resolveUrlMarketDataMode: () => "dexscreener", getMarketTerminalSnapshot: async () => ({ mode: "dexscreener", allPairs: [{}], universe: {}, recentSignals: [], freshness: "fresh" }) },
       "@/lib/base-terminal/onchainDiscovery": { getOnchainCollectorHealth: () => ({ ready, lagBlocks: ready ? 0 : 100, delayedReason: ready ? undefined : "confirmed_cursor_behind" }) }
     });
     const request = new Request("https://example.invalid/api/pulse?data=live");

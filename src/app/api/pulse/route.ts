@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const snapshot = await getMarketTerminalSnapshot(resolveUrlMarketDataMode(searchParams.get("data")));
-    const collector = snapshot.mode === "live" && process.env.ONCHAIN_STORE_PATH?.trim() ? getOnchainCollectorHealth(0) : undefined;
+    const collector = snapshot.mode !== "mock" && process.env.ONCHAIN_STORE_PATH?.trim() ? getOnchainCollectorHealth(0) : undefined;
     const collectorDelayed = collector?.ready === false;
 
     return NextResponse.json({
