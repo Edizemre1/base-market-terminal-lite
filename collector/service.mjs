@@ -2,7 +2,7 @@ import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH, COLLECTOR_VERSION, FACTORY_REGISTR
 import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, coalesceBoundedQueue, decodeFactoryLog, reconcileCanonicalWindow } from "./model.mjs";
 import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
-import { ONCHAIN_STATE_REFRESH_MS, acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState } from "./onchain-state.mjs";
+import { ONCHAIN_STATE_REFRESH_MS, acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ProviderEnrichmentClient,
@@ -47,7 +47,9 @@ export function resolveCollectorConfig(environment = process.env) {
     maximumChunksPerPass: boundedInteger(environment.ONCHAIN_MAX_CHUNKS_PER_PASS, 4, 1, 16),
     metadataBatchSize: boundedInteger(environment.ONCHAIN_METADATA_BATCH_SIZE, 1, 1, 32),
     onchainStateBatchSize: boundedInteger(environment.ONCHAIN_STATE_BATCH_SIZE, 1, 1, 12),
+    onchainLocalClassificationBatchSize: boundedInteger(environment.ONCHAIN_LOCAL_CLASSIFICATION_BATCH_SIZE, 128, 1, 512),
     onchainStateIntervalMs: boundedInteger(environment.ONCHAIN_STATE_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
+    onchainStateCycleTimeoutMs: boundedInteger(environment.ONCHAIN_STATE_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
     enrichmentBatchSize: boundedInteger(environment.ONCHAIN_ENRICHMENT_BATCH_SIZE, 4, 1, 8),
     enrichmentIntervalMs: boundedInteger(environment.ONCHAIN_ENRICHMENT_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
     providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
@@ -273,7 +275,20 @@ export class OnchainDiscoveryCollector {
         await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
         continue;
       }
-      try { await this.runOnchainStateCycle(new Date(), signal); }
+      const cycleController = new AbortController();
+      const cycleSignal = signal ? AbortSignal.any([signal, cycleController.signal]) : cycleController.signal;
+      let deadline;
+      try {
+        const timeout = new Promise((_, reject) => {
+          deadline = setTimeout(() => {
+            const error = new Error("onchain_state_cycle_deadline_exceeded");
+            error.reasonCode = "onchain_state_cycle_deadline_exceeded";
+            cycleController.abort(error);
+            reject(error);
+          }, this.config.onchainStateCycleTimeoutMs ?? 45_000);
+        });
+        await Promise.race([this.runOnchainStateCycle(new Date(), cycleSignal), timeout]);
+      }
       catch (error) {
         await this.store.transact("onchain-state-cycle-failure", (draft) => {
           ensureEnrichmentState(draft);
@@ -282,6 +297,7 @@ export class OnchainDiscoveryCollector {
           draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
         }).catch(() => {});
       }
+      finally { clearTimeout(deadline); }
       await delay(Math.max(50, this.config.onchainStateIntervalMs), signal);
     }
   }
@@ -290,12 +306,12 @@ export class OnchainDiscoveryCollector {
     const before = this.store.read();
     const scheduled = structuredClone(before);
     if (hasOnchainSeedCandidate(scheduled, now)) seedOnchainQueue(scheduled, now);
-    const due = (scheduled.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.onchainStateBatchSize);
+    const dueNow = (scheduled.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime());
+    const rpcDue = dueNow.filter((item) => poolNeedsOnchainRpc(before, item)).slice(0, this.config.onchainStateBatchSize);
+    const localDue = dueNow.filter((item) => !poolNeedsOnchainRpc(before, item)).slice(0, this.config.onchainLocalClassificationBatchSize ?? 128);
+    const due = [...rpcDue, ...localDue];
     if (!due.length) return before;
-    const needsRpc = due.some((item) => {
-      const pool = before.pools[item.poolKey];
-      return Boolean(pool?.poolAddress && resolveOnchainAdapter(pool));
-    });
+    const needsRpc = rpcDue.length > 0;
     const blockNumber = needsRpc ? await this.stateRpc.blockNumber({ signal }) : before.confirmedHead;
     const blockRow = needsRpc ? await this.stateRpc.getBlock(blockNumber, { signal }) : undefined;
     const blockTime = blockRow?.timestamp ? Number.parseInt(blockRow.timestamp, 16) * 1_000 : now.getTime();
@@ -840,6 +856,14 @@ function seedOnchainQueue(state, now) {
   }).slice(0, 512);
   state.health ??= {};
   state.health.onchainQueueDepth = state.onchainQueue.length;
+}
+
+function poolNeedsOnchainRpc(state, item) {
+  const pool = state.pools?.[item.poolKey];
+  return Boolean(pool?.poolAddress
+    && resolveOnchainAdapter(pool)
+    && validTokenDecimals(state.tokenMetadata?.[pool.token0]?.decimals)
+    && validTokenDecimals(state.tokenMetadata?.[pool.token1]?.decimals));
 }
 
 function hasOnchainSeedCandidate(state, now) {

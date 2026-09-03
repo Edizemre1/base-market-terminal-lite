@@ -18,7 +18,9 @@ test("normal collector cadence is measured start-to-start", () => {
   assert.equal(config.pollIntervalMs, 10_000);
   assert.equal(config.metadataBatchSize, 1);
   assert.equal(config.onchainStateBatchSize, 1);
+  assert.equal(config.onchainLocalClassificationBatchSize, 128);
   assert.equal(config.onchainStateIntervalMs, 30_000);
+  assert.equal(config.onchainStateCycleTimeoutMs, 45_000);
   assert.equal(config.enrichmentIntervalMs, 30_000);
   assert.equal(config.discoveryBatchPaceMs, 3_000);
 
@@ -257,4 +259,49 @@ test("an unqueued pool is seeded and classified in one durable state transaction
   assert.equal(transactions, 1);
   assert.equal(state.pools.fixture.onchainState.status, "unsupported");
   assert.equal(state.eventRing.filter((event) => event.type === "pool_onchain_state_observed").length, 1);
+});
+
+test("metadata-pending supported pools classify locally without spending RPC", async () => {
+  let state = initialState(NOW);
+  state.health.backfillState = "caught_up";
+  state.confirmedHead = 50_000_000;
+  const registry = FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v2");
+  for (let index = 0; index < 3; index += 1) {
+    const poolKey = `pending-${index}`;
+    state.pools[poolKey] = {
+      poolKey,
+      poolAddress: `0x${String(index + 10).padStart(40, "0")}`,
+      token0: TOKEN0,
+      token1: TOKEN1,
+      factoryId: registry.id,
+      factoryAddress: registry.address,
+      status: "confirmed",
+      orphaned: false,
+      replay: false
+    };
+  }
+  let rpcRequests = 0;
+  const store = {
+    read: () => structuredClone(state),
+    transact: async (_reason, mutator, afterDerive) => {
+      const draft = structuredClone(state);
+      const result = await mutator(draft);
+      state = result && typeof result === "object" ? result : draft;
+      await afterDerive?.(state);
+      return structuredClone(state);
+    }
+  };
+  const subject = {
+    store,
+    stateRpc: {
+      async blockNumber() { rpcRequests += 1; throw new Error("unexpected RPC"); },
+      circuitSnapshot: () => ({ state: "closed" })
+    },
+    config: { onchainStateBatchSize: 1, onchainLocalClassificationBatchSize: 128 }
+  };
+
+  await OnchainDiscoveryCollector.prototype.runOnchainStateCycle.call(subject, NOW);
+
+  assert.equal(rpcRequests, 0);
+  assert.deepEqual(Object.values(state.pools).map((pool) => pool.onchainState?.reasonCode), ["token_metadata_pending", "token_metadata_pending", "token_metadata_pending"]);
 });
