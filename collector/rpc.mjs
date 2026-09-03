@@ -72,12 +72,13 @@ export class JsonRpcClient {
           return { ok: true, value: row.result, method: request.method };
         });
         const retryableRowFailure = outcomes.some((outcome) => !outcome.ok && outcome.retryable);
+        const retryableBatchFailure = outcomes.every((outcome) => !outcome.ok && outcome.retryable);
         if (retryableRowFailure && attempt < this.retries) {
           this.metrics.retries += 1;
           await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
           continue;
         }
-        this.consecutiveFailures = retryableRowFailure ? this.consecutiveFailures + 1 : 0;
+        this.consecutiveFailures = retryableBatchFailure ? this.consecutiveFailures + 1 : 0;
         if (this.consecutiveFailures >= this.circuitFailureThreshold) {
           this.openUntil = this.now().getTime() + this.circuitCooldownMs;
           this.metrics.circuitOpens += 1;

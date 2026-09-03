@@ -176,6 +176,37 @@ test("non-archive code lookup falls back to current bytecode without weakening e
   assert.deepEqual(batches[1], [{ method: "eth_getCode", params: [pool.poolAddress, "latest"] }]);
 });
 
+test("partial getter errors do not open the transport circuit or stall later binding batches", async () => {
+  const rpc = new JsonRpcClient("https://mainnet.base.org", {
+    retries: 0,
+    circuitFailureThreshold: 2,
+    fetchImpl: async (_url, options) => {
+      const requests = JSON.parse(options.body);
+      return {
+        ok: true,
+        async json() {
+          return requests.map((request) => request.method === "eth_getCode"
+            ? { jsonrpc: "2.0", id: request.id, result: "0x01" }
+            : { jsonrpc: "2.0", id: request.id, error: { code: -32016, message: "execution unavailable" } });
+        }
+      };
+    }
+  });
+  const pools = Array.from({ length: 5 }, (_, index) => ({
+    poolAddress: `0x${String(index + 1).padStart(40, "0")}`,
+    factoryAddress: `0x${"f".repeat(40)}`,
+    token0: TOKEN0,
+    token1: TOKEN1,
+    blockNumber: 50_000_000 + index
+  }));
+
+  const results = await verifyPoolBindings(rpc, pools);
+
+  assert.ok(results.every((result) => result.ok && result.kind === "factory_event_and_code"));
+  assert.equal(rpc.circuitSnapshot().state, "closed");
+  assert.equal(rpc.circuitSnapshot().circuitOpens, 0);
+});
+
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
   let requests = 0;
   const signal = AbortSignal.timeout(1_000);
