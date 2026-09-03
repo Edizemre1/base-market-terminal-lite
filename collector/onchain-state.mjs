@@ -132,7 +132,8 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
       status: "retryable",
       confidence: "unavailable",
       reasonCode: normalizeOutcomeReason(requiredFailure[1], `${requiredFailure[0]}_read_failed`),
-      failureMethod: requiredFailure[0],
+      failureMethod: "eth_call",
+      failureSelector: requiredFailure[0],
       endpointLabel: requiredFailure[1]?.endpointLabel,
       retryable: requiredFailure[1]?.retryable !== false
     });

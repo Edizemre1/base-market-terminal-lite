@@ -57,6 +57,7 @@ export class RpcTransportPool {
     const releaseEndpoint = await endpoint.gate.acquire(signal);
     let releaseGlobal;
     try {
+      this.assertNotQuarantined(endpoint);
       releaseGlobal = await this.global.acquire(signal);
       const now = this.now();
       const start = Math.max(now, this.nextStartAt, endpoint.nextStartAt);
@@ -66,8 +67,13 @@ export class RpcTransportPool {
       throwIfAborted(signal);
       this.metrics.requests += 1; this.metrics.calls += calls.length;
       const outcomes = await endpoint.client.batchOutcomes(calls, { signal });
+      this.assertNotQuarantined(endpoint);
       return outcomes.map((item) => ({ ...item, endpointLabel: endpoint.label }));
     } finally { releaseGlobal?.(); releaseEndpoint(); }
+  }
+
+  assertNotQuarantined(endpoint) {
+    if (endpoint.status === "quarantined") throw new JsonRpcRequestError(endpoint.reasonCode ?? "rpc_malformed_result", { retryable: false, endpointLabel: endpoint.label });
   }
 
   async raw(endpoint, method, params, signal) {
@@ -77,7 +83,7 @@ export class RpcTransportPool {
   }
 
   async validate(endpoint, signal) {
-    if (endpoint.status === "quarantined") throw new JsonRpcRequestError(endpoint.reasonCode, { retryable: false, endpointLabel: endpoint.label });
+    this.assertNotQuarantined(endpoint);
     if (endpoint.retryAt > this.now()) throw new JsonRpcRequestError("rpc_endpoint_cooldown", { endpointLabel: endpoint.label });
     if (endpoint.status === "eligible" && this.now() - endpoint.validatedAt < 30_000) return;
     const chain = await this.raw(endpoint, "eth_chainId", [], signal);
@@ -85,13 +91,17 @@ export class RpcTransportPool {
     const latest = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", ["latest", false], signal));
     if (latest.timestamp > this.now() + 30_000) throw new JsonRpcRequestError("rpc_invalid_block_time", { retryable: false });
     if (this.now() - latest.timestamp > 120_000 || latest.number < Math.max(this.minimumHead - 16, this.continuity?.number ?? 0)) throw new JsonRpcRequestError("rpc_endpoint_behind");
-    if (this.continuity) {
-      const row = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", [hex(this.continuity.number), false], signal), this.continuity.number);
-      if (this.continuity.hash && row.hash !== this.continuity.hash) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false });
+    const continuity = this.continuity ? { ...this.continuity } : undefined;
+    if (continuity) {
+      const row = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", [hex(continuity.number), false], signal), continuity.number);
+      if (continuity.hash && row.hash !== continuity.hash) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false });
       // Migration from the old cursor schema has no hash. The first validated
       // endpoint establishes the checkpoint; every fallback must match it.
+      if (this.continuity?.number !== continuity.number) throw new JsonRpcRequestError("rpc_cursor_changed_during_validation");
+      if (this.continuity.hash && this.continuity.hash !== row.hash) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false });
       this.continuity.hash ??= row.hash;
     }
+    this.assertNotQuarantined(endpoint);
     endpoint.status = "eligible"; endpoint.validatedAt = this.now(); endpoint.head = latest.number; endpoint.reasonCode = undefined;
   }
 

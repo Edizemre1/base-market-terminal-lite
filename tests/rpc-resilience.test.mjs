@@ -84,6 +84,29 @@ for (const kind of ["wrong_chain", "hash_conflict", "malformed"]) test(`${kind} 
   assert.equal(f.pool.snapshot().endpoints[0].status, "quarantined");
 });
 
+test("cursor movement during validation is retryable, not a false block quarantine", async () => {
+  let moved = false;
+  const f = fixture((endpoint, request) => {
+    if (!moved && endpoint === "primary" && request.method === "eth_getBlockByNumber" && request.params[0] === "0x32") {
+      moved = true; f.pool.setContinuity({ number: 51, hash: hash(51) });
+    }
+  });
+  const [outcome] = await f.client.batchOutcomes([call]);
+  assert.equal(outcome.ok, true);
+  assert.notEqual(f.pool.snapshot().endpoints[0].status, "quarantined");
+  assert.equal(f.pool.snapshot().endpoints[0].methods.eth_call.lastError.reasonCode, "rpc_cursor_changed_during_validation");
+});
+
+test("a response completing after endpoint quarantine cannot publish success", async () => {
+  const f = fixture((endpoint, request) => {
+    if (endpoint === "primary" && request.method === "eth_call") Object.assign(f.pool.endpoints[0], { status: "quarantined", reasonCode: "rpc_malformed_result" });
+  });
+  const [outcome] = await f.client.batchOutcomes([call]);
+  assert.equal(outcome.ok, true); assert.equal(outcome.endpointLabel, "configured-1");
+  assert.equal(f.pool.snapshot().endpoints[0].status, "quarantined");
+  assert.equal(f.pool.snapshot().endpoints[0].methods.eth_call.success, 0);
+});
+
 test("behind fallback is ineligible for the requested exact block", async () => {
   const f = fixture((endpoint, request) => {
     if (endpoint === "primary" && request.method === "eth_call") return { http: 503 };

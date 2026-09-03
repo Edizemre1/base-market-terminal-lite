@@ -113,6 +113,16 @@ test("cursor commits independently while anchor is stuck; loop timeout cleans pa
   assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 });
 
+test("an anchor cooldown tick cannot fabricate recovery or renew its last success", async () => {
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test" });
+  collector.store = memoryStore(initialState(NOW)); collector.running = true;
+  collector.loopHealth = { anchor: { lastSuccessAt: NOW.toISOString(), lastError: { reasonCode: "rpc_error_-32016", observedAt: NOW.toISOString() } } };
+  await collector.runLoop("anchor", 1, 100, async () => { collector.running = false; return { loopSkipped: true }; });
+  assert.equal(collector.loopHealth.anchor.phase, "retrying");
+  assert.equal(collector.loopHealth.anchor.lastSuccessAt, NOW.toISOString());
+  assert.equal(collector.loopHealth.anchor.lastError.recoveredAt, undefined);
+});
+
 test("late metadata completion after cancellation cannot commit", async () => {
   const state = initialState(NOW);
   state.metadataQueue = [{ tokenAddress: TOKEN, blockNumber: 100 }];

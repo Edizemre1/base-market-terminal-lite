@@ -111,9 +111,11 @@ export class OnchainDiscoveryCollector {
       const previous = this.loopHealth[name] ?? {};
       this.loopHealth[name] = { ...previous, phase: "running", startedAt: new Date(startedAt).toISOString() };
       try {
-        await withDeadline(operation, timeoutMs, { signal, reasonCode: `${name}_cycle_deadline_exceeded` });
+        const outcome = await withDeadline(operation, timeoutMs, { signal, reasonCode: `${name}_cycle_deadline_exceeded` });
         const successAt = new Date().toISOString();
-        this.loopHealth[name] = { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, retryAt: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
+        this.loopHealth[name] = outcome?.loopSkipped
+          ? { ...previous, phase: previous.lastError && !previous.lastError.recoveredAt ? "retrying" : "idle" }
+          : { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, retryAt: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
       } catch (error) {
         if (signal?.aborted) break;
         const failure = { reasonCode: safeError(error), method: error?.method, endpointLabel: error?.endpointLabel, observedAt: new Date().toISOString(), retryAt: new Date(Date.now() + intervalMs).toISOString() };
@@ -526,7 +528,7 @@ export class OnchainDiscoveryCollector {
   async refreshAnchorIfDue(now = new Date(), signal) {
     const before = this.store.read();
     const current = before.priceAnchors?.wethUsdc;
-    if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return before;
+    if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return { loopSkipped: true };
     try {
       const trustedPoolAddresses = [...new Set([...(current?.candidates ?? []), ...(current?.lastTrustedCandidates ?? [])]
         .flatMap((candidate) => trustedAnchorPoolIdentity(current, candidate?.poolAddress) ? [candidate.poolAddress] : []))];
