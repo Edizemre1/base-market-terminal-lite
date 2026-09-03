@@ -9,6 +9,7 @@ import { resolveOnchainPoolEvidence } from "./onchain-state.mjs";
 export const STORE_SCHEMA_VERSION = 1;
 export const MAX_CANONICAL_EVENTS = 5_000;
 export const MAX_POOLS = 2_000;
+export const MAX_PROTECTED_PROVIDER_POOLS = 512;
 export const MAX_MARKET_SNAPSHOTS = 96;
 export const MAX_WAL_LINES = 512;
 
@@ -217,7 +218,7 @@ function enforceRetention(state) {
   state.onchainQueue = (state.onchainQueue ?? []).slice(0, 512);
   state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
   state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
-  state.pools = keepNewestRecordEntries(state.pools ?? {}, MAX_POOLS, (pool) => pool.blockNumber ?? 0);
+  state.pools = retainPriorityPools(state.pools ?? {}, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS);
   const retainedTokens = new Set(Object.values(state.pools).flatMap((pool) => [pool.token0, pool.token1]));
   state.tokenMetadata = Object.fromEntries(Object.entries(state.tokenMetadata ?? {}).filter(([address]) => retainedTokens.has(address)));
 }
@@ -285,6 +286,19 @@ function keepNewestRecordEntries(record, maximum, rank) {
   const entries = Object.entries(record);
   if (entries.length <= maximum) return record;
   return Object.fromEntries(entries.sort((left, right) => rank(right[1]) - rank(left[1]) || left[0].localeCompare(right[0])).slice(0, maximum));
+}
+
+export function retainPriorityPools(record, maximum = MAX_POOLS, protectedMaximum = MAX_PROTECTED_PROVIDER_POOLS) {
+  const entries = Object.entries(record);
+  if (entries.length <= maximum) return record;
+  const newest = (left, right) => (right[1].blockNumber ?? 0) - (left[1].blockNumber ?? 0) || left[0].localeCompare(right[0]);
+  const protectedEntries = entries
+    .filter(([, pool]) => pool.providerEnrichment?.status === "matched")
+    .sort(newest)
+    .slice(0, Math.min(maximum, protectedMaximum));
+  const protectedKeys = new Set(protectedEntries.map(([key]) => key));
+  const remaining = entries.filter(([key]) => !protectedKeys.has(key)).sort(newest).slice(0, maximum - protectedEntries.length);
+  return Object.fromEntries([...protectedEntries, ...remaining]);
 }
 
 async function writeAtomicJson(target, value) {

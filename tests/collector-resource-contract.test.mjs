@@ -7,7 +7,7 @@ import { FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { appendRelayEvent } from "../collector/model.mjs";
 import { JsonRpcClient, verifyPoolBindings } from "../collector/rpc.mjs";
 import { nextScanDelayMs, OnchainDiscoveryCollector, resolveCollectorConfig } from "../collector/service.mjs";
-import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
+import { DurableDiscoveryStore, initialState, retainPriorityPools } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-02T20:00:00.000Z");
 const TOKEN0 = "0x1111111111111111111111111111111111111111";
@@ -35,6 +35,23 @@ test("normal collector cadence is measured start-to-start", () => {
   assert.equal(bounded.discoveryBatchPaceMs, 4_000);
   assert.equal(nextScanDelayMs(config.pollIntervalMs, 2_500), 7_500);
   assert.equal(nextScanDelayMs(config.pollIntervalMs, 12_000), 3_000);
+});
+
+test("bounded pool retention preserves provider-matched source evidence", () => {
+  const pools = Object.fromEntries([
+    ["matched-oldest", { blockNumber: 1, providerEnrichment: { status: "matched" } }],
+    ["matched-second", { blockNumber: 2, providerEnrichment: { status: "matched" } }],
+    ...Array.from({ length: 2_000 }, (_, index) => [`detected-${index}`, { blockNumber: index + 3 }])
+  ]);
+
+  const retained = retainPriorityPools(pools, 2_000, 512);
+
+  assert.equal(Object.keys(retained).length, 2_000);
+  assert.ok(retained["matched-oldest"]);
+  assert.ok(retained["matched-second"]);
+  assert.equal(retained["detected-0"], undefined);
+  assert.equal(retained["detected-1"], undefined);
+  assert.ok(retained["detected-1999"]);
 });
 
 test("discovery verification has an isolated bounded RPC client", () => {
