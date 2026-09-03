@@ -74,12 +74,12 @@ test("public RPC pacing measures the interval between batch starts", async () =>
 });
 
 test("pool binding verification paces each public RPC batch", async () => {
-  let requests = 0;
+  let requestCount = 0;
   let pacing = 0;
   const rpc = {
     async paceBatch() { pacing += 1; },
     async batchOutcomes(calls) {
-      requests += 1;
+      requestCount += 1;
       return calls.map(() => ({ ok: true, value: "0x01" }));
     }
   };
@@ -90,7 +90,7 @@ test("pool binding verification paces each public RPC batch", async () => {
 
   const results = await verifyPoolBindings(rpc, pools);
 
-  assert.equal(requests, 3);
+  assert.equal(requestCount, 3);
   assert.equal(pacing, 3);
   assert.ok(results.every((result) => result.ok && result.kind === "manager_pool_id"));
 });
@@ -177,10 +177,12 @@ test("non-archive code lookup falls back to current bytecode without weakening e
 });
 
 test("partial getter errors do not open the transport circuit or stall later binding batches", async () => {
+  let requestCount = 0;
   const rpc = new JsonRpcClient("https://mainnet.base.org", {
-    retries: 0,
+    retries: 3,
     circuitFailureThreshold: 2,
     fetchImpl: async (_url, options) => {
+      requestCount += 1;
       const requests = JSON.parse(options.body);
       return {
         ok: true,
@@ -203,6 +205,7 @@ test("partial getter errors do not open the transport circuit or stall later bin
   const results = await verifyPoolBindings(rpc, pools);
 
   assert.ok(results.every((result) => result.ok && result.kind === "factory_event_and_code"));
+  assert.equal(requestCount, 3);
   assert.equal(rpc.circuitSnapshot().state, "closed");
   assert.equal(rpc.circuitSnapshot().circuitOpens, 0);
 });

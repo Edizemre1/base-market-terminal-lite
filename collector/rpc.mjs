@@ -71,9 +71,8 @@ export class JsonRpcClient {
           if (row.result === "0x" && request.method === "eth_call") return { ok: false, reasonCode: "rpc_empty_response", retryable: false, method: request.method };
           return { ok: true, value: row.result, method: request.method };
         });
-        const retryableRowFailure = outcomes.some((outcome) => !outcome.ok && outcome.retryable);
         const retryableBatchFailure = outcomes.every((outcome) => !outcome.ok && outcome.retryable);
-        if (retryableRowFailure && attempt < this.retries) {
+        if (retryableBatchFailure && attempt < this.retries) {
           this.metrics.retries += 1;
           await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
           continue;
@@ -82,7 +81,7 @@ export class JsonRpcClient {
         if (this.consecutiveFailures >= this.circuitFailureThreshold) {
           this.openUntil = this.now().getTime() + this.circuitCooldownMs;
           this.metrics.circuitOpens += 1;
-        } else if (!retryableRowFailure) {
+        } else if (!retryableBatchFailure) {
           this.openUntil = 0;
         }
         this.metrics.successes += outcomes.filter((outcome) => outcome.ok).length;
