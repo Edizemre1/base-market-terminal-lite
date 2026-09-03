@@ -120,8 +120,9 @@ test("most-traded eligibility requires real transaction counts", () => {
 });
 
 test("ranking liquidity threshold has an exact boundary", () => {
-  assert.equal(tokenOpportunity(MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd - 0.01).qualityBand, "EMERGING");
-  assert.equal(tokenOpportunity(MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd).qualityBand, "RANKED");
+  assert.equal(tokenOpportunity(MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd - 0.01, true).qualityBand, "EMERGING");
+  assert.equal(tokenOpportunity(MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd, true).qualityBand, "RANKED");
+  assert.equal(tokenOpportunity(MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd).qualityBand, "EMERGING");
 });
 
 test("exact pool lookup uses only the requested address endpoints", async () => {
@@ -269,8 +270,10 @@ test("quality labels retain exact TR and EN parity", async () => {
   }
 });
 
-function tokenOpportunity(liquidityUsd) {
-  return buildCanonicalOpportunities([collectorPool({ liquidityUsd })], { [TOKEN]: { symbol: "TOKEN", name: "Token", decimals: 18, status: "complete", verificationState: "verified" } }, [], NOW).find((item) => item.tokenAddress === TOKEN);
+function tokenOpportunity(liquidityUsd, withProof = false) {
+  const pool = collectorPool({ liquidityUsd });
+  if (withProof) pool.onchainState = { status: "complete", confidence: "exact_onchain_state", token0: TOKEN, token1: BASE_USDC, decimals0: 18, decimals1: 6, blockNumber: 50_000_000, blockHash: `0x${"a".repeat(64)}`, observedAt: NOW.toISOString(), observedPrice0In1: 0.00421 };
+  return buildCanonicalOpportunities([pool], { [TOKEN]: { symbol: "TOKEN", name: "Token", decimals: 18, status: "complete", verificationState: "verified" } }, [], NOW).find((item) => item.tokenAddress === TOKEN);
 }
 
 function collectorPool({ liquidityUsd = 500, observedAt = NOW.toISOString(), providerMatched = true, priceToken1PerToken0 = 0.00421 } = {}) {
