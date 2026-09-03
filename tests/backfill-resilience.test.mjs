@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { getEventListeners } from "node:events";
 import { BASE_USDC, BASE_WETH, FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
-import { OnchainDiscoveryCollector, seedMetadataQueue } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, seedMetadataQueue, verifyFactoryEvents } from "../collector/service.mjs";
 import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT, selectBackfillRpcBatch } from "../collector/pool-backfill.mjs";
 import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
 import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
@@ -148,6 +148,22 @@ test("cursor commits independently while anchor is stuck; loop timeout cleans pa
   assert.equal(collector.loopHealth.anchor.lastError.reasonCode, "anchor_cycle_deadline_exceeded");
   collector.running = false; controller.abort(); await anchor;
   assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
+
+test("known overlap reuses immutable binding but always verifies canonical block hash", async () => {
+  const event = { ...pool("known"), blockNumber: 100, blockHash: HASH, idempotencyKey: "8453:tx:1", verifiedBinding: "pool_contract" };
+  const calls = [];
+  let blockHash = HASH;
+  const rpc = { batchOutcomes: async (batch) => {
+    calls.push(...batch);
+    if (batch.some((call) => call.method !== "eth_getBlockByNumber")) throw new Error("fresh_binding_required");
+    return batch.map((call) => ({ ok: true, method: call.method, value: { hash: blockHash, timestamp: "0x64" } }));
+  } };
+  const result = await verifyFactoryEvents(rpc, [event], 2, { knownEvents: { [event.idempotencyKey]: event } });
+  assert.equal(result.length, 1); assert.equal(calls.length, 1); assert.equal(calls[0].method, "eth_getBlockByNumber");
+  blockHash = `0x${"b".repeat(64)}`;
+  await assert.rejects(verifyFactoryEvents(rpc, [event], 2, { knownEvents: { [event.idempotencyKey]: event } }), /rpc_block_hash_conflict/);
+  await assert.rejects(verifyFactoryEvents(rpc, [{ ...event, token0: OTHER }], 2, { knownEvents: { [event.idempotencyKey]: event } }), /fresh_binding_required/);
 });
 
 test("an anchor cooldown tick cannot fabricate recovery or renew its last success", async () => {

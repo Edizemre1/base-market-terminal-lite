@@ -199,7 +199,7 @@ export class OnchainDiscoveryCollector {
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
       if (malformedCount) throw new JsonRpcRequestError("factory_malformed_log_window", { retryable: false, method: "eth_getLogs" });
-      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 2, { signal, managerCodeEvidence: this.managerCodeEvidence });
+      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 2, { signal, managerCodeEvidence: this.managerCodeEvidence, knownEvents: state.events });
       const cursorBlock = validBlock(await this.rpc.getBlock(toBlock, { signal }), toBlock);
       throwIfAborted(signal);
       cursor = toBlock;
@@ -1090,9 +1090,21 @@ async function mapWithConcurrency(items, concurrency, operation) {
   return results;
 }
 
-export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal, managerCodeEvidence } = {}) {
+export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal, managerCodeEvidence, knownEvents } = {}) {
   if (typeof rpc?.batchOutcomes === "function") {
-    const bindings = await verifyPoolBindings(rpc, events, { signal, managerCodeEvidence });
+    const bindings = events.map((event) => {
+      const previous = knownEvents?.[event.idempotencyKey];
+      const immutableMatch = previous?.status === "confirmed" && !previous.replay && previous.blockHash === event.blockHash
+        && ["factoryAddress", "token0", "token1", "poolKey", "blockNumber"].every((key) => previous[key] === event[key]);
+      const proved = ["pool_contract", "factory_event_and_code", "factory_event_and_latest_code", "manager_pool_id", "manager_pool_id_latest_code"].includes(previous?.verifiedBinding);
+      return immutableMatch && proved ? { ok: true, kind: previous.verifiedBinding } : undefined;
+    });
+    const fresh = await verifyPoolBindings(rpc, events.filter((_, index) => !bindings[index]), { signal, managerCodeEvidence });
+    let freshIndex = 0;
+    for (let index = 0; index < bindings.length; index += 1) if (!bindings[index]) bindings[index] = fresh[freshIndex++];
+    // Reuse only the immutable factory binding. Every overlap block hash is
+    // still re-read below, so a reorg cannot reuse an orphaned proof. This also
+    // prevents a dense known overlap from exhausting every bounded scan tick.
     const unavailable = bindings.find((binding) => !binding.ok && binding.retryable);
     if (unavailable) throw new JsonRpcRequestError(unavailable.reason ?? "factory_binding_verification_unavailable", { method: "eth_getCode" });
     const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
