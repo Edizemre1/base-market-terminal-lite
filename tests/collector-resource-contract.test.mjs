@@ -148,6 +148,34 @@ test("retryable getter failures retain verified factory-event and bytecode evide
   assert.equal(result.kind, "factory_event_and_code");
 });
 
+test("non-archive code lookup falls back to current bytecode without weakening event-block getters", async () => {
+  const batches = [];
+  const rpc = {
+    async paceBatch() {},
+    async batchOutcomes(calls) {
+      batches.push(calls);
+      if (batches.length === 1) return calls.map(() => ({ ok: false, reasonCode: "rpc_error_-32016", retryable: true }));
+      return calls.map(() => ({ ok: true, value: "0x01" }));
+    }
+  };
+  const blockNumber = 50_000_000;
+  const pool = {
+    poolAddress: `0x${"a".repeat(40)}`,
+    factoryAddress: `0x${"f".repeat(40)}`,
+    token0: TOKEN0,
+    token1: TOKEN1,
+    blockNumber
+  };
+
+  const [result] = await verifyPoolBindings(rpc, [pool]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, "factory_event_and_latest_code");
+  assert.equal(batches[0].find((call) => call.method === "eth_getCode").params[1], `0x${blockNumber.toString(16)}`);
+  assert.ok(batches[0].filter((call) => call.method === "eth_call").every((call) => call.params[1] === `0x${blockNumber.toString(16)}`));
+  assert.deepEqual(batches[1], [{ method: "eth_getCode", params: [pool.poolAddress, "latest"] }]);
+});
+
 test("pool binding verification fails fast and defers the remaining batch backlog", async () => {
   let requests = 0;
   const signal = AbortSignal.timeout(1_000);
@@ -166,7 +194,7 @@ test("pool binding verification fails fast and defers the remaining batch backlo
 
   const results = await verifyPoolBindings(rpc, pools, { signal });
 
-  assert.equal(requests, 1);
+  assert.equal(requests, 2);
   assert.equal(results.length, pools.length);
   assert.ok(results.every((result) => !result.ok && result.retryable && result.reason === "rpc_timeout"));
 });

@@ -251,6 +251,20 @@ export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal, ma
     });
     if (calls.length) await rpc.paceBatch?.({ signal });
     const outcomes = calls.length ? await rpc.batchOutcomes(calls, { signal }) : [];
+    const latestCodeFallbacks = [...new Map(layouts.flatMap((layout) => {
+      if (layout.cachedCode) return [];
+      const outcome = outcomes[layout.codeIndex];
+      return !outcome?.ok && outcome?.retryable !== false
+        ? [{ codeIndex: layout.codeIndex, address: calls[layout.codeIndex]?.params?.[0] }]
+        : [];
+    }).map((item) => [item.codeIndex, item])).values()];
+    if (latestCodeFallbacks.length) {
+      await rpc.paceBatch?.({ signal });
+      const fallbackOutcomes = await rpc.batchOutcomes(latestCodeFallbacks.map(({ address }) => ({ method: "eth_getCode", params: [address, "latest"] })), { signal });
+      for (let index = 0; index < latestCodeFallbacks.length; index += 1) {
+        if (fallbackOutcomes[index]?.ok) outcomes[latestCodeFallbacks[index].codeIndex] = { ...fallbackOutcomes[index], codeAtLatest: true };
+      }
+    }
     const retryableFailure = layouts
       .flatMap((layout) => layout.cachedCode ? [] : [outcomes[layout.codeIndex]])
       .find((outcome) => !outcome?.ok && outcome?.retryable !== false);
@@ -273,12 +287,12 @@ export async function verifyPoolBindings(rpc, pools, { batchSize = 2, signal, ma
         continue;
       }
       if (!pool.poolAddress) {
-        results.push({ ok: true, kind: "manager_pool_id" });
+        results.push({ ok: true, kind: code.codeAtLatest ? "manager_pool_id_latest_code" : "manager_pool_id" });
         continue;
       }
       const getters = [outcomes[layout.token0Index], outcomes[layout.token1Index], outcomes[layout.factoryIndex]];
       if (getters.some((outcome) => !outcome?.ok)) {
-        results.push({ ok: true, kind: "factory_event_and_code" });
+        results.push({ ok: true, kind: code.codeAtLatest ? "factory_event_and_latest_code" : "factory_event_and_code" });
         continue;
       }
       const token0 = decodeAbiAddress(getters[0].value);
