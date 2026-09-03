@@ -11,7 +11,7 @@ export function configuredRpcEndpoints(environment = process.env) {
   const candidates = [{ label: "primary", url: environment.BASE_RPC_HTTP_URL?.trim() || "https://mainnet.base.org" }];
   // Only explicit Base configuration is accepted; never infer the chain from an
   // arbitrary RPC secret in the environment. Labels cannot contain a hostname.
-  for (const key of ["BASE_RPC_URL", "BASE_RPC_FALLBACK_URLS", "BASE_RPC_HTTP_URLS", "ONCHAIN_BASE_RPC_URLS"]) {
+  for (const key of ["BASE_RPC_URL", "BASE_RPC_URLS", "BASE_RPC_FALLBACK_URLS", "BASE_RPC_HTTP_URLS", "ONCHAIN_BASE_RPC_URLS"]) {
     for (const url of (environment[key] ?? "").split(/[\s,]+/).filter(Boolean)) candidates.push({ label: `configured-${candidates.length}`, url });
   }
   // Official Base public endpoints. No pending/preconfirmation reads are used.

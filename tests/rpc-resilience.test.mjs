@@ -43,6 +43,15 @@ function fixture(behavior = () => undefined, options = {}) {
   return { pool, client: pool.client(), wires, advance: (ms) => { clock += ms; }, now: () => clock };
 }
 
+test("existing plural Base endpoint configuration is included without leaking labels", () => {
+  const endpoints = configuredRpcEndpoints({ BASE_RPC_URL: "https://mainnet.base.org", BASE_RPC_URLS: "https://mainnet.base.org,https://configured-a.invalid/key https://configured-b.invalid/key" });
+  assert.equal(endpoints.length, 4);
+  assert.equal(endpoints.filter((row) => row.url === "https://mainnet.base.org").length, 1);
+  assert(endpoints.some((row) => row.url === "https://configured-a.invalid/key"));
+  assert(endpoints.some((row) => row.url === "https://configured-b.invalid/key"));
+  assert(endpoints.every((row) => !row.label.includes("key")));
+});
+
 test("-32016 is provider-retryable even when its raw message says revert", async () => {
   const rpc = new JsonRpcClient("https://example.invalid", { retries: 0, fetchImpl: async (_, init) => ({ ok: true, json: async () => JSON.parse(init.body).map(({ id }) => ({ jsonrpc: "2.0", id, error: { code: -32016, message: "execution reverted upstream secret" } })) }) });
   const [outcome] = await rpc.batchOutcomes([call]);
