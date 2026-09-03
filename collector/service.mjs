@@ -391,9 +391,11 @@ export class OnchainDiscoveryCollector {
     const before = this.store.read();
     const scheduled = structuredClone(before);
     if (hasEnrichmentSeedCandidate(scheduled, now)) seedEnrichmentQueue(scheduled, now);
-    const due = (scheduled.enrichmentQueue ?? [])
-      .filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime())
-      .slice(0, this.config.enrichmentBatchSize);
+    const due = selectFairEnrichmentBatch(
+      (scheduled.enrichmentQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()),
+      before.pools,
+      this.config.enrichmentBatchSize
+    );
     if (!due.length) return before;
     const outcomes = await Promise.all(due.map(async (item) => {
       const pool = before.pools[item.poolKey];
@@ -1014,6 +1016,28 @@ function enrichmentPriority(state, pool, containsAnchor, now) {
   if (opportunity?.qualityBand === "EMERGING") return 60;
   if (pool.providerEnrichment?.status === "pending") return 55;
   return 30;
+}
+
+export function selectFairEnrichmentBatch(queue, pools, maximum = 4) {
+  const limit = Math.max(1, maximum);
+  const discovery = [];
+  const refresh = [];
+  for (const item of queue ?? []) {
+    if (pools?.[item.poolKey]?.providerEnrichment?.status === "matched") refresh.push(item);
+    else discovery.push(item);
+  }
+  if (!discovery.length) return refresh.slice(0, limit);
+  if (!refresh.length) return discovery.slice(0, limit);
+  const refreshQuota = limit > 1 ? Math.max(1, Math.floor(limit / 4)) : 0;
+  const discoveryCount = Math.min(discovery.length, limit - refreshQuota);
+  const refreshCount = Math.min(refresh.length, limit - discoveryCount);
+  const selected = [
+    ...discovery.slice(0, discoveryCount),
+    ...refresh.slice(0, refreshCount)
+  ];
+  if (selected.length < limit) selected.push(...discovery.slice(discoveryCount, discoveryCount + limit - selected.length));
+  if (selected.length < limit) selected.push(...refresh.slice(refreshCount, refreshCount + limit - selected.length));
+  return selected.slice(0, limit);
 }
 
 function isRecentlyDetected(pool, now, maximumAgeMs = 15 * 60_000) {

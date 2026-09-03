@@ -16,7 +16,7 @@ import {
   stabilizeWethUsdcAnchorRefresh
 } from "../collector/provider-enrichment.mjs";
 import { readSupportedPoolState } from "../collector/rpc.mjs";
-import { OnchainDiscoveryCollector, trustedAnchorPoolIdentity } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, selectFairEnrichmentBatch, trustedAnchorPoolIdentity } from "../collector/service.mjs";
 import { DurableDiscoveryStore, initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-01T12:00:00.000Z");
@@ -314,6 +314,26 @@ test("enrichment queue deduplicates by normalized pool key and priority", () => 
   assert.equal(queue.length, 1);
   assert.equal(queue[0].priority, 90);
   assert.equal(queue[0].poolKey, POOL);
+});
+
+test("provider refreshes cannot starve never-enriched pools", () => {
+  const refreshes = Array.from({ length: 4 }, (_, index) => ({ poolKey: `refresh-${index}`, priority: 100 }));
+  const discovery = Array.from({ length: 4 }, (_, index) => ({ poolKey: `discovery-${index}`, priority: 30 }));
+  const pools = Object.fromEntries([
+    ...refreshes.map((item) => [item.poolKey, { providerEnrichment: { status: "matched" } }]),
+    ...discovery.map((item) => [item.poolKey, {}])
+  ]);
+
+  const selected = selectFairEnrichmentBatch([...refreshes, ...discovery], pools, 4);
+
+  assert.deepEqual(selected.map((item) => item.poolKey), ["discovery-0", "discovery-1", "discovery-2", "refresh-0"]);
+});
+
+test("provider batch capacity is filled when only one work class is due", () => {
+  const refreshes = Array.from({ length: 5 }, (_, index) => ({ poolKey: `refresh-${index}` }));
+  const pools = Object.fromEntries(refreshes.map((item) => [item.poolKey, { providerEnrichment: { status: "matched" } }]));
+
+  assert.deepEqual(selectFairEnrichmentBatch(refreshes, pools, 4).map((item) => item.poolKey), refreshes.slice(0, 4).map((item) => item.poolKey));
 });
 
 test("bounded provider timeout/retry performs at most two attempts", async () => {
