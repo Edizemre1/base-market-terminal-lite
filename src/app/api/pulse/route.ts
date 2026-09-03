@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMarketTerminalSnapshot, resolveUrlMarketDataMode } from "@/data/providers";
 import type { PulseEventType } from "@/lib/base-terminal/pulse";
+import { getOnchainCollectorHealth } from "@/lib/base-terminal/onchainDiscovery";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const snapshot = await getMarketTerminalSnapshot(resolveUrlMarketDataMode(searchParams.get("data")));
+    const collector = snapshot.mode === "live" && process.env.ONCHAIN_STORE_PATH?.trim() ? getOnchainCollectorHealth(0) : undefined;
+    const collectorDelayed = collector?.ready === false;
 
     return NextResponse.json({
       ok: snapshot.allPairs.length > 0,
@@ -36,7 +39,9 @@ export async function GET(request: Request) {
       source: snapshot.providerName,
       generatedAt: snapshot.generatedAt,
       sourceUpdatedAt: snapshot.sourceUpdatedAt,
-      freshness: snapshot.freshness,
+      freshness: collectorDelayed ? "delayed" : snapshot.freshness,
+      delayedReason: collectorDelayed ? ("delayedReason" in collector ? collector.delayedReason : "collector_store_unavailable") : undefined,
+      onchainCollector: collector ? { ready: collector.ready, lagBlocks: "lagBlocks" in collector ? collector.lagBlocks : undefined, lastCursorProgressAt: "lastCursorProgressAt" in collector ? collector.lastCursorProgressAt : undefined } : undefined,
       qualifiedPairCount: snapshot.allPairs.length,
       rawPoolCount: snapshot.universe.rawPoolCount,
       uniqueTokenCount: snapshot.universe.uniqueTokenCount,

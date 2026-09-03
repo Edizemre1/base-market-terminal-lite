@@ -12,7 +12,7 @@ function load(relativePath, mocks = {}) {
   const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS, esModuleInterop: true } });
   const exports = {};
-  vm.runInNewContext(compiled.outputText, { exports, require: (name) => mocks[name] ?? require(name), process, globalThis: {}, TextEncoder, Response, ReadableStream, setTimeout, clearTimeout, setInterval, clearInterval, console });
+  vm.runInNewContext(compiled.outputText, { exports, require: (name) => mocks[name] ?? require(name), process, globalThis: {}, URL, TextEncoder, Response, ReadableStream, setTimeout, clearTimeout, setInterval, clearInterval, console });
   return exports;
 }
 const discovery = load("../src/lib/base-terminal/onchainDiscovery.ts");
@@ -29,6 +29,25 @@ test("fresh snapshot writes cannot mask a stale external head or cursor lag", ()
   value.health.lastHeadObservedAt = new Date().toISOString(); value.cursors.one.blockNumber = 10;
   assert.equal(discovery.collectorFreshness(value).lagBlocks, 90);
   assert.equal(discovery.collectorFreshness(value).ready, false);
+});
+
+test("live Pulse stays delayed while its configured collector is behind, then recovers", async () => {
+  const previous = process.env.ONCHAIN_STORE_PATH;
+  process.env.ONCHAIN_STORE_PATH = "/not-read-by-mocked-test";
+  let ready = false;
+  try {
+    const route = load("../src/app/api/pulse/route.ts", {
+      "next/server": { NextResponse: { json: (value) => Response.json(value) } },
+      "@/data/providers": { resolveUrlMarketDataMode: () => "live", getMarketTerminalSnapshot: async () => ({ mode: "live", allPairs: [{}], universe: {}, recentSignals: [], freshness: "fresh" }) },
+      "@/lib/base-terminal/onchainDiscovery": { getOnchainCollectorHealth: () => ({ ready, lagBlocks: ready ? 0 : 100, delayedReason: ready ? undefined : "confirmed_cursor_behind" }) }
+    });
+    const request = new Request("https://example.invalid/api/pulse?data=live");
+    const delayed = await (await route.GET(request)).json();
+    assert.equal(delayed.freshness, "delayed"); assert.equal(delayed.delayedReason, "confirmed_cursor_behind");
+    ready = true;
+    const recovered = await (await route.GET(request)).json();
+    assert.equal(recovered.freshness, "fresh"); assert.equal(recovered.onchainCollector.ready, true);
+  } finally { if (previous === undefined) delete process.env.ONCHAIN_STORE_PATH; else process.env.ONCHAIN_STORE_PATH = previous; }
 });
 
 test("relay baseline/checkpoint and expired reconnect do not replay historical transitions", () => {
