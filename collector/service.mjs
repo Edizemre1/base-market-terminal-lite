@@ -186,6 +186,7 @@ export class OnchainDiscoveryCollector {
       const fromBlock = Math.max(1, cursor - overlap + 1);
       let toBlock = Math.min(confirmedHead, cursor + maximumChunk);
       let rawLogs;
+      let decoded;
       for (;;) {
         rawLogs = await this.rpc.getLogs({
           fromBlock,
@@ -193,12 +194,12 @@ export class OnchainDiscoveryCollector {
           addresses: ENABLED.map((entry) => entry.address),
           topics: [...new Set(ENABLED.map((entry) => entry.eventTopic))]
         }, { signal });
-        if (rawLogs.length <= 16 || toBlock <= cursor + 1) break;
+        decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
+        if (rawLogs.length !== decoded.length) throw new JsonRpcRequestError("factory_malformed_log_window", { retryable: false, method: "eth_getLogs" });
+        const newBindingCount = decoded.filter((event) => !knownFactoryBinding(state.events?.[event.idempotencyKey], event)).length;
+        if (newBindingCount <= 16 || toBlock <= cursor + 1) break;
         toBlock = Math.max(cursor + 1, cursor + Math.floor((toBlock - cursor) / 2));
       }
-      const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
-      const malformedCount = rawLogs.length - decoded.length;
-      if (malformedCount) throw new JsonRpcRequestError("factory_malformed_log_window", { retryable: false, method: "eth_getLogs" });
       const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 2, { signal, managerCodeEvidence: this.managerCodeEvidence, knownEvents: state.events });
       const cursorBlock = validBlock(await this.rpc.getBlock(toBlock, { signal }), toBlock);
       throwIfAborted(signal);
@@ -1090,14 +1091,18 @@ async function mapWithConcurrency(items, concurrency, operation) {
   return results;
 }
 
+function knownFactoryBinding(previous, event) {
+  const immutableMatch = previous?.status === "confirmed" && !previous.replay && previous.blockHash === event.blockHash
+    && ["factoryAddress", "token0", "token1", "poolKey", "blockNumber"].every((key) => previous[key] === event[key]);
+  const proved = ["pool_contract", "factory_event_and_code", "factory_event_and_latest_code", "manager_pool_id", "manager_pool_id_latest_code"].includes(previous?.verifiedBinding);
+  return immutableMatch && proved ? previous.verifiedBinding : undefined;
+}
+
 export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal, managerCodeEvidence, knownEvents } = {}) {
   if (typeof rpc?.batchOutcomes === "function") {
     const bindings = events.map((event) => {
-      const previous = knownEvents?.[event.idempotencyKey];
-      const immutableMatch = previous?.status === "confirmed" && !previous.replay && previous.blockHash === event.blockHash
-        && ["factoryAddress", "token0", "token1", "poolKey", "blockNumber"].every((key) => previous[key] === event[key]);
-      const proved = ["pool_contract", "factory_event_and_code", "factory_event_and_latest_code", "manager_pool_id", "manager_pool_id_latest_code"].includes(previous?.verifiedBinding);
-      return immutableMatch && proved ? { ok: true, kind: previous.verifiedBinding } : undefined;
+      const kind = knownFactoryBinding(knownEvents?.[event.idempotencyKey], event);
+      return kind ? { ok: true, kind } : undefined;
     });
     const fresh = await verifyPoolBindings(rpc, events.filter((_, index) => !bindings[index]), { signal, managerCodeEvidence });
     let freshIndex = 0;

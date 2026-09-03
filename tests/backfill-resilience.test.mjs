@@ -9,7 +9,7 @@ import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
 import { OnchainDiscoveryCollector, seedMetadataQueue, verifyFactoryEvents } from "../collector/service.mjs";
 import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT, selectBackfillRpcBatch } from "../collector/pool-backfill.mjs";
 import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
-import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
+import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, decodeFactoryLog, eventsAfterId } from "../collector/model.mjs";
 
 const NOW = new Date("2026-09-03T20:00:00Z");
 const TOKEN = `0x${"1".repeat(40)}`, OTHER = `0x${"2".repeat(40)}`, HASH = `0x${"a".repeat(64)}`;
@@ -164,6 +164,22 @@ test("known overlap reuses immutable binding but always verifies canonical block
   blockHash = `0x${"b".repeat(64)}`;
   await assert.rejects(verifyFactoryEvents(rpc, [event], 2, { knownEvents: { [event.idempotencyKey]: event } }), /rpc_block_hash_conflict/);
   await assert.rejects(verifyFactoryEvents(rpc, [{ ...event, token0: OTHER }], 2, { knownEvents: { [event.idempotencyKey]: event } }), /fresh_binding_required/);
+});
+
+test("dense already-proved overlap cannot shrink a no-new-work scan to one block", async () => {
+  const word = (address) => `0x${address.slice(2).padStart(64, "0")}`;
+  const logs = Array.from({ length: 20 }, (_, index) => ({ address: registry.address, topics: [registry.eventTopic, word(TOKEN), word(OTHER)], data: `${word(`0x${(index + 100).toString(16).padStart(40, "0")}`)}${"0".repeat(63)}1`, blockNumber: "0x64", blockHash: HASH, transactionHash: `0x${"b".repeat(64)}`, logIndex: `0x${index.toString(16)}` }));
+  const state = initialState(NOW);
+  for (const cursor of Object.values(state.cursors)) cursor.blockNumber = 100;
+  for (const log of logs) { const event = decodeFactoryLog(log); state.events[event.idempotencyKey] = { ...event, status: "confirmed", verifiedBinding: "pool_contract" }; }
+  let logRequests = 0;
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test",
+    rpcClient: { blockNumber: async () => 1_000, getLogs: async () => { logRequests++; return logs; }, getBlock: async (number) => ({ number: `0x${number.toString(16)}`, hash: HASH, timestamp: "0x64" }) },
+    discoveryRpcClient: { batchOutcomes: async (calls) => calls.map((call) => ({ ok: true, method: call.method, value: { hash: HASH, timestamp: "0x64" } })) }
+  });
+  collector.store = memoryStore(state);
+  await collector.scanOnce();
+  assert.equal(logRequests, 1); assert.equal(collector.store.read().cursors[registry.id].blockNumber, 350);
 });
 
 test("an anchor cooldown tick cannot fabricate recovery or renew its last success", async () => {
