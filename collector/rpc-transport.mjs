@@ -193,7 +193,12 @@ export class RpcTransportPool {
         return outcomes;
       }
     }
-    const outcomes = last ?? calls.map((call) => ({ ok: false, reasonCode: "rpc_all_endpoints_cooling_down", retryable: true, method: call.method }));
+    const outcomes = (last ?? calls.map((call) => ({ ok: false, reasonCode: "rpc_all_endpoints_cooling_down", retryable: true, method: call.method })))
+      // Endpoint-level permanent failures (403, malformed, wrong chain) do not
+      // constitute permanent evidence against a pool. Exhausted transport must
+      // stay retryable to the caller; otherwise discovery could drop a valid
+      // factory event and advance its cursor past it after a fallback denial.
+      .map((item) => !item.ok && isProviderFailure(item) ? { ...item, retryable: true } : item);
     this.metrics.failures += outcomes.filter((item) => !item.ok).length;
     return outcomes;
   }

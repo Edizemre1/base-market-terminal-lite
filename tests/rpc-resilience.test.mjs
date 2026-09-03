@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
-import { JsonRpcClient } from "../collector/rpc.mjs";
+import { JsonRpcClient, verifyPoolBindings } from "../collector/rpc.mjs";
 import { RpcTransportPool, configuredRpcEndpoints } from "../collector/rpc-transport.mjs";
 import { BoundedSemaphore, withDeadline, abortableDelay } from "../collector/async-control.mjs";
 
@@ -105,6 +105,16 @@ test("a response completing after endpoint quarantine cannot publish success", a
   assert.equal(outcome.ok, true); assert.equal(outcome.endpointLabel, "configured-1");
   assert.equal(f.pool.snapshot().endpoints[0].status, "quarantined");
   assert.equal(f.pool.snapshot().endpoints[0].methods.eth_call.success, 0);
+});
+
+test("exhausted denied endpoints remain provider-retryable and cannot reject a factory pool", async () => {
+  const f = fixture((_endpoint, request) => request.method === "eth_getCode" ? { http: 403 } : undefined);
+  const address = `0x${"1".repeat(40)}`;
+  const [binding] = await verifyPoolBindings(f.client, [{ poolAddress: address, token0: address, token1: `0x${"2".repeat(40)}`, factoryAddress: `0x${"3".repeat(40)}`, blockNumber: 98 }]);
+  assert.equal(binding.ok, false);
+  assert.equal(binding.retryable, true, "endpoint denial must block the window, never drop its pool event");
+  assert.match(binding.reason, /^rpc_/);
+  assert(f.pool.snapshot().endpoints.every((endpoint) => endpoint.methods.eth_getCode.state === "open"));
 });
 
 test("behind fallback is ineligible for the requested exact block", async () => {
