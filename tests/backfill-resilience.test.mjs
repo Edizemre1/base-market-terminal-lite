@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { getEventListeners } from "node:events";
 import { BASE_USDC, BASE_WETH, FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
-import { OnchainDiscoveryCollector } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, seedMetadataQueue } from "../collector/service.mjs";
 import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT } from "../collector/pool-backfill.mjs";
 import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
 import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
@@ -42,6 +42,31 @@ function memoryStore(state) {
 test("backfill priority follows exact anchor, matched, quote, new, evidence, retry, supported", () => {
   const rows = [pool("anchor", { token0: BASE_WETH, token1: BASE_USDC }), pool("matched", { providerEnrichment: { status: "matched" } }), pool("quote", { token1: BASE_USDC }), pool("new", { firstSeenAt: NOW.toISOString() }), pool("evidence", { volume24hUsd: 1 }), pool("retry", { onchainState: { status: "retryable" } }), pool("other")];
   assert.deepEqual(rows.map((row) => backfillPriority(row, NOW)), [0, 1, 2, 3, 4, 5, 6]);
+});
+
+test("metadata prerequisites preserve waiting jobs and attempts under bounded queue pressure", () => {
+  const state = initialState(NOW);
+  state.tokenMetadata[BASE_WETH] = { decimals: 18, verificationState: "verified" };
+  state.pools.supported = pool("supported", { token0: TOKEN, token1: BASE_WETH });
+  for (let i = 0; i < 300; i++) {
+    const token = `0x${(i + 10).toString(16).padStart(40, "f")}`;
+    state.pools[token] = pool(token, { token0: token, token1: BASE_WETH, factoryId: "uniswap-v4", poolAddress: undefined });
+  }
+  state.metadataQueue = [{ tokenAddress: TOKEN, poolKey: TOKEN, attempts: 4, createdAt: "2026-09-03T19:00:00Z", nextAttemptAt: NOW.toISOString() }];
+  seedMetadataQueue(state, NOW);
+  assert.equal(state.metadataQueue.length, 256);
+  assert.equal(state.metadataQueue[0].tokenAddress, TOKEN);
+  assert.equal(state.metadataQueue[0].attempts, 4);
+  for (let pass = 0; pass < 3; pass++) seedMetadataQueue(state, NOW);
+  assert.equal(state.metadataQueue[0].tokenAddress, TOKEN);
+  state.metadataQueue = [];
+  const restarted = structuredClone(state); seedMetadataQueue(restarted, NOW);
+  assert.equal(restarted.metadataQueue[0].attempts, 4);
+  assert.equal(restarted.metadataQueue[0].createdAt, "2026-09-03T19:00:00Z");
+  const oldUnsupported = Object.values(restarted.pools).find((row) => !row.poolAddress).token0;
+  restarted.tokenMetadata[oldUnsupported].metadataBackfill.nextAttemptAt = "2026-09-03T19:30:00Z";
+  seedMetadataQueue(restarted, NOW);
+  assert.equal(restarted.metadataQueue[0].tokenAddress, oldUnsupported, "aging still provides fairness to lower priorities");
 });
 
 test("queue is bounded and aging eventually outranks recurring high-priority work", () => {
@@ -121,6 +146,22 @@ test("an anchor cooldown tick cannot fabricate recovery or renew its last succes
   assert.equal(collector.loopHealth.anchor.phase, "retrying");
   assert.equal(collector.loopHealth.anchor.lastSuccessAt, NOW.toISOString());
   assert.equal(collector.loopHealth.anchor.lastError.recoveredAt, undefined);
+});
+
+test("anchor refresh cannot overwrite concurrently verified token metadata", async () => {
+  const state = initialState(NOW);
+  state.tokenMetadata = { [TOKEN]: { verificationState: "pending" }, [BASE_WETH]: { decimals: 18, verificationState: "verified" }, [BASE_USDC]: { decimals: 6, verificationState: "verified" } };
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test",
+    anchorProviderClient: { lookupWethPools: async () => {
+      await collector.store.transact("metadata-other-loop", (draft) => { draft.tokenMetadata[TOKEN] = { decimals: 9, verificationState: "verified", metadataBackfill: { attempts: 5 } }; });
+      return [];
+    } }, anchorRpcClient: { blockNumber: async () => 102, getBlock: async () => ({ number: "0x64", hash: HASH, timestamp: `0x${Math.floor(Date.now() / 1_000).toString(16)}` }) }
+  });
+  collector.store = memoryStore(state);
+  await collector.refreshAnchorIfDue();
+  assert.equal(collector.store.read().tokenMetadata[TOKEN].verificationState, "verified");
+  assert.equal(collector.store.read().tokenMetadata[TOKEN].decimals, 9);
+  assert.equal(collector.store.read().tokenMetadata[TOKEN].metadataBackfill.attempts, 5);
 });
 
 test("late metadata completion after cancellation cannot commit", async () => {

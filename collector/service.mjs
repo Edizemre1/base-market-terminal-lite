@@ -3,7 +3,7 @@ import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, co
 import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcRequestError, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
 import { configuredRpcEndpoints, RpcTransportPool, validBlock } from "./rpc-transport.mjs";
 import { throwIfAborted, withDeadline } from "./async-control.mjs";
-import { seedBackfillQueue, recordBackfillOutcome, backfillHealth } from "./pool-backfill.mjs";
+import { seedBackfillQueue, recordBackfillOutcome, backfillHealth, backfillPriority } from "./pool-backfill.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
 import { acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
 import {
@@ -296,17 +296,23 @@ export class OnchainDiscoveryCollector {
         const previous = draft.tokenMetadata[item.tokenAddress];
         const result = results[item.tokenAddress];
         if (previous?.verificationState === "verified") { completed.add(item.tokenAddress); continue; }
-        draft.tokenMetadata[item.tokenAddress] = result;
+        const attempts = (item.attempts ?? 0) + 1;
+        const retryDelay = attempts % 6 === 0 ? 60 * 60_000 : Math.min(15 * 60_000, 15_000 * 2 ** Math.min(attempts, 6));
+        const nextAttemptAt = new Date(now.getTime() + retryDelay).toISOString();
+        draft.tokenMetadata[item.tokenAddress] = {
+          ...result,
+          retryAt: result.retryable ? nextAttemptAt : undefined,
+          metadataBackfill: { ...previous?.metadataBackfill, attempts, createdAt: item.createdAt ?? now.toISOString(), nextAttemptAt, lastReason: result.failureReason, lastAttemptAt: now.toISOString() }
+        };
         if (result.verificationState === "verified") {
           completed.add(item.tokenAddress);
           draft.counters.tokenMetadataVerified += 1;
           appendRelayEvent(draft, "token_metadata_verified", { tokenAddress: item.tokenAddress, decimals: result.decimals, blockNumber: result.blockNumber }, result.observedAt);
-        } else if (!result.retryable || (item.attempts ?? 0) >= 5) {
+        } else if (!result.retryable) {
           completed.add(item.tokenAddress);
         } else {
           const queued = draft.metadataQueue.find((row) => row.tokenAddress === item.tokenAddress);
-          const attempts = (item.attempts ?? 0) + 1;
-          if (queued) Object.assign(queued, { attempts, nextAttemptAt: new Date(now.getTime() + Math.min(15 * 60_000, 15_000 * 2 ** attempts)).toISOString(), lastReason: result.failureReason });
+          if (queued) Object.assign(queued, { attempts, nextAttemptAt, lastReason: result.failureReason });
         }
       }
       draft.metadataQueue = draft.metadataQueue.filter((item) => !completed.has(item.tokenAddress));
@@ -539,12 +545,14 @@ export class OnchainDiscoveryCollector {
       block.observedAt = new Date(block.timestamp).toISOString();
       const exactOptions = { signal, blockProof: block };
       const metadata = { ...before.tokenMetadata };
+      const anchorMetadataUpdates = {};
       for (const token of [BASE_WETH, BASE_USDC]) {
         if (!Number.isInteger(metadata[token]?.decimals)) {
           const exactDecimals = await readTokenDecimals(this.anchorRpc, token, blockNumber, exactOptions);
           metadata[token] = exactDecimals.ok
             ? { ...metadata[token], address: token, decimals: exactDecimals.decimals, codeExists: true, observedAt: exactDecimals.observedAt, blockNumber, status: metadata[token]?.name && metadata[token]?.symbol ? "complete" : "partial" }
             : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now, exactOptions);
+          anchorMetadataUpdates[token] = metadata[token];
         }
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
@@ -598,7 +606,11 @@ export class OnchainDiscoveryCollector {
         throwIfAborted(signal);
         semanticBefore = semanticSnapshot(draft, []);
         ensureEnrichmentState(draft);
-        draft.tokenMetadata = { ...draft.tokenMetadata, ...metadata };
+        // Other metadata jobs may have committed while anchor RPC was in
+        // flight. Only publish anchor-token fields actually read this cycle.
+        for (const [token, update] of Object.entries(anchorMetadataUpdates)) {
+          if (draft.tokenMetadata[token]?.verificationState !== "verified") draft.tokenMetadata[token] = { ...draft.tokenMetadata[token], ...update };
+        }
         draft.priceAnchors.wethUsdc = anchor;
         if (anchor.status === "ready") draft.health.lastSuccessfulEnrichment = anchor.observedAt;
         draft.counters.staleAnchorRejected += anchor.rejected.filter((item) => item.reasonCode === "stale_anchor").length;
@@ -826,18 +838,29 @@ function ensureEnrichmentState(state) {
   }
 }
 
-function seedMetadataQueue(state, now) {
-  const queued = new Set((state.metadataQueue ?? []).map((item) => item.tokenAddress));
-  const tokens = [...new Set(Object.values(state.pools ?? {}).flatMap((pool) => [pool.token0, pool.token1]))].filter(Boolean).sort();
-  const jobs = [];
-  for (const token of tokens) {
-    const metadata = state.tokenMetadata?.[token];
-    if (metadata?.verificationState === "verified" || metadata?.verificationState === "quarantined" || queued.has(token)) continue;
-    const retryAt = Date.parse(metadata?.retryAt ?? "");
-    if (Number.isFinite(retryAt) && retryAt > now.getTime()) continue;
-    jobs.push({ poolKey: token, tokenAddress: token, blockNumber: state.confirmedHead || state.currentHead, attempts: 0, createdAt: now.toISOString(), nextAttemptAt: now.toISOString() });
+export function seedMetadataQueue(state, now) {
+  state.tokenMetadata ??= {};
+  const queued = new Map((state.metadataQueue ?? []).map((item) => [item.tokenAddress, item]));
+  const priorities = new Map();
+  for (const pool of Object.values(state.pools ?? {})) {
+    if (pool.status !== "confirmed" || pool.orphaned || pool.replay) continue;
+    for (const token of [pool.token0, pool.token1].filter(Boolean)) priorities.set(token, Math.min(priorities.get(token) ?? Infinity, backfillPriority(pool, now)));
   }
-  state.metadataQueue = coalesceBoundedQueue(state.metadataQueue ?? [], jobs, 256);
+  const jobs = [];
+  for (const [token, priority] of priorities) {
+    const metadata = state.tokenMetadata[token] ??= {};
+    if (metadata.verificationState === "verified" || metadata.verificationState === "quarantined" || metadata.verificationState === "rejected" && metadata.retryable === false) continue;
+    const previous = queued.get(token);
+    const history = metadata.metadataBackfill ??= { attempts: previous?.attempts ?? 0, createdAt: previous?.createdAt ?? now.toISOString(), nextAttemptAt: metadata.retryAt ?? previous?.nextAttemptAt ?? now.toISOString() };
+    if (Date.parse(history.nextAttemptAt) > now.getTime()) continue;
+    const waitingSince = history.nextAttemptAt ?? history.createdAt;
+    const score = priority - Math.floor(Math.max(0, now.getTime() - Date.parse(waitingSince)) / 60_000);
+    jobs.push({ poolKey: token, tokenAddress: token, blockNumber: state.confirmedHead || state.currentHead, ...history, priority, score, waitingSince });
+  }
+  // Keep the best 256 pending prerequisites. Appending every missing token and
+  // slicing the tail repeatedly evicted waiting jobs in address-order, starving
+  // supported pools regardless of the pool-state scheduler's fairness.
+  state.metadataQueue = jobs.sort((a, b) => a.score - b.score || Date.parse(a.waitingSince) - Date.parse(b.waitingSince) || a.tokenAddress.localeCompare(b.tokenAddress)).slice(0, 256);
 }
 
 function seedOnchainQueue(state, now) {
