@@ -152,7 +152,7 @@ export class OnchainDiscoveryCollector {
       draft.currentHead = head; draft.confirmedHead = confirmedHead;
       draft.health = buildHealth(draft, head, confirmedHead, this.config.websocketUrl ? "websocket" : "confirmed_polling");
       draft.health.lastHeadObservedAt = new Date().toISOString();
-    });
+    }, undefined, { derive: false });
   }
 
   async scanOnce(signal) {

@@ -170,10 +170,14 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
     }
   }
   const previousById = new Map(previous.map((item) => [item.id, item]));
+  // A single immutable proof/freshness context belongs to this rebuild. Do not
+  // re-dedupe and revalidate the entire universe for every token (quadratic CPU
+  // work would block unrelated RPC deadlines on the collector event loop).
+  const pricingContext = createPricingContext(pools, now);
   return [...groups.values()].map((group) => {
     const before = previousById.get(group.id);
     const selection = selectPrimaryPool(group.pools, before?.primaryPoolKey, now);
-    const price = calculateCanonicalUsdcPrice(group.tokenAddress, pools, now);
+    const price = calculatePriceFromContext(group.tokenAddress, pricingContext, now);
     const tokenMetadata = metadata[group.tokenAddress];
     const observed = group.pools.map((pool) => pool.observedAt ?? pool.confirmedAt).filter(Boolean).sort();
     const metadataVerified = tokenMetadata?.verificationState === "verified" || Number.isInteger(tokenMetadata?.decimals);
@@ -245,20 +249,30 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
 }
 
 export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new Date(), options = {}) {
+  return calculatePriceFromContext(tokenAddress, createPricingContext(dedupePools(inputPools), now, options), now);
+}
+
+function createPricingContext(pools, now, options = {}) {
+  const accepted = [];
+  const rejectedByToken = new Map();
+  const rejectedAnchors = [];
+  for (const pool of pools) {
+    const reason = validatePricingPool(pool, now.getTime(), options.maxAgeMs ?? MAX_PRICE_AGE_MS, options.minimumLiquidityUsd ?? MIN_PRICE_LIQUIDITY_USD);
+    if (!reason) { accepted.push(pool); continue; }
+    const rejected = { pool, reason };
+    for (const token of [pool.token0, pool.token1]) {
+      const rows = rejectedByToken.get(token) ?? [];
+      rows.push(rejected); rejectedByToken.set(token, rows);
+    }
+    if (sameTokenPair(pool, BASE_WETH, BASE_USDC)) rejectedAnchors.push(rejected);
+  }
+  return { graph: buildPriceGraph(accepted), rejectedByToken, rejectedAnchors };
+}
+
+function calculatePriceFromContext(tokenAddress, { graph, rejectedByToken, rejectedAnchors }, now) {
   const token = normalizeAddress(tokenAddress);
   if (!token) return unpriced("invalid_token_address");
   if (token === BASE_USDC) return { value: 1, tier: "A", kind: "direct", sourcePoolKeys: [], anchor: BASE_USDC, observedAt: now.toISOString(), freshness: "fresh", reasonCode: "canonical_usdc_unit" };
-  const maxAgeMs = options.maxAgeMs ?? MAX_PRICE_AGE_MS;
-  const minimumLiquidityUsd = options.minimumLiquidityUsd ?? MIN_PRICE_LIQUIDITY_USD;
-  const nowMs = now.getTime();
-  const accepted = [];
-  const rejected = [];
-  for (const pool of dedupePools(inputPools)) {
-    const reason = validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd);
-    if (reason) rejected.push({ pool, reason });
-    else accepted.push(pool);
-  }
-  const graph = buildPriceGraph(accepted);
   const queue = [{ token, value: 1, path: [], visited: new Set([token]), observedAt: now.toISOString(), blockNumber: undefined }];
   const candidates = [];
   while (queue.length) {
@@ -279,9 +293,8 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     }
   }
   if (!candidates.length) {
-    const tokenRejected = rejected.filter(({ pool }) => pool.token0 === token || pool.token1 === token);
-    const anchorRejected = rejected.filter(({ pool }) => sameTokenPair(pool, BASE_WETH, BASE_USDC));
-    const relevant = tokenRejected.length ? tokenRejected : anchorRejected;
+    const tokenRejected = rejectedByToken.get(token) ?? [];
+    const relevant = tokenRejected.length ? tokenRejected : rejectedAnchors;
     if (relevant.some(({ reason }) => reason === "future_timestamp")) return unpriced("future_timestamp");
     if (relevant.some(({ reason }) => reason === "conflicting_pool_identity")) return unpriced("conflicting_pool_identity");
     if (relevant.some(({ reason }) => reason === "stale_anchor")) return unpriced("stale_anchor");

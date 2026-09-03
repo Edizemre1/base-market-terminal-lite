@@ -9,11 +9,28 @@ import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
 import { OnchainDiscoveryCollector } from "../collector/service.mjs";
 import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT } from "../collector/pool-backfill.mjs";
 import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
-import { calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
+import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
 
 const NOW = new Date("2026-09-03T20:00:00Z");
 const TOKEN = `0x${"1".repeat(40)}`, OTHER = `0x${"2".repeat(40)}`, HASH = `0x${"a".repeat(64)}`;
 const registry = FACTORY_REGISTRY.find((row) => row.id === "uniswap-v2");
+test("one rebuild validates each pool proof once and reuses its source-correct graph", () => {
+  let proofReads = 0;
+  const rows = Array.from({ length: 64 }, (_, index) => {
+    const token = `0x${(index + 1).toString(16).padStart(40, "0")}`;
+    return pool(`pool-${index}`, { token0: token, token1: BASE_USDC, liquidityUsd: 10_000, observedAt: NOW.toISOString(), priceToken1PerToken0: index + 1,
+      onchainState: { get status() { proofReads++; return "complete"; }, confidence: "exact_onchain_state", token0: token, token1: BASE_USDC, decimals0: 18, decimals1: 6, blockNumber: 100, blockHash: HASH, observedAt: NOW.toISOString(), observedPrice0In1: index + 1 } });
+  });
+  const result = buildCanonicalOpportunities(rows, {}, [], NOW);
+  assert.equal(result.length, 64);
+  assert.equal(proofReads, 64, "proof validation must be linear, not repeated once per token");
+  for (const opportunity of result) {
+    const row = rows.find((item) => item.token0 === opportunity.tokenAddress);
+    assert.deepEqual(opportunity.canonicalPrice, calculateCanonicalUsdcPrice(row.token0, rows, NOW));
+  }
+  const stale = buildCanonicalOpportunities(rows, {}, result, new Date(NOW.getTime() + 10 * 60_000));
+  assert(stale.every((row) => row.canonicalPrice.tier === "UNPRICED"), "context cannot survive a later freshness boundary");
+});
 function pool(key, extra = {}) { return { poolKey: key, poolAddress: `0x${"3".repeat(40)}`, token0: TOKEN, token1: OTHER, status: "confirmed", verifiedSource: true, factoryId: registry.id, factoryAddress: registry.address, firstSeenAt: "2026-09-01T00:00:00Z", ...extra }; }
 function memoryStore(state) {
   return {
