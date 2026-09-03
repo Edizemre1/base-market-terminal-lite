@@ -193,6 +193,7 @@ test.describe("pool market to token opportunity contracts", () => {
           blockNumber: 50_000_000,
           providers: ["dexscreener"],
           priceToken1PerToken0: anchorUsd,
+          onchainState: { status: "complete", confidence: "exact_onchain_state", decimals0: 18, decimals1: 6, blockNumber: 50_000_000, blockHash: `0x${"a".repeat(64)}`, observedAt: new Date().toISOString(), observedPrice0In1: anchorUsd, observedPrice1In0: 1 / anchorUsd },
           liquidityUsd: 115_000_000,
           volume24hUsd: 50_000_000,
           anchorConsensus: true,
@@ -335,6 +336,7 @@ function verifiedPool(pool: BasePair): BasePair {
   const observedAt = new Date().toISOString();
   return {
     ...pool,
+    onchainStateEvidence: { status: "complete", confidence: "exact_onchain_state", token0: pool.baseTokenAddress, token1: pool.quoteTokenAddress, decimals0: 18, decimals1: 6, blockNumber: 50_000_000, blockHash: `0x${"a".repeat(64)}`, observedAt, observedPrice0In1: Number(pool.priceNative), observedPrice1In0: 1 / Number(pool.priceNative) },
     dataProviders: [...new Set([...(pool.dataProviders ?? []), "onchain" as const])],
     sourceUpdatedAt: observedAt,
     onchainProvenance: {

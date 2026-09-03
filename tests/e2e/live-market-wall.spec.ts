@@ -201,6 +201,7 @@ function market(seed: number, options: { symbol: string; ageMinutes?: number; ch
     priceUsd: `$${1 + (options.change ?? 0) / 100}`,
     priceUsdValue: 1 + (options.change ?? 0) / 100,
     onchainProvenance: { factoryId: "fixture", factoryAddress: address(seed + 30_000), protocolVersion: "v2", confirmedAt: new Date(NOW).toISOString(), bindingKind: "registered_pool_identity", decimalsVerified: true },
+    onchainStateEvidence: { status: "complete", confidence: "exact_onchain_state", token0: address(seed + 20_000), token1: USDC, decimals0: 18, decimals1: 6, blockNumber: 50_000_000, blockHash: `0x${"a".repeat(64)}`, observedAt: new Date(NOW).toISOString(), observedPrice0In1: 1 + (options.change ?? 0) / 100, observedPrice1In0: 1 / (1 + (options.change ?? 0) / 100) },
     change24h: options.change24h ?? options.change ?? 0,
     priceChanges: { m5: options.change, h1: options.change, h24: options.change24h ?? options.change },
     liquidity,
