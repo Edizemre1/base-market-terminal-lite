@@ -1,4 +1,5 @@
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH } from "./factory-registry.mjs";
+import { BoundedSemaphore, abortableDelay, throwIfAborted, withDeadline } from "./async-control.mjs";
 
 export const ENRICHMENT_QUEUE_LIMIT = 512;
 export const ENRICHMENT_MAX_ATTEMPTS = 4;
@@ -32,6 +33,7 @@ export class ProviderEnrichmentClient {
     // consumers while keeping this collector below the public 30 req/min limit.
     this.providerMinimumIntervalMs = { ...PROVIDER_MINIMUM_INTERVAL_MS };
     this.providerNextRequestAt = { dexscreener: 0, geckoterminal: 0 };
+    this.providerGates = { dexscreener: new BoundedSemaphore(1), geckoterminal: new BoundedSemaphore(1) };
     this.exactLookupCache = new Map();
     this.exactLookupInFlight = new Map();
     this.circuits = {
@@ -40,7 +42,8 @@ export class ProviderEnrichmentClient {
     };
   }
 
-  async lookupPool(poolAddress) {
+  async lookupPool(poolAddress, { signal } = {}) {
+    throwIfAborted(signal);
     const address = normalizeAddress(poolAddress);
     if (!address) throw new ProviderRequestError("malformed_pool_address", { retryable: false });
     const nowMs = this.now().getTime();
@@ -48,20 +51,22 @@ export class ProviderEnrichmentClient {
     if (cached && cached.expiresAt > nowMs) return structuredClone({ ...cached.value, cacheHit: true });
     const pending = this.exactLookupInFlight.get(address);
     if (pending) return pending;
-    const lookup = this.performExactPoolLookup(address).then((value) => {
+    const lookup = this.performExactPoolLookup(address, { signal }).then((value) => {
+      throwIfAborted(signal);
       const ttl = value.lookupState === "not_found" ? EXACT_LOOKUP_NEGATIVE_TTL_MS : EXACT_LOOKUP_CACHE_MS;
       this.exactLookupCache.set(address, { expiresAt: this.now().getTime() + ttl, value });
+      if (this.exactLookupCache.size > ENRICHMENT_QUEUE_LIMIT) this.exactLookupCache.delete(this.exactLookupCache.keys().next().value);
       return structuredClone(value);
     }).finally(() => this.exactLookupInFlight.delete(address));
     this.exactLookupInFlight.set(address, lookup);
     return lookup;
   }
 
-  async performExactPoolLookup(address) {
+  async performExactPoolLookup(address, { signal } = {}) {
     const receivedAt = this.now().toISOString();
     const calls = [
-      { kind: "dexscreener", promise: this.request("dexscreener", `${DEXSCREENER}/latest/dex/pairs/base/${address}`).then((payload) => parseDexScreenerPayload(payload, receivedAt)) },
-      { kind: "geckoterminal", promise: this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}?include=base_token,quote_token,dex`).then((payload) => parseGeckoTerminalPayload(payload, receivedAt)) }
+      { kind: "dexscreener", promise: this.request("dexscreener", `${DEXSCREENER}/latest/dex/pairs/base/${address}`, { signal }).then((payload) => parseDexScreenerPayload(payload, receivedAt)) },
+      { kind: "geckoterminal", promise: this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}?include=base_token,quote_token,dex`, { signal }).then((payload) => parseGeckoTerminalPayload(payload, receivedAt)) }
     ];
     const settled = await Promise.allSettled(calls.map((call) => call.promise));
     const observations = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
@@ -73,7 +78,7 @@ export class ProviderEnrichmentClient {
     const failures = [...providerFailures];
     if (observations.length) {
       try {
-        const payload = await this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}/info`);
+        const payload = await this.request("geckoterminal", `${GECKOTERMINAL}/networks/base/pools/${address}/info`, { signal });
         poolInfo = parseGeckoTerminalInfo(payload, address, receivedAt);
       } catch (error) {
         failures.push(error);
@@ -122,14 +127,16 @@ export class ProviderEnrichmentClient {
     if (this.now().getTime() < circuit.openUntil) throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
-        await this.waitForProviderSlot(provider);
+        const payload = await withDeadline(async (attemptSignal) => {
+          const release = await this.providerGates[provider].acquire(attemptSignal);
+          try {
+        await this.waitForProviderSlot(provider, attemptSignal);
         if (this.now().getTime() < circuit.openUntil) {
           throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
         }
-        const timeoutSignal = AbortSignal.timeout(this.providerTimeoutMs[provider] ?? 8_000);
         const response = await this.fetchImpl(url, {
           headers: { accept: "application/json", "user-agent": "Mergen-Base-Terminal/2.0" },
-          signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+          signal: attemptSignal
         });
         if (!response?.ok) {
           const status = Number(response?.status);
@@ -139,13 +146,16 @@ export class ProviderEnrichmentClient {
             retryAfterMs: status === 429 ? readRetryAfterMs(response, this.now().getTime()) : undefined
           });
         }
-        const payload = await response.json();
+            return await response.json();
+          } finally { release(); }
+        }, this.providerTimeoutMs[provider] ?? 8_000, { signal, reasonCode: "provider_timeout" });
         circuit.consecutiveFailures = 0;
         circuit.openUntil = 0;
         circuit.lastSuccessAt = this.now().toISOString();
         circuit.lastFailureReason = undefined;
         return payload;
       } catch (error) {
+        throwIfAborted(signal);
         const normalized = normalizeProviderError(error, provider);
         circuit.lastFailureReason = normalized.reasonCode;
         if (normalized.reasonCode === "provider_circuit_open") throw normalized;
@@ -159,17 +169,17 @@ export class ProviderEnrichmentClient {
           if (circuit.consecutiveFailures >= 5) circuit.openUntil = this.now().getTime() + 30_000;
           throw normalized;
         }
-        await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
+        await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt), signal);
       }
     }
     throw new ProviderRequestError("provider_retry_exhausted", { retryable: true, provider });
   }
 
-  async waitForProviderSlot(provider) {
+  async waitForProviderSlot(provider, signal) {
     const nowMs = this.now().getTime();
     const scheduledAt = Math.max(nowMs, this.providerNextRequestAt[provider] ?? 0);
     this.providerNextRequestAt[provider] = scheduledAt + (this.providerMinimumIntervalMs[provider] ?? 250);
-    if (scheduledAt > nowMs) await this.delayImpl(scheduledAt - nowMs);
+    if (scheduledAt > nowMs) await this.delayImpl(scheduledAt - nowMs, signal);
   }
 }
 
@@ -371,16 +381,18 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
     pricingPool: {
       poolKey: selected.poolAddress,
       poolAddress: selected.poolAddress,
-      token0: BASE_WETH,
-      token1: BASE_USDC,
+      token0: selected.token0,
+      token1: selected.token1,
       status: "confirmed",
       verifiedSource: true,
       orphaned: false,
       observedAt,
       blockNumber: selected.blockNumber,
-      priceToken1PerToken0: value,
-      rawPriceRatio: selected.rawPriceRatio,
-      liquidityUsd: Math.max(...consensus.map((item) => item.liquidityUsd)),
+      blockHash: selected.blockHash,
+      onchainState: selected.onchainState,
+      priceToken1PerToken0: selected.onchainState?.observedPrice0In1 ?? (selected.token0 === BASE_WETH ? value : 1 / value),
+      rawPriceRatio: selected.onchainState?.rawPriceRatio ?? selected.rawPriceRatio,
+      liquidityUsd: selected.liquidityUsd,
       volume24hUsd: selected.volume24hUsd,
       trades24h: selected.trades24h,
       providers: [...new Set(consensus.flatMap((item) => item.providers ?? []))].sort(),
@@ -521,7 +533,7 @@ function canonicalNumber(value) { return Number.isFinite(value) && value > 0 ? v
 function relativeDeviation(values) { if (!values.length) return undefined; const minimum = Math.min(...values); const maximum = Math.max(...values); const middle = (minimum + maximum) / 2; return middle > 0 ? (maximum - minimum) / middle : undefined; }
 function dominantReason(rejected) { return rejected.map((item) => item.reasonCode).sort()[0]; }
 function safeFailure(error) { return { provider: error?.provider, reasonCode: error?.reasonCode ?? "provider_failure", retryable: Boolean(error?.retryable) }; }
-function normalizeProviderError(error, provider) { if (error instanceof ProviderRequestError) return error; const timeout = error?.name === "TimeoutError" || error?.name === "AbortError"; return new ProviderRequestError(timeout ? "provider_timeout" : "provider_network_failure", { retryable: true, provider }); }
+function normalizeProviderError(error, provider) { if (error instanceof ProviderRequestError) return error; const timeout = error?.reasonCode === "provider_timeout" || error?.name === "TimeoutError" || error?.name === "AbortError"; return new ProviderRequestError(timeout ? "provider_timeout" : "provider_network_failure", { retryable: true, provider }); }
 function readRetryAfterMs(response, nowMs) {
   const value = response?.headers?.get?.("retry-after")?.trim();
   if (!value) return undefined;
@@ -530,4 +542,4 @@ function readRetryAfterMs(response, nowMs) {
   return Number.isFinite(milliseconds) && milliseconds > 0 ? Math.min(5 * 60_000, Math.max(1_000, milliseconds)) : undefined;
 }
 function newCircuit() { return { consecutiveFailures: 0, openUntil: 0, lastSuccessAt: undefined, lastFailureReason: undefined }; }
-function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+const delay = abortableDelay;

@@ -45,6 +45,10 @@ export type BasePair = {
   metadataStatus?: "complete" | "partial" | "unavailable";
   metadataVerificationState?: "verified" | "legacy_verified" | "pending" | "quarantined" | "rejected";
   onchainStateEvidence?: {
+    token0?: string;
+    token1?: string;
+    decimals0?: number;
+    decimals1?: number;
     status?: "complete" | "pending" | "retryable" | "rejected" | "unsupported";
     adapterFamily?: string;
     protocolFamily?: string;

@@ -54,7 +54,7 @@ test("bounded pool retention preserves provider-matched source evidence", () => 
   assert.ok(retained["detected-1999"]);
 });
 
-test("discovery verification has an isolated bounded RPC client", () => {
+test("discovery has an isolated lane and shares the central bounded RPC budget", () => {
   const discoveryRpcClient = { kind: "isolated-discovery-client" };
   const config = {
     ...resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }),
@@ -67,7 +67,10 @@ test("discovery verification has an isolated bounded RPC client", () => {
   assert.notEqual(collector.discoveryRpc, collector.rpc);
 
   const defaultCollector = new OnchainDiscoveryCollector(resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" }));
-  assert.equal(defaultCollector.discoveryRpc.retries, 3);
+  assert.equal(defaultCollector.discoveryRpc.retries, 0);
+  assert.equal(defaultCollector.discoveryRpc.pool, defaultCollector.stateRpc.pool);
+  assert.equal(defaultCollector.anchorRpc.pool, defaultCollector.rpc.pool);
+  assert.equal(defaultCollector.transport.snapshot().budget.maximumAttempts, 2);
   assert.equal(defaultCollector.discoveryRpc.timeoutMs, 8_000);
   assert.equal(defaultCollector.discoveryRpc.batchPaceMs, 3_000);
 });

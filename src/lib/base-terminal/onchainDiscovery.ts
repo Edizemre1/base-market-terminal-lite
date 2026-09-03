@@ -41,6 +41,7 @@ type StoredPool = {
   liquidityReconciliation?: BasePair["liquidityReconciliation"];
   onchainObservedPricesUsd?: Record<string, number>;
   onchainState?: {
+    decimals0?: number; decimals1?: number;
     status?: "complete" | "pending" | "retryable" | "rejected" | "unsupported";
     adapterFamily?: string; protocolFamily?: string; reasonCode?: string; confidence?: string; sourceMethod?: string;
     blockNumber?: number; blockHash?: string; observedAt?: string; observedPrice0In1?: number; observedPrice1In0?: number;
@@ -105,6 +106,7 @@ export type OnchainStoreState = {
         decimalsVerified?: boolean;
       }>;
       pricingPool?: Record<string, unknown> & {
+        onchainState?: StoredPool["onchainState"];
         poolKey?: string;
         poolAddress?: string;
         token0?: string;
@@ -185,7 +187,8 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
       priceToken1PerToken0: pricingPool.priceToken1PerToken0,
       liquidityUsd: pricingPool.liquidityUsd,
       volume24hUsd: pricingPool.volume24hUsd,
-      trades24h: pricingPool.trades24h
+      trades24h: pricingPool.trades24h,
+      onchainState: pricingPool.onchainState
     } satisfies StoredPool];
   });
   const bindingsByPool = new Map<string, StoredPool>();
@@ -200,7 +203,8 @@ export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = r
       const providers = [...new Set([...(current.dataProviders ?? (current.dataSource ? [current.dataSource] : [])), "onchain" as const])];
       const currentBase = normalizeAddress(current.baseTokenAddress) ?? "";
       const onchainObserved = positive(pool.onchainObservedPricesUsd?.[currentBase]);
-      const resolvedNative = positive(pool.priceToken1PerToken0);
+      const poolRate = positive(pool.priceToken1PerToken0);
+      const resolvedNative = currentBase === pool.token0 ? poolRate : currentBase === pool.token1 && poolRate ? 1 / poolRate : undefined;
       pairsByPool.set(key, {
         ...current,
         dataProviders: providers,
@@ -255,7 +259,7 @@ export function getOnchainCollectorHealth(sseClients: number) {
   }
   return {
     ...state.health,
-    ready: Boolean(state.health.ready && state.health.storeIntegrity === "ok"),
+    ...collectorFreshness(state),
     mode: state.health.mode ?? state.mode,
     currentHead: state.currentHead,
     confirmedCursor: Math.min(...Object.values(state.cursors).map((cursor) => cursor.blockNumber)),
@@ -279,6 +283,19 @@ export function getOnchainCollectorHealth(sseClients: number) {
     storeSchemaVersion: state.schemaVersion,
     sseClients
   };
+}
+
+export function collectorFreshness(state: OnchainStoreState, nowMs = Date.now()) {
+  const cursorRows = Object.values(state.cursors ?? {});
+  const confirmedCursor = cursorRows.length ? Math.min(...cursorRows.map((row) => row.blockNumber)) : 0;
+  const snapshotAgeMs = Math.max(0, nowMs - Date.parse(state.updatedAt));
+  const headAt = typeof state.health.lastHeadObservedAt === "string" ? state.health.lastHeadObservedAt : cursorRows.map((row) => row.updatedAt).sort()[0];
+  const headAgeMs = headAt ? Math.max(0, nowMs - Date.parse(headAt)) : Infinity;
+  const lagBlocks = Math.max(0, state.confirmedHead - confirmedCursor);
+  const delayedReason = !Number.isFinite(snapshotAgeMs) || snapshotAgeMs > 60_000 ? "snapshot_stale"
+    : !Number.isFinite(headAgeMs) || headAgeMs > 45_000 ? "head_observation_stale"
+      : confirmedCursor <= 0 || lagBlocks > 16 ? "confirmed_cursor_behind" : undefined;
+  return { ready: Boolean(!delayedReason && state.health.ready && state.health.storeIntegrity === "ok"), lagBlocks, lagSeconds: lagBlocks * 2, snapshotAgeMs: Number.isFinite(snapshotAgeMs) ? snapshotAgeMs : null, headAgeMs: Number.isFinite(headAgeMs) ? headAgeMs : null, snapshotFreshness: delayedReason ? "delayed" : "fresh", delayedReason, snapshotReceivedAt: state.updatedAt };
 }
 
 export function getOnchainPricingStatus() {
@@ -391,6 +408,10 @@ function stateEvidence(pool: StoredPool): BasePair["onchainStateEvidence"] {
   if (!state) return undefined;
   return {
     status: state.status,
+    token0: pool.token0,
+    token1: pool.token1,
+    decimals0: state.decimals0,
+    decimals1: state.decimals1,
     adapterFamily: state.adapterFamily,
     protocolFamily: state.protocolFamily,
     reasonCode: state.reasonCode,

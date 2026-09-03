@@ -43,13 +43,13 @@ export class DurableDiscoveryStore {
     return structuredClone(this.state);
   }
 
-  async transact(reason, mutator, afterDerive) {
-    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator, afterDerive));
+  async transact(reason, mutator, afterDerive, options) {
+    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator, afterDerive, options));
     this.transactionTail = operation.catch(() => {});
     return operation;
   }
 
-  async performTransaction(reason, mutator, afterDerive) {
+  async performTransaction(reason, mutator, afterDerive, { derive = true } = {}) {
     if (!this.state || this.closed) throw new Error("Store is not writable");
     const transactionId = randomUUID();
     const beforeDigest = this.state.integrity.digest;
@@ -61,8 +61,23 @@ export class DurableDiscoveryStore {
     next.updatedAt = new Date().toISOString();
     enforceRetention(next);
     expireStalePriceAnchors(next, new Date(next.updatedAt));
-    resolveOnchainPoolEvidence(next, new Date(next.updatedAt));
-    next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt));
+    next.health.loops ??= {};
+    if (derive) {
+      // Derived pricing has no remote I/O and cannot roll back durable ingestion
+      // on failure. A failed derivation preserves the last-good opportunities,
+      // marks them unavailable for freshness, and retries on the next commit.
+      const derived = structuredClone(next);
+      try {
+        resolveOnchainPoolEvidence(derived, new Date(next.updatedAt));
+        derived.opportunities = buildCanonicalOpportunities(pricingPoolsForState(derived), derived.tokenMetadata ?? {}, derived.opportunities ?? [], new Date(next.updatedAt));
+        Object.assign(next, derived);
+        const previousError = next.health.loops.opportunities?.lastError;
+        next.health.loops.opportunities = { phase: "idle", lastSuccessAt: next.updatedAt, lastError: previousError ? { ...previousError, recoveredAt: previousError.recoveredAt ?? next.updatedAt } : undefined };
+      } catch {
+        next.health.loops.opportunities = { ...this.state.health.loops?.opportunities, phase: "retrying", lastError: { reasonCode: "opportunity_rebuild_failed", observedAt: next.updatedAt, retryAt: new Date(Date.parse(next.updatedAt) + 10_000).toISOString() } };
+      }
+    }
+    next.health.loops.publish = { phase: "idle", lastSuccessAt: next.updatedAt };
     synchronizeDerivedHealth(next);
     if (afterDerive) await afterDerive(next);
     enforceRetention(next);
@@ -218,7 +233,14 @@ function enforceRetention(state) {
   state.onchainQueue = (state.onchainQueue ?? []).slice(0, 512);
   state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
   state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
-  state.pools = retainPriorityPools(state.pools ?? {}, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS);
+  const previousPools = state.pools ?? {};
+  state.pools = retainPriorityPools(previousPools, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS);
+  const evicted = Object.keys(previousPools).filter((key) => !state.pools[key]);
+  if (evicted.length) {
+    state.counters.retentionEvicted = (state.counters.retentionEvicted ?? 0) + evicted.length;
+    state.reconciliation.push(...evicted.map((poolKey) => ({ kind: "retention_eviction", poolKey, blockNumber: previousPools[poolKey].blockNumber, reasonCode: "bounded_universe_oldest_unprotected", at: state.updatedAt })));
+    state.reconciliation = state.reconciliation.slice(-MAX_RECONCILIATION_RING);
+  }
   const retainedTokens = new Set(Object.values(state.pools).flatMap((pool) => [pool.token0, pool.token1]));
   state.tokenMetadata = Object.fromEntries(Object.entries(state.tokenMetadata ?? {}).filter(([address]) => retainedTokens.has(address)));
 }
@@ -247,6 +269,21 @@ export function expireStalePriceAnchors(state, now = new Date()) {
 
 function synchronizeDerivedHealth(state) {
   state.health ??= {};
+  const cursors = Object.values(state.cursors ?? {}).map((row) => row.blockNumber);
+  const cursor = cursors.length ? Math.min(...cursors) : 0;
+  const lag = Math.max(0, (state.confirmedHead ?? 0) - cursor);
+  state.health.confirmedCursor = cursor;
+  state.health.lagBlocks = lag;
+  state.health.lagSeconds = lag * 2;
+  const headAgeMs = Date.parse(state.updatedAt) - Date.parse(state.health.lastHeadObservedAt ?? "");
+  // Legacy snapshots without head timestamps retain their old readiness until
+  // reconciliation; HTTP readers still reject their stale cursor timestamp.
+  if (state.health.lastHeadObservedAt) {
+    state.health.ready = cursor > 0 && lag <= 16 && Number.isFinite(headAgeMs) && headAgeMs <= 45_000;
+    state.health.delayedReason = headAgeMs > 45_000 ? "head_observation_stale" : lag > 16 ? "confirmed_cursor_behind" : undefined;
+    state.health.backfillState = lag === 0 ? "caught_up" : "catching_up";
+  }
+  if (state.health.loops?.opportunities?.phase === "retrying") { state.health.ready = false; state.health.delayedReason = "opportunity_rebuild_failed"; }
   const pricingTierCounts = { A: 0, B: 0, C: 0, UNPRICED: 0 };
   for (const opportunity of state.opportunities ?? []) {
     const tier = opportunity.canonicalPrice?.tier;

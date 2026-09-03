@@ -66,6 +66,9 @@ jobs:
       - name: On-chain discovery contracts
         run: npm run test:onchain
 
+      - name: RPC resilience and bounded backfill contracts
+        run: npm run test:rpc
+
       - name: Pricing and enrichment contracts
         run: npm run test:enrichment
 

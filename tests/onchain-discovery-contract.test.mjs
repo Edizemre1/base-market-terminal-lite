@@ -125,11 +125,12 @@ test("Last-Event-ID returns only unseen events", () => {
   assert.deepEqual(eventsAfterId(state.eventRing, "1").map((event) => event.type), ["two", "three"]);
 });
 
-test("unknown Last-Event-ID safely replays the bounded ring", () => {
+test("unknown Last-Event-ID and first snapshot do not fabricate historical events", () => {
   const state = initialState(NOW);
   appendRelayEvent(state, "one", {}, NOW.toISOString());
   appendRelayEvent(state, "two", {}, NOW.toISOString());
-  assert.equal(eventsAfterId(state.eventRing, "expired-id").length, 2);
+  assert.equal(eventsAfterId(state.eventRing, "expired-id").length, 0);
+  assert.equal(eventsAfterId(state.eventRing).length, 0);
 });
 
 test("bounded queue coalesces by pool key and retains newest value", () => {
@@ -391,7 +392,7 @@ test("durable store rejects a tampered snapshot", async () => {
 });
 
 function pricingPool(overrides = {}) {
-  return {
+  const row = {
     poolKey: POOL_A,
     token0: TOKEN_A,
     token1: BASE_USDC,
@@ -408,6 +409,7 @@ function pricingPool(overrides = {}) {
     providers: ["onchain"],
     ...overrides
   };
+  return { ...row, onchainState: { status: "complete", confidence: "exact_onchain_state", token0: row.token0, token1: row.token1, decimals0: 18, decimals1: 6, blockNumber: row.blockNumber, blockHash: HASH_A, observedAt: row.observedAt, observedPrice0In1: row.priceToken1PerToken0 } };
 }
 
 function canonicalEvent(overrides = {}) {

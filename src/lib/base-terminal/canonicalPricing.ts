@@ -12,9 +12,11 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
     const token0 = normalizeAddress(pair.baseTokenAddress);
     const token1 = normalizeAddress(pair.quoteTokenAddress);
     const poolKey = (pair.pairAddress ?? pair.id).toLowerCase();
-    const observedAt = pair.sourceUpdatedAt;
-    const directUsdc = token1 === BASE_USDC_ADDRESS ? positive(pair.priceUsdValue) : undefined;
-    const rate = positive(Number(pair.priceNative)) ?? directUsdc;
+    const proof = pair.onchainStateEvidence;
+    const observedAt = proof?.observedAt;
+    const direct = token0 === proof?.token0 && token1 === proof?.token1;
+    const inverted = token0 === proof?.token1 && token1 === proof?.token0;
+    const rate = direct ? positive(proof?.observedPrice0In1) : inverted ? positive(proof?.observedPrice1In0) : undefined;
     if (!token0 || !token1 || !rate || !observedAt) return [];
     return [{
       poolKey,
@@ -23,6 +25,7 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
       status: "confirmed",
       orphaned: false,
       verifiedSource: Boolean(pair.pairAddress && pair.dataProviders?.includes("onchain") && (pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified" || pair.onchainProvenance?.decimalsVerified)),
+      onchainState: { ...proof, token0, token1, observedPrice0In1: rate, decimals0: direct ? proof?.decimals0 : proof?.decimals1, decimals1: direct ? proof?.decimals1 : proof?.decimals0 },
       priceToken1PerToken0: rate,
       liquidityUsd: nonNegative(pair.liquidityUsd),
       priceReconciliation: pair.priceReconciliation,

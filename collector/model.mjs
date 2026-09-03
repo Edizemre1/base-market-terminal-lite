@@ -289,6 +289,7 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     if (relevant.some(({ reason }) => reason === "zero_liquidity")) return unpriced("zero_liquidity");
     if (relevant.some(({ reason }) => reason === "thin_liquidity")) return unpriced("thin_liquidity");
     if (relevant.some(({ reason }) => reason === "stale_pool")) return unpriced("stale_pool");
+    if (relevant.some(({ reason }) => reason === "onchain_proof_required")) return unpriced("onchain_proof_required");
     return unpriced(graph.has(token) ? "no_bounded_usdc_path" : "no_trustworthy_usdc_path");
   }
   const preferredTier = Math.min(...candidates.map((candidate) => priceTierRank(candidate.path)));
@@ -306,6 +307,7 @@ export function calculateCanonicalUsdcPrice(tokenAddress, inputPools, now = new 
     anchor: tier === "B" ? BASE_WETH : winner.path.at(-1)?.from,
     observedAt: winner.observedAt,
     blockNumber: winner.blockNumber,
+    sourceBlocks: [...new Map(consensus.members.flatMap((candidate) => candidate.path.map((edge) => [edge.poolKey, { poolKey: edge.poolKey, blockNumber: edge.blockNumber, blockHash: edge.blockHash, observedAt: edge.observedAt }]))).values()],
     freshness: "fresh",
     qualityStatus: consensus.members.length > 1 ? "consensus" : "single_path",
     selectionReason: consensus.members.length > 1 ? "bounded_liquidity_consensus" : "highest_quality_verified_path",
@@ -341,9 +343,8 @@ export function appendRelayEvent(state, type, data, at = new Date().toISOString(
 }
 
 export function eventsAfterId(ring, lastEventId) {
-  if (!lastEventId) return ring.slice(-1);
-  const index = ring.findIndex((event) => event.id === String(lastEventId));
-  return index < 0 ? ring : ring.slice(index + 1);
+  if (!lastEventId || !/^\d{1,16}$/.test(String(lastEventId))) return [];
+  return ring.filter((event) => BigInt(event.id) > BigInt(lastEventId));
 }
 
 export function coalesceBoundedQueue(existing, incoming, maximum = 64) {
@@ -458,14 +459,22 @@ function validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd) {
     const exactWethUsdcAnchor = pool.token0 === BASE_WETH && pool.token1 === BASE_USDC || pool.token0 === BASE_USDC && pool.token1 === BASE_WETH;
     return exactWethUsdcAnchor ? "stale_anchor" : "stale_pool";
   }
+  const proof = pool.onchainState;
+  if (proof?.status !== "complete" || proof.confidence !== "exact_onchain_state" || !Number.isSafeInteger(proof.blockNumber) || !/^0x[0-9a-f]{64}$/i.test(proof.blockHash ?? "")
+    || ![proof.decimals0, proof.decimals1].every((value) => Number.isInteger(value) && value >= 0 && value <= 255)
+    || proof.token0 !== pool.token0 || proof.token1 !== pool.token1 || !Number.isFinite(proof.observedPrice0In1) || proof.observedPrice0In1 <= 0) return "onchain_proof_required";
+  const proofAt = Date.parse(proof.observedAt ?? "");
+  if (!Number.isFinite(proofAt)) return "onchain_proof_required";
+  if (proofAt > nowMs + 5_000) return "future_timestamp";
+  if (nowMs - proofAt > maxAgeMs) return sameTokenPair(pool, BASE_WETH, BASE_USDC) ? "stale_anchor" : "stale_pool";
   return undefined;
 }
 
 function buildPriceGraph(pools) {
   const graph = new Map();
   for (const pool of pools) {
-    const rate = pool.priceToken1PerToken0;
-    const provenance = { poolKey: pool.poolKey, sourcePoolKeys: pool.sourcePoolKeys, observedAt: pool.observedAt ?? pool.confirmedAt, blockNumber: pool.blockNumber, liquidityUsd: pool.liquidityUsd };
+    const rate = pool.onchainState.observedPrice0In1;
+    const provenance = { poolKey: pool.poolKey, sourcePoolKeys: pool.sourcePoolKeys, observedAt: pool.onchainState.observedAt, blockNumber: pool.onchainState.blockNumber, blockHash: pool.onchainState.blockHash, liquidityUsd: pool.liquidityUsd };
     addEdge(graph, pool.token0, { to: pool.token1, from: pool.token0, rate, ...provenance });
     addEdge(graph, pool.token1, { to: pool.token0, from: pool.token1, rate: 1 / rate, ...provenance });
   }

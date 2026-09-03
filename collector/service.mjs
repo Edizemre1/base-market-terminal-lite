@@ -1,8 +1,11 @@
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
 import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, coalesceBoundedQueue, decodeFactoryLog, reconcileCanonicalWindow } from "./model.mjs";
-import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcClient, readSupportedPoolState, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
+import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcRequestError, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
+import { configuredRpcEndpoints, RpcTransportPool, validBlock } from "./rpc-transport.mjs";
+import { throwIfAborted, withDeadline } from "./async-control.mjs";
+import { seedBackfillQueue, recordBackfillOutcome, backfillHealth } from "./pool-backfill.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
-import { ONCHAIN_STATE_REFRESH_MS, acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
+import { acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ProviderEnrichmentClient,
@@ -18,21 +21,12 @@ import {
 
 const ENABLED = FACTORY_REGISTRY.filter((entry) => entry.enabled);
 const PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT = 8;
-const DERIVED_CYCLE_BACKFILL_DELAY_MS = 1_000;
 const MINIMUM_DISCOVERY_IDLE_MS = 3_000;
 const NORMAL_POLL_INTERVAL_MS = 10_000;
 const NORMAL_DERIVED_INTERVAL_MS = 30_000;
 
-export function derivedCyclesReady(state) {
-  return state?.health?.backfillState === "caught_up";
-}
-
 export function nextScanDelayMs(pollIntervalMs, elapsedMs) {
   return Math.max(MINIMUM_DISCOVERY_IDLE_MS, pollIntervalMs - Math.max(0, elapsedMs));
-}
-
-function storeDerivedCyclesReady(store) {
-  return store?.state ? derivedCyclesReady(store.state) : true;
 }
 
 export function resolveCollectorConfig(environment = process.env) {
@@ -40,6 +34,7 @@ export function resolveCollectorConfig(environment = process.env) {
   const websocketUrl = environment.BASE_RPC_WS_URL?.trim();
   return {
     httpUrl,
+    rpcEndpoints: configuredRpcEndpoints(environment),
     websocketUrl: websocketUrl && /^wss?:\/\//i.test(websocketUrl) ? websocketUrl : undefined,
     storeDirectory: environment.ONCHAIN_STORE_PATH?.trim() || ".data/onchain-discovery",
     pollIntervalMs: boundedInteger(environment.ONCHAIN_POLL_INTERVAL_MS, NORMAL_POLL_INTERVAL_MS, 1_000, 60_000),
@@ -62,15 +57,10 @@ export function resolveCollectorConfig(environment = process.env) {
 export class OnchainDiscoveryCollector {
   constructor(config = resolveCollectorConfig()) {
     this.config = config;
-    this.rpc = new JsonRpcClient(config.httpUrl);
-    this.discoveryRpc = config.discoveryRpcClient ?? new JsonRpcClient(config.httpUrl, {
-      timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000),
-      retries: 3,
-      circuitFailureThreshold: 2,
-      circuitCooldownMs: 5_000,
-      batchPaceMs: config.discoveryBatchPaceMs ?? 3_000
-    });
-    this.stateRpc = config.stateRpcClient ?? new JsonRpcClient(config.httpUrl, { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000), retries: 2 });
+    this.transport = config.transport ?? new RpcTransportPool(config.rpcEndpoints ?? [{ label: "primary", url: config.httpUrl }], { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000) });
+    this.rpc = config.rpcClient ?? this.transport.client();
+    this.discoveryRpc = config.discoveryRpcClient ?? this.transport.client({ batchPaceMs: config.discoveryBatchPaceMs ?? 3_000 });
+    this.stateRpc = config.stateRpcClient ?? this.transport.client();
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
     // Anchor availability is a pricing safety boundary. Keep its provider
     // request and bounded RPC validation independent from the normal exact-pool
@@ -79,10 +69,7 @@ export class OnchainDiscoveryCollector {
       timeoutMs: config.providerTimeoutMs,
       retries: 0
     });
-    this.anchorRpc = config.anchorRpcClient ?? new JsonRpcClient(config.httpUrl, {
-      timeoutMs: Math.min(5_000, config.providerTimeoutMs),
-      retries: 0
-    });
+    this.anchorRpc = config.anchorRpcClient ?? this.transport.client();
     this.store = new DurableDiscoveryStore(config.storeDirectory);
     this.running = false;
     this.websocket = undefined;
@@ -91,6 +78,7 @@ export class OnchainDiscoveryCollector {
     this.lastObservedHead = undefined;
     this.lastObservedConfirmedHead = undefined;
     this.managerCodeEvidence = new Map();
+    this.loopHealth = {};
   }
 
   async open() {
@@ -101,26 +89,74 @@ export class OnchainDiscoveryCollector {
       seedMetadataQueue(draft, new Date());
       seedOnchainQueue(draft, new Date());
     });
+    this.updateContinuity(state);
     if (this.config.websocketUrl) this.startWebsocket();
     return state;
   }
 
   async run(signal) {
     this.running = true;
-    const enrichment = this.runEnrichmentLoop(signal);
-    const anchor = this.runAnchorLoop(signal);
-    const onchainState = this.runOnchainStateLoop(signal);
-    while (this.running && !signal?.aborted) {
-      const scanStartedAt = Date.now();
-      try { await this.scanOnce(); }
-      catch (error) { await this.recordFailure(error); }
-      await delay(nextScanDelayMs(this.config.pollIntervalMs, Date.now() - scanStartedAt), signal);
-    }
-    await Promise.all([enrichment, anchor, onchainState]);
+    await Promise.all([
+      this.runLoop("head", 10_000, 25_000, (child) => this.reconcileHead(child), signal),
+      this.runLoop("ingestion", this.config.pollIntervalMs, 45_000, (child) => this.scanOnce(child), signal),
+      this.runLoop("metadata", 10_000, 25_000, (child) => this.drainMetadata(child), signal),
+      this.runEnrichmentLoop(signal), this.runAnchorLoop(signal), this.runOnchainStateLoop(signal)
+    ]);
   }
 
-  async scanOnce() {
-    const head = await this.rpc.blockNumber();
+  async runLoop(name, intervalMs, timeoutMs, operation, signal) {
+    this.loopHealth ??= {};
+    while (this.running && !signal?.aborted) {
+      const startedAt = Date.now();
+      const previous = this.loopHealth[name] ?? {};
+      this.loopHealth[name] = { ...previous, phase: "running", startedAt: new Date(startedAt).toISOString() };
+      try {
+        await withDeadline(operation, timeoutMs, { signal, reasonCode: `${name}_cycle_deadline_exceeded` });
+        const successAt = new Date().toISOString();
+        this.loopHealth[name] = { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, retryAt: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
+      } catch (error) {
+        if (signal?.aborted) break;
+        const failure = { reasonCode: safeError(error), method: error?.method, endpointLabel: error?.endpointLabel, observedAt: new Date().toISOString(), retryAt: new Date(Date.now() + intervalMs).toISOString() };
+        this.loopHealth[name] = { ...this.loopHealth[name], phase: "retrying", lastError: failure, retryAt: failure.retryAt };
+        // Structured journal output contains no raw provider message or URL.
+        console.warn(JSON.stringify({ event: "collector_loop_failure", loop: name, ...failure }));
+        if (name === "ingestion") await this.recordFailure(error).catch(() => {});
+      }
+      // Heartbeat is bounded and separate from all remote I/O. The store's
+      // transaction tail serializes publication and preserves the last commit.
+      await this.store.transact(`loop-${name}-status`, (draft) => {
+        draft.health.loops = { ...draft.health.loops, ...structuredClone(this.loopHealth) };
+        draft.health.rpc = this.transport?.snapshot();
+        draft.health.lastAnchorLoopFailure = this.loopHealth.anchor?.lastError?.reasonCode;
+        draft.health.lastOnchainStateFailure = this.loopHealth.pool_state?.lastError?.reasonCode;
+      }, undefined, { derive: false }).catch(() => {});
+      if (!this.running || signal?.aborted) break;
+      await delay(Math.max(1_000, intervalMs - (Date.now() - startedAt)), signal);
+    }
+  }
+
+  updateContinuity(state) {
+    const rows = Object.values(state.cursors ?? {}).filter((row) => row.blockNumber > 0).sort((left, right) => left.blockNumber - right.blockNumber);
+    if (rows[0]) this.transport?.setContinuity({ number: rows[0].blockNumber, hash: rows[0].blockHash });
+  }
+
+  async reconcileHead(signal) {
+    this.updateContinuity(this.store.read());
+    const head = await this.rpc.blockNumber({ signal });
+    const confirmedHead = Math.max(0, head - Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.confirmations)));
+    if (this.transport) this.transport.minimumHead = Math.max(this.transport.minimumHead, confirmedHead);
+    this.lastObservedHead = head; this.lastObservedConfirmedHead = confirmedHead;
+    throwIfAborted(signal);
+    return this.store.transact("independent-head-reconciliation", (draft) => {
+      throwIfAborted(signal);
+      draft.currentHead = head; draft.confirmedHead = confirmedHead;
+      draft.health = buildHealth(draft, head, confirmedHead, this.config.websocketUrl ? "websocket" : "confirmed_polling");
+      draft.health.lastHeadObservedAt = new Date().toISOString();
+    });
+  }
+
+  async scanOnce(signal) {
+    const head = this.lastObservedHead ?? await this.rpc.blockNumber({ signal });
     const confirmations = Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.confirmations));
     const confirmedHead = Math.max(0, head - confirmations);
     this.lastObservedHead = head;
@@ -130,6 +166,7 @@ export class OnchainDiscoveryCollector {
     if (cursors.some((cursor) => cursor <= 0)) {
       const initialCursor = Math.max(1, confirmedHead - this.config.bootstrapBlocks - 1);
       state = await this.store.transact("initialize-bounded-cursors", (draft) => {
+        throwIfAborted(signal);
         for (const entry of ENABLED) draft.cursors[entry.id] = { blockNumber: initialCursor, blockHash: undefined, updatedAt: new Date().toISOString() };
         draft.currentHead = head;
         draft.confirmedHead = confirmedHead;
@@ -139,30 +176,35 @@ export class OnchainDiscoveryCollector {
 
     let cursor = Math.min(...ENABLED.map((entry) => state.cursors[entry.id].blockNumber));
     let chunks = 0;
-    const windows = [];
-    while (cursor < confirmedHead && chunks < this.config.maximumChunksPerPass) {
+    // One durable window per tick prevents a later RPC error from discarding
+    // earlier verified progress. Never advance a cursor past an uncommitted log.
+    while (cursor < confirmedHead && chunks < 1) {
       const maximumChunk = Math.min(...ENABLED.map((entry) => entry.confirmationPolicy.maximumChunkBlocks));
       const overlap = Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.overlapBlocks));
       const fromBlock = Math.max(1, cursor - overlap + 1);
-      const toBlock = Math.min(confirmedHead, cursor + maximumChunk);
-      const rawLogs = await this.rpc.getLogs({
-        fromBlock,
-        toBlock,
-        addresses: ENABLED.map((entry) => entry.address),
-        topics: [...new Set(ENABLED.map((entry) => entry.eventTopic))]
-      });
+      let toBlock = Math.min(confirmedHead, cursor + maximumChunk);
+      let rawLogs;
+      for (;;) {
+        rawLogs = await this.rpc.getLogs({
+          fromBlock,
+          toBlock,
+          addresses: ENABLED.map((entry) => entry.address),
+          topics: [...new Set(ENABLED.map((entry) => entry.eventTopic))]
+        }, { signal });
+        if (rawLogs.length <= 16 || toBlock <= cursor + 1) break;
+        toBlock = Math.max(cursor + 1, cursor + Math.floor((toBlock - cursor) / 2));
+      }
       const decoded = rawLogs.map((log) => decodeFactoryLog(log)).filter(Boolean);
       const malformedCount = rawLogs.length - decoded.length;
-      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 4, { managerCodeEvidence: this.managerCodeEvidence });
-      windows.push({ confirmed, fromBlock, toBlock, malformedCount });
+      if (malformedCount) throw new JsonRpcRequestError("factory_malformed_log_window", { retryable: false, method: "eth_getLogs" });
+      const confirmed = await verifyFactoryEvents(this.discoveryRpc, decoded, 2, { signal, managerCodeEvidence: this.managerCodeEvidence });
+      const cursorBlock = validBlock(await this.rpc.getBlock(toBlock, { signal }), toBlock);
+      throwIfAborted(signal);
       cursor = toBlock;
       chunks += 1;
-    }
-    if (windows.length) {
       state = await this.store.transact("confirmed-log-reconciliation", (draft) => {
-        let next = draft;
-        for (const window of windows) next = reconcileCanonicalWindow(next, window.confirmed, window.fromBlock, window.toBlock);
-        const confirmed = windows.flatMap((window) => window.confirmed);
+        throwIfAborted(signal);
+        const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock);
         const committedAt = new Date();
         for (const token of confirmed.flatMap((event) => [event.token0, event.token1])) {
           if (!next.tokenMetadata[token]) next.metadataQueue = coalesceBoundedQueue(next.metadataQueue, [{ poolKey: token, tokenAddress: token, blockNumber: cursor }], 256);
@@ -179,16 +221,16 @@ export class OnchainDiscoveryCollector {
         next.enrichmentQueue = coalesceEnrichmentQueue(next.enrichmentQueue, enrichmentJobs);
         seedMetadataQueue(next, committedAt);
         seedOnchainQueue(next, committedAt);
-        for (const entry of ENABLED) next.cursors[entry.id] = { blockNumber: cursor, blockHash: undefined, updatedAt: committedAt.toISOString() };
-        next.currentHead = head;
-        next.confirmedHead = confirmedHead;
-        next.counters.malformedRejected += windows.reduce((total, window) => total + window.malformedCount, 0);
-        next.health = buildHealth(next, head, confirmedHead, this.config.websocketUrl ? (this.websocket?.readyState === WebSocket.OPEN ? "websocket" : "reconnecting") : "confirmed_polling");
+        for (const entry of ENABLED) next.cursors[entry.id] = { blockNumber: cursor, blockHash: cursorBlock.hash, updatedAt: committedAt.toISOString() };
+        next.currentHead = Math.max(next.currentHead ?? 0, head);
+        next.confirmedHead = Math.max(next.confirmedHead ?? 0, confirmedHead);
+        next.health = buildHealth(next, next.currentHead, next.confirmedHead, this.config.websocketUrl ? (this.websocket?.readyState === WebSocket.OPEN ? "websocket" : "reconnecting") : "confirmed_polling");
+        next.health.lastCursorProgressAt = committedAt.toISOString();
         next.health.lastFailure = undefined;
         return next;
       });
+      this.updateContinuity(state);
     }
-    if (derivedCyclesReady(state)) await this.drainMetadata();
     return this.store.read();
   }
 
@@ -238,13 +280,15 @@ export class OnchainDiscoveryCollector {
     await this.store.close();
   }
 
-  async drainMetadata() {
+  async drainMetadata(signal) {
     const state = this.store.read();
     const now = new Date();
     const batch = (state.metadataQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.metadataBatchSize);
     if (!batch.length) return;
-    const results = Object.fromEntries(await Promise.all(batch.map(async (item) => [item.tokenAddress, await enrichTokenMetadata(this.rpc, item.tokenAddress, item.blockNumber, now)])));
+    const results = Object.fromEntries(await Promise.all(batch.map(async (item) => [item.tokenAddress, await enrichTokenMetadata(this.rpc, item.tokenAddress, item.blockNumber, now, { signal })])));
+    throwIfAborted(signal);
     await this.store.transact("bounded-token-metadata-enrichment", (draft) => {
+      throwIfAborted(signal);
       const completed = new Set();
       for (const item of batch) {
         const previous = draft.tokenMetadata[item.tokenAddress];
@@ -270,36 +314,7 @@ export class OnchainDiscoveryCollector {
   }
 
   async runOnchainStateLoop(signal) {
-    while (this.running && !signal?.aborted) {
-      if (!storeDerivedCyclesReady(this.store)) {
-        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
-        continue;
-      }
-      const cycleController = new AbortController();
-      const cycleSignal = signal ? AbortSignal.any([signal, cycleController.signal]) : cycleController.signal;
-      let deadline;
-      try {
-        const timeout = new Promise((_, reject) => {
-          deadline = setTimeout(() => {
-            const error = new Error("onchain_state_cycle_deadline_exceeded");
-            error.reasonCode = "onchain_state_cycle_deadline_exceeded";
-            cycleController.abort(error);
-            reject(error);
-          }, this.config.onchainStateCycleTimeoutMs ?? 45_000);
-        });
-        await Promise.race([this.runOnchainStateCycle(new Date(), cycleSignal), timeout]);
-      }
-      catch (error) {
-        await this.store.transact("onchain-state-cycle-failure", (draft) => {
-          ensureEnrichmentState(draft);
-          draft.counters.onchainStateFailure += 1;
-          draft.health.lastOnchainStateFailure = safeError(error);
-          draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
-        }).catch(() => {});
-      }
-      finally { clearTimeout(deadline); }
-      await delay(Math.max(50, this.config.onchainStateIntervalMs), signal);
-    }
+    return this.runLoop("pool_state", this.config.onchainStateIntervalMs, this.config.onchainStateCycleTimeoutMs ?? 45_000, (child) => this.runOnchainStateCycle(new Date(), child), signal);
   }
 
   async runOnchainStateCycle(now = new Date(), signal) {
@@ -312,23 +327,33 @@ export class OnchainDiscoveryCollector {
     const due = [...rpcDue, ...localDue];
     if (!due.length) return before;
     const needsRpc = rpcDue.length > 0;
-    const blockNumber = needsRpc ? await this.stateRpc.blockNumber({ signal }) : before.confirmedHead;
-    const blockRow = needsRpc ? await this.stateRpc.getBlock(blockNumber, { signal }) : undefined;
-    const blockTime = blockRow?.timestamp ? Number.parseInt(blockRow.timestamp, 16) * 1_000 : now.getTime();
-    const block = { number: blockNumber, hash: blockRow?.hash?.toLowerCase(), observedAt: Number.isFinite(blockTime) ? new Date(blockTime).toISOString() : now.toISOString() };
+    let block;
+    try {
+      const blockNumber = needsRpc ? Math.max(1, (await this.stateRpc.blockNumber({ signal })) - 2) : before.confirmedHead;
+      const blockRow = needsRpc ? await this.stateRpc.getBlock(blockNumber, { signal }) : undefined;
+      block = needsRpc ? { ...validBlock(blockRow, blockNumber), observedAt: new Date(Number.parseInt(blockRow.timestamp, 16) * 1_000).toISOString() } : { number: blockNumber, observedAt: now.toISOString() };
+    } catch (error) {
+      throwIfAborted(signal);
+      block = { error };
+    }
     const outcomes = await Promise.all(due.map(async (item) => {
       const pool = before.pools[item.poolKey];
       if (!pool || pool.status !== "confirmed" || pool.orphaned || pool.replay) return { item, state: undefined, remove: true };
       const adapter = resolveOnchainAdapter(pool);
       if (!adapter) return { item, state: unsupportedOnchainState(pool, now) };
       try {
-        return { item, state: await readPoolOnchainState(this.stateRpc, pool, before.tokenMetadata, block, { signal }) };
+        if (poolNeedsOnchainRpc(before, item) && block.error) throw block.error;
+        return { item, state: await readPoolOnchainState(this.stateRpc, pool, before.tokenMetadata, block, { signal, blockProof: block.hash ? block : undefined }) };
       } catch (error) {
-        return { item, state: { ...unsupportedOnchainState(pool, now), status: "retryable", adapterFamily: adapter.adapterFamily, protocolFamily: adapter.protocolFamily, confidence: "unavailable", reasonCode: error?.reasonCode ?? "onchain_state_read_failed", retryable: true } };
+        return { item, state: { ...unsupportedOnchainState(pool, now), status: "retryable", adapterFamily: adapter.adapterFamily, protocolFamily: adapter.protocolFamily, confidence: "unavailable", reasonCode: error?.reasonCode ?? "onchain_state_read_failed", endpointLabel: error?.endpointLabel, failureMethod: error?.method, retryable: true } };
       }
     }));
+    throwIfAborted(signal);
     const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
+    let semanticBefore;
     const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
+      throwIfAborted(signal);
+      semanticBefore = semanticSnapshot(draft, touchedPoolKeys);
       ensureEnrichmentState(draft);
       seedOnchainQueue(draft, now);
       const remove = new Set();
@@ -338,22 +363,21 @@ export class OnchainDiscoveryCollector {
         if (!pool || outcome.remove) { remove.add(key); continue; }
         const observed = outcome.state;
         const acceptance = acceptOnchainStateUpdate(pool.onchainState, observed);
+        const usedRpc = rpcDue.some((item) => item.poolKey === key);
+        const recorded = acceptance.accepted ? observed : { status: "retryable", reasonCode: acceptance.reasonCode, endpointLabel: observed.endpointLabel };
+        const nextRetryAt = recordBackfillOutcome(pool, recorded, now, { usedRpc });
+        draft.counters.backfillProcessed = (draft.counters.backfillProcessed ?? 0) + 1;
+        draft.counters.backfillRpcAttempts = (draft.counters.backfillRpcAttempts ?? 0) + Number(usedRpc);
         if (!acceptance.accepted) {
           if (acceptance.reasonCode === "duplicate_state_snapshot") draft.counters.onchainStateDuplicate += 1;
           else draft.counters.onchainStateOutOfOrder += 1;
-          if (pool.onchainState) draft.pools[key] = { ...pool, onchainState: { ...pool.onchainState, nextRetryAt: new Date(now.getTime() + ONCHAIN_STATE_REFRESH_MS).toISOString(), lastRejectedUpdate: acceptance.reasonCode } };
+          if (pool.onchainState) draft.pools[key] = { ...pool, onchainState: { ...pool.onchainState, nextRetryAt, lastRejectedUpdate: acceptance.reasonCode } };
           remove.add(key);
           continue;
         }
-        const queued = draft.onchainQueue.find((item) => item.poolKey === key);
-        const attempts = observed.status === "retryable" || observed.status === "pending" ? (outcome.item.attempts ?? 0) + 1 : 0;
-        const refreshMs = observed.status === "complete" ? ONCHAIN_STATE_REFRESH_MS
-          : observed.status === "unsupported" ? 6 * 60 * 60_000
-            : observed.status === "rejected" ? observed.reasonCode === "zero_liquidity" ? ONCHAIN_STATE_REFRESH_MS : 60 * 60_000
-              : Math.min(15 * 60_000, 15_000 * 2 ** Math.min(attempts, 6));
-        const nextRetryAt = new Date(now.getTime() + refreshMs).toISOString();
-        draft.pools[key] = { ...pool, onchainState: { ...observed, nextRetryAt }, decimalsVerified: Number.isInteger(observed.decimals0) && Number.isInteger(observed.decimals1) };
-        if (queued) Object.assign(queued, { attempts, nextAttemptAt: nextRetryAt, lastReason: observed.reasonCode });
+        // A failed refresh never erases last-good proof or renews its age.
+        const retained = ["retryable", "pending"].includes(observed.status) && pool.onchainState?.status === "complete";
+        draft.pools[key] = { ...pool, onchainState: { ...(retained ? pool.onchainState : observed), nextRetryAt }, decimalsVerified: retained ? pool.decimalsVerified : Number.isInteger(observed.decimals0) && Number.isInteger(observed.decimals1) };
         if (observed.status === "complete") draft.counters.onchainStateSuccess += 1;
         else draft.counters.onchainStateFailure += 1;
         draft.counters.onchainStateClassified += 1;
@@ -364,30 +388,16 @@ export class OnchainDiscoveryCollector {
       draft.health.onchainQueueDepth = draft.onchainQueue.length;
       draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
       draft.health.lastOnchainStateCycle = now.toISOString();
-    }, (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
+      draft.health.backfill = backfillHealth(draft, now);
+    }, (draft) => appendSemanticDeltas(draft, semanticBefore, touchedPoolKeys));
     return after;
   }
 
   async runEnrichmentLoop(signal) {
-    while (this.running && !signal?.aborted) {
-      if (!storeDerivedCyclesReady(this.store)) {
-        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
-        continue;
-      }
-      try { await this.runEnrichmentCycle(); }
-      catch (error) {
-        await this.store.transact("enrichment-cycle-failure", (draft) => {
-          ensureEnrichmentState(draft);
-          draft.counters.enrichmentFailure += 1;
-          draft.health.lastEnrichmentFailure = safeError(error);
-          refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-        }).catch(() => {});
-      }
-      await delay(Math.max(50, this.config.enrichmentIntervalMs), signal);
-    }
+    return this.runLoop("provider", this.config.enrichmentIntervalMs, 45_000, (child) => this.runEnrichmentCycle(new Date(), child), signal);
   }
 
-  async runEnrichmentCycle(now = new Date()) {
+  async runEnrichmentCycle(now = new Date(), signal) {
     const before = this.store.read();
     const scheduled = structuredClone(before);
     if (hasEnrichmentSeedCandidate(scheduled, now)) seedEnrichmentQueue(scheduled, now);
@@ -401,7 +411,7 @@ export class OnchainDiscoveryCollector {
       const pool = before.pools[item.poolKey];
       if (!pool?.poolAddress || pool.status !== "confirmed" || pool.orphaned) return { item, status: "discarded", reasonCode: "pool_no_longer_eligible" };
       try {
-        const lookup = await this.provider.lookupPool(pool.poolAddress);
+        const lookup = await this.provider.lookupPool(pool.poolAddress, { signal });
         const metadata = before.tokenMetadata;
         const metadataUpdates = {};
         const decimalsVerified = [pool.token0, pool.token1].every((token) => Number.isInteger(metadata[token]?.decimals));
@@ -419,7 +429,11 @@ export class OnchainDiscoveryCollector {
       }
     }));
     const touchedPoolKeys = outcomes.map((outcome) => outcome.item.poolKey);
+    throwIfAborted(signal);
+    let semanticBefore;
     const after = await this.store.transact("bounded-pool-financial-enrichment", (draft) => {
+      throwIfAborted(signal);
+      semanticBefore = semanticSnapshot(draft, touchedPoolKeys);
       ensureEnrichmentState(draft);
       seedEnrichmentQueue(draft, now);
       const completed = new Set();
@@ -447,7 +461,7 @@ export class OnchainDiscoveryCollector {
             trades24h: joined.trades24h,
             providerSnapshots: joined.providerSnapshots,
             fieldProvenance: joined.fieldProvenance,
-            onchainState: joined.onchainState,
+            onchainState: pool.onchainState,
             providerIndexedAt: pool.providerIndexedAt ?? joined.receivedAt ?? joined.observedAt,
             providerIndexingLatencyMs: pool.providerIndexingLatencyMs ?? indexingLatencyMs(pool.firstSeenAt, joined.receivedAt ?? joined.observedAt),
             providerEnrichment: {
@@ -501,47 +515,12 @@ export class OnchainDiscoveryCollector {
       }
       draft.enrichmentQueue = draft.enrichmentQueue.filter((item) => !completed.has(item.poolKey));
       refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-    }, (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
+    }, (draft) => appendSemanticDeltas(draft, semanticBefore, touchedPoolKeys));
     return after;
   }
 
   async runAnchorLoop(signal) {
-    while (this.running && !signal?.aborted) {
-      if (!storeDerivedCyclesReady(this.store)) {
-        await delay(DERIVED_CYCLE_BACKFILL_DELAY_MS, signal);
-        continue;
-      }
-      const startedAt = Date.now();
-      const cycleController = new AbortController();
-      const cycleSignal = signal ? AbortSignal.any([signal, cycleController.signal]) : cycleController.signal;
-      let deadline;
-      try {
-        const timeoutMs = this.config?.anchorCycleTimeoutMs ?? 45_000;
-        const timeout = new Promise((_, reject) => {
-          deadline = setTimeout(() => {
-            cycleController.abort();
-            const error = new Error("anchor_refresh_deadline_exceeded");
-            error.reasonCode = "anchor_refresh_deadline_exceeded";
-            reject(error);
-          }, timeoutMs);
-        });
-        await Promise.race([this.refreshAnchorIfDue(new Date(), cycleSignal), timeout]);
-      } catch (error) {
-        await this.store.transact("trusted-anchor-loop-failure", (draft) => {
-          ensureEnrichmentState(draft);
-          const failedAt = new Date();
-          draft.health.lastAnchorLoopFailure = safeError(error);
-          draft.priceAnchors.wethUsdc.nextRefreshAt = new Date(failedAt.getTime() + 10_000).toISOString();
-          draft.counters.enrichmentFailure += 1;
-          refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-        }).catch(() => {});
-      } finally {
-        clearTimeout(deadline);
-      }
-      if (!this.running || signal?.aborted) break;
-      const intervalMs = this.config?.anchorLoopIntervalMs ?? 5_000;
-      await delay(Math.max(1, intervalMs - (Date.now() - startedAt)), signal);
-    }
+    return this.runLoop("anchor", this.config.anchorLoopIntervalMs ?? 5_000, this.config.anchorCycleTimeoutMs ?? 45_000, (child) => this.refreshAnchorIfDue(new Date(), child), signal);
   }
 
   async refreshAnchorIfDue(now = new Date(), signal) {
@@ -553,21 +532,23 @@ export class OnchainDiscoveryCollector {
         .flatMap((candidate) => trustedAnchorPoolIdentity(current, candidate?.poolAddress) ? [candidate.poolAddress] : []))];
       const observations = selectAnchorValidationCandidates(await this.anchorProvider.lookupWethPools({ signal, poolAddresses: trustedPoolAddresses }));
       const lookupCompletedAt = new Date();
-      const blockNumber = before.currentHead || await this.anchorRpc.blockNumber({ signal });
+      const blockNumber = Math.max(1, (await this.anchorRpc.blockNumber({ signal })) - 2);
+      const block = validBlock(await this.anchorRpc.getBlock(blockNumber, { signal }), blockNumber);
+      block.observedAt = new Date(block.timestamp).toISOString();
+      const exactOptions = { signal, blockProof: block };
       const metadata = { ...before.tokenMetadata };
       for (const token of [BASE_WETH, BASE_USDC]) {
         if (!Number.isInteger(metadata[token]?.decimals)) {
-          const exactDecimals = await readTokenDecimals(this.anchorRpc, token, "latest", { signal });
+          const exactDecimals = await readTokenDecimals(this.anchorRpc, token, blockNumber, exactOptions);
           metadata[token] = exactDecimals.ok
             ? { ...metadata[token], address: token, decimals: exactDecimals.decimals, codeExists: true, observedAt: exactDecimals.observedAt, blockNumber, status: metadata[token]?.name && metadata[token]?.symbol ? "complete" : "partial" }
-            : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now, { signal });
+            : metadata[token] ?? await enrichTokenMetadata(this.anchorRpc, token, blockNumber, now, exactOptions);
         }
       }
       const inspected = await mapWithConcurrency(observations, 2, async (observation) => {
         let pool = trustedAnchorPoolIdentity(current, observation.poolAddress);
-        let onchainState;
         if (!pool) {
-          const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, "latest", { signal });
+          const identity = await inspectRegisteredPool(this.anchorRpc, observation.poolAddress, blockNumber, exactOptions);
           if (!identity.ok || !sameTokenSet(identity.token0, identity.token1, BASE_WETH, BASE_USDC)) return undefined;
           pool = {
             poolKey: observation.poolAddress,
@@ -578,13 +559,21 @@ export class OnchainDiscoveryCollector {
             factoryAddress: identity.registry.address,
             protocolVersion: identity.registry.protocolVersion
           };
-          onchainState = await readSupportedPoolState(this.anchorRpc, pool, metadata, "latest", { signal });
         }
+        const onchainState = await readPoolOnchainState(this.anchorRpc, pool, metadata, block, exactOptions);
+        if (onchainState.status !== "complete") throw new JsonRpcRequestError(onchainState.reasonCode, { method: onchainState.failureMethod, endpointLabel: onchainState.endpointLabel });
         const joined = joinExactProviderPools(pool, [observation], { onchainState, now: lookupCompletedAt });
         if (joined.status !== "matched") return undefined;
-        const canonicalRate = pool.token0 === BASE_WETH ? joined.priceToken1PerToken0 : joined.priceToken1PerToken0 > 0 ? 1 / joined.priceToken1PerToken0 : undefined;
+        const canonicalRate = pool.token0 === BASE_WETH ? onchainState.observedPrice0In1 : onchainState.observedPrice1In0;
+        const amounts = onchainState.liquidityAmountsRaw;
+        const amount0 = amounts ? Number(amounts.amount0Raw) / 10 ** onchainState.decimals0 : undefined;
+        const amount1 = amounts ? Number(amounts.amount1Raw) / 10 ** onchainState.decimals1 : undefined;
+        const liquidityUsd = amount0 * (pool.token0 === BASE_WETH ? canonicalRate : 1) + amount1 * (pool.token1 === BASE_WETH ? canonicalRate : 1);
         return {
           ...joined,
+          onchainState,
+          observedAt: onchainState.observedAt,
+          liquidityUsd: Number.isFinite(liquidityUsd) ? liquidityUsd : undefined,
           token0: pool.token0,
           token1: pool.token1,
           registeredFactory: true,
@@ -593,14 +582,19 @@ export class OnchainDiscoveryCollector {
           factoryAddress: pool.factoryAddress,
           protocolVersion: pool.protocolVersion,
           blockNumber,
+          blockHash: block.hash,
           priceToken1PerToken0: canonicalRate,
-          rawPriceRatio: pool.token0 === BASE_WETH ? joined.rawPriceRatio : invertRawRatio(joined.rawPriceRatio)
+          rawPriceRatio: pool.token0 === BASE_WETH ? onchainState.rawPriceRatio : invertRawRatio(onchainState.rawPriceRatio)
         };
       });
       const completedAt = new Date();
       const candidateAnchor = resolveWethUsdcAnchor(inspected.filter(Boolean), completedAt);
       const anchor = stabilizeWethUsdcAnchorRefresh(current, candidateAnchor, completedAt);
+      throwIfAborted(signal);
+      let semanticBefore;
       const after = await this.store.transact("trusted-weth-usdc-anchor-refresh", (draft) => {
+        throwIfAborted(signal);
+        semanticBefore = semanticSnapshot(draft, []);
         ensureEnrichmentState(draft);
         draft.tokenMetadata = { ...draft.tokenMetadata, ...metadata };
         draft.priceAnchors.wethUsdc = anchor;
@@ -608,10 +602,12 @@ export class OnchainDiscoveryCollector {
         draft.counters.staleAnchorRejected += anchor.rejected.filter((item) => item.reasonCode === "stale_anchor").length;
         draft.counters.dustRejected += anchor.rejected.filter((item) => item.reasonCode === "dust_anchor_liquidity").length;
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-      }, (draft) => appendSemanticDeltas(draft, before, []));
+      }, (draft) => appendSemanticDeltas(draft, semanticBefore, []));
       return after;
     } catch (error) {
-      return this.store.transact("trusted-anchor-refresh-failure", (draft) => {
+      throwIfAborted(signal);
+      await this.store.transact("trusted-anchor-refresh-failure", (draft) => {
+        throwIfAborted(signal);
         ensureEnrichmentState(draft);
         const failedAt = new Date();
         const anchor = draft.priceAnchors.wethUsdc;
@@ -620,9 +616,11 @@ export class OnchainDiscoveryCollector {
           draft.priceAnchors.wethUsdc = { ...anchor, status: "unavailable", reasonCode: error?.reasonCode ?? "anchor_provider_failure", freshness: "unavailable" };
         }
         draft.priceAnchors.wethUsdc.nextRefreshAt = new Date(failedAt.getTime() + 10_000).toISOString();
+        draft.health.lastAnchorLoopFailure = safeError(error);
         draft.counters.enrichmentFailure += 1;
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
       });
+      throw error;
     }
   }
 
@@ -709,9 +707,13 @@ export class OnchainDiscoveryCollector {
   }
 }
 
+function semanticSnapshot(state, poolKeys) {
+  return { pools: Object.fromEntries(poolKeys.map((key) => [key, state.pools[key]])), priceAnchors: { ...state.priceAnchors }, opportunities: state.opportunities };
+}
+
 function appendSemanticDeltas(draft, before, touchedPoolKeys) {
   const events = [];
-  for (const poolKey of touchedPoolKeys) {
+  for (const poolKey of new Set(touchedPoolKeys)) {
     const previousPool = before.pools?.[poolKey];
     const currentPool = draft.pools?.[poolKey];
     const previous = previousPool?.providerEnrichment?.status;
@@ -736,12 +738,12 @@ function appendSemanticDeltas(draft, before, touchedPoolKeys) {
     const previous = previousById.get(opportunity.id);
     if (previous?.canonicalPrice?.tier === "UNPRICED" && opportunity.canonicalPrice.tier !== "UNPRICED") events.push({ type: "opportunity_priced", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value } });
     if (previous && semanticCanonicalPrice(previous.canonicalPrice) !== semanticCanonicalPrice(opportunity.canonicalPrice)) events.push({ type: "opportunity_canonical_price", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier, value: opportunity.canonicalPrice.value, sourcePoolKeys: opportunity.canonicalPrice.sourcePoolKeys, reasonCode: opportunity.canonicalPrice.reasonCode } });
-    if (previous?.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
-    if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
+    if (previous && previous.canonicalPrice?.tier !== "UNPRICED" && opportunity.canonicalPrice.tier === "UNPRICED") events.push({ type: "opportunity_unpriced", data: { opportunityId: opportunity.id, reasonCode: opportunity.canonicalPrice.reasonCode } });
+    if (previous && !previous.ranked && opportunity.ranked) events.push({ type: "opportunity_activated", data: { opportunityId: opportunity.id, tier: opportunity.canonicalPrice.tier } });
     if (previous && semanticObservedPrice(previous.observedPriceUsd) !== semanticObservedPrice(opportunity.observedPriceUsd)) events.push({ type: "opportunity_observed_price", data: { opportunityId: opportunity.id, value: opportunity.observedPriceUsd?.value, provider: opportunity.observedPriceUsd?.provider, poolAddress: opportunity.observedPriceUsd?.poolAddress, reasonCode: opportunity.observedPriceUsd?.reasonCode } });
     if (previous && (previous.liquidityState !== opportunity.liquidityState || previous.bestLiquidityUsd !== opportunity.bestLiquidityUsd)) events.push({ type: "opportunity_liquidity_resolved", data: { opportunityId: opportunity.id, liquidityState: opportunity.liquidityState, bestLiquidityUsd: opportunity.bestLiquidityUsd } });
     if (previous && previous.qualityBand !== opportunity.qualityBand) events.push({ type: "opportunity_band_changed", data: { opportunityId: opportunity.id, previousBand: previous.qualityBand, band: opportunity.qualityBand } });
-    if (!previous?.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
+    if (previous && !previous.ranked && opportunity.ranked) events.push({ type: "opportunity_ranked", data: { opportunityId: opportunity.id, band: opportunity.qualityBand } });
     if (previous?.ranked && !opportunity.ranked) events.push({ type: "opportunity_unranked", data: { opportunityId: opportunity.id, reasonCode: opportunity.exclusionReason } });
     if (previous && semanticMetrics(previous) !== semanticMetrics(opportunity)) events.push({ type: "metrics_updated", data: { opportunityId: opportunity.id, aggregate: opportunity.aggregate } });
   }
@@ -775,7 +777,7 @@ export function trustedAnchorPoolIdentity(anchor, poolAddress) {
 function buildHealth(state, head, confirmedHead, mode) {
   ensureEnrichmentState(state);
   refreshEnrichmentHealth(state, state.health.providerCircuits ?? {});
-  const cursor = Math.min(...ENABLED.map((entry) => state.cursors[entry.id].blockNumber));
+  const cursor = Math.min(...ENABLED.map((entry) => state.cursors?.[entry.id]?.blockNumber ?? 0));
   const lagBlocks = Math.max(0, confirmedHead - cursor);
   const latestEvent = Object.values(state.events ?? {}).filter((event) => event.status === "confirmed" && !event.replay).sort((left, right) => right.blockNumber - left.blockNumber)[0];
   return {
@@ -788,7 +790,7 @@ function buildHealth(state, head, confirmedHead, mode) {
     lagSeconds: lagBlocks * 2,
     lastEventTime: latestEvent?.firstSeenAt ?? state.health.lastEventTime,
     lastConfirmedEvent: latestEvent ? { blockNumber: latestEvent.blockNumber, transactionHash: latestEvent.transactionHash, logIndex: latestEvent.logIndex } : undefined,
-    factories: Object.fromEntries(ENABLED.map((entry) => [entry.id, { enabled: true, healthy: state.cursors[entry.id].blockNumber > 0, cursor: state.cursors[entry.id].blockNumber }])),
+    factories: Object.fromEntries(ENABLED.map((entry) => [entry.id, { enabled: true, healthy: (state.cursors?.[entry.id]?.blockNumber ?? 0) > 0, cursor: state.cursors?.[entry.id]?.blockNumber ?? 0 }])),
     reconnectCount: state.counters.reconnectCount,
     backfillState: lagBlocks === 0 ? "caught_up" : "catching_up",
     reorgCount: state.counters.reorgCount,
@@ -837,29 +839,7 @@ function seedMetadataQueue(state, now) {
 }
 
 function seedOnchainQueue(state, now) {
-  const queued = new Set((state.onchainQueue ?? []).map((item) => item.poolKey));
-  const candidates = Object.values(state.pools ?? {}).filter((pool) => {
-    if (pool.status !== "confirmed" || pool.orphaned || pool.replay || queued.has(pool.poolKey)) return false;
-    const retryAt = Date.parse(pool.onchainState?.nextRetryAt ?? "");
-    return !Number.isFinite(retryAt) || retryAt <= now.getTime();
-  }).sort((left, right) => Number(Boolean(resolveOnchainAdapter(right) && right.poolAddress)) - Number(Boolean(resolveOnchainAdapter(left) && left.poolAddress)) || left.poolKey.localeCompare(right.poolKey));
-  const jobs = candidates.map((pool) => ({
-    poolKey: pool.poolKey,
-    poolAddress: pool.poolAddress,
-    attempts: 0,
-    createdAt: now.toISOString(),
-    nextAttemptAt: now.toISOString()
-  }));
-  const combined = new Map([...(state.onchainQueue ?? []), ...jobs].map((item) => [item.poolKey, item]));
-  state.onchainQueue = [...combined.values()].sort((left, right) => {
-    const leftPool = state.pools?.[left.poolKey];
-    const rightPool = state.pools?.[right.poolKey];
-    const adapterPriority = Number(Boolean(resolveOnchainAdapter(rightPool) && rightPool?.poolAddress)) - Number(Boolean(resolveOnchainAdapter(leftPool) && leftPool?.poolAddress));
-    const createdPriority = Date.parse(left.createdAt ?? "") - Date.parse(right.createdAt ?? "");
-    return adapterPriority || (Number.isFinite(createdPriority) ? createdPriority : 0) || left.poolKey.localeCompare(right.poolKey);
-  }).slice(0, 512);
-  state.health ??= {};
-  state.health.onchainQueueDepth = state.onchainQueue.length;
+  seedBackfillQueue(state, now);
 }
 
 function poolNeedsOnchainRpc(state, item) {
@@ -1078,8 +1058,7 @@ async function mapWithConcurrency(items, concurrency, operation) {
     while (nextIndex < items.length) {
       const index = nextIndex;
       nextIndex += 1;
-      try { results[index] = await operation(items[index]); }
-      catch { results[index] = undefined; }
+      results[index] = await operation(items[index]);
     }
   });
   await Promise.all(workers);
@@ -1089,7 +1068,8 @@ async function mapWithConcurrency(items, concurrency, operation) {
 export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal, managerCodeEvidence } = {}) {
   if (typeof rpc?.batchOutcomes === "function") {
     const bindings = await verifyPoolBindings(rpc, events, { signal, managerCodeEvidence });
-    if (bindings.some((binding) => !binding.ok && binding.retryable)) throw new Error("factory_binding_verification_unavailable");
+    const unavailable = bindings.find((binding) => !binding.ok && binding.retryable);
+    if (unavailable) throw new JsonRpcRequestError(unavailable.reason ?? "factory_binding_verification_unavailable", { method: "eth_getCode" });
     const accepted = events.flatMap((event, index) => bindings[index]?.ok ? [{ event, binding: bindings[index] }] : []);
     const blockNumbers = [...new Set(accepted.map(({ event }) => event.blockNumber))];
     const blockRows = new Map();
@@ -1097,11 +1077,13 @@ export async function verifyFactoryEvents(rpc, events, concurrency = 4, { signal
       await rpc.paceBatch?.({ signal });
       const numbers = blockNumbers.slice(offset, offset + PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT);
       const outcomes = await rpc.batchOutcomes(numbers.map((blockNumber) => ({ method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false] })), { signal });
-      if (outcomes.some((outcome) => !outcome.ok)) throw new Error("factory_block_evidence_unavailable");
+      const failure = outcomes.find((outcome) => !outcome.ok);
+      if (failure) throw new JsonRpcRequestError(failure.reasonCode, failure);
       for (let index = 0; index < numbers.length; index += 1) blockRows.set(numbers[index], outcomes[index].value);
     }
     return accepted.map(({ event, binding }) => {
       const block = blockRows.get(event.blockNumber);
+      if (block?.hash?.toLowerCase() !== event.blockHash?.toLowerCase()) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false, method: "eth_getBlockByNumber" });
       const timestampSeconds = block?.timestamp ? Number.parseInt(block.timestamp, 16) : undefined;
       return {
         ...event,
@@ -1138,11 +1120,12 @@ function boundedInteger(value, fallback, minimum, maximum) {
 }
 
 function safeError(error) {
-  const message = error instanceof Error ? error.message : "unknown collector failure";
-  return message.replace(/https?:\/\/\S+/gi, "[redacted-rpc]").slice(0, 240);
+  const reason = error?.reasonCode ?? error?.message;
+  return typeof reason === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(reason) ? reason : "collector_operation_failed";
 }
 
 function delay(milliseconds, signal) {
+  if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     let timer;
     const finish = () => {

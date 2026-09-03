@@ -12,7 +12,7 @@ import {
   resolveOnchainPoolEvidence
 } from "../collector/onchain-state.mjs";
 import { enrichTokenMetadata, JsonRpcClient } from "../collector/rpc.mjs";
-import { derivedCyclesReady, OnchainDiscoveryCollector, verifyFactoryEvents } from "../collector/service.mjs";
+import { OnchainDiscoveryCollector, verifyFactoryEvents } from "../collector/service.mjs";
 import { initialState } from "../collector/store.mjs";
 
 const NOW = new Date("2026-09-02T12:00:00.000Z");
@@ -266,7 +266,7 @@ test("factory event verification is bounded and reuses block evidence", async ()
   assert.ok(verified.every((event) => event.blockTimestamp === "1970-01-01T00:01:40.000Z"));
 });
 
-test("one bounded scan pass commits all fetched windows atomically", async () => {
+test("each bounded scan window commits its exact cursor hash before the next tick", async () => {
   const state = initialState(NOW);
   for (const cursor of Object.values(state.cursors)) cursor.blockNumber = 500;
   let transactions = 0;
@@ -283,6 +283,7 @@ test("one bounded scan pass commits all fetched windows atomically", async () =>
   const subject = {
     rpc: {
       blockNumber: async () => 1_000,
+      getBlock: async (number) => ({ number: `0x${number.toString(16)}`, hash: HASH, timestamp: "0x64" }),
       getLogs: async ({ fromBlock, toBlock }) => {
         ranges.push([fromBlock, toBlock]);
         return [];
@@ -291,21 +292,16 @@ test("one bounded scan pass commits all fetched windows atomically", async () =>
     store,
     config: { maximumChunksPerPass: 3 },
     drainMetadata: async () => {},
+    updateContinuity: () => {},
     websocket: undefined
   };
 
   await OnchainDiscoveryCollector.prototype.scanOnce.call(subject);
 
-  assert.deepEqual(ranges, [[485, 750], [735, 998]]);
+  assert.deepEqual(ranges, [[485, 750]]);
   assert.equal(transactions, 1);
-  assert.ok(Object.values(state.cursors).every((cursor) => cursor.blockNumber === 998));
-  assert.equal(state.health.backfillState, "caught_up");
-});
-
-test("derived pricing cycles wait for confirmed discovery catch-up", () => {
-  assert.equal(derivedCyclesReady({ health: { backfillState: "retrying" } }), false);
-  assert.equal(derivedCyclesReady({ health: { backfillState: "catching_up" } }), false);
-  assert.equal(derivedCyclesReady({ health: { backfillState: "caught_up" } }), true);
+  assert.ok(Object.values(state.cursors).every((cursor) => cursor.blockNumber === 750 && cursor.blockHash === HASH));
+  assert.equal(state.health.backfillState, "catching_up");
 });
 
 test("factory identity and block evidence use bounded RPC batches", async () => {
@@ -316,7 +312,8 @@ test("factory identity and block evidence use bounded RPC batches", async () => 
     factoryAddress,
     token0: TOKEN,
     token1: BASE_USDC,
-    blockNumber: 200 + index
+    blockNumber: 200 + index,
+    blockHash: HASH
   }));
   const requestSizes = [];
   const rpc = {
@@ -324,7 +321,7 @@ test("factory identity and block evidence use bounded RPC batches", async () => 
       requestSizes.push(calls.length);
       return calls.map((call) => {
         if (call.method === "eth_getCode") return { ok: true, value: "0x01" };
-        if (call.method === "eth_getBlockByNumber") return { ok: true, value: { timestamp: "0x64" } };
+        if (call.method === "eth_getBlockByNumber") return { ok: true, value: { hash: HASH, timestamp: "0x64" } };
         const selector = call.params[0].data;
         const value = selector === "0x0dfe1681" ? addressWord(TOKEN)
           : selector === "0xd21220a7" ? addressWord(BASE_USDC)
@@ -374,6 +371,7 @@ function fakeRpc({ pool, reserve0 = 1_000n * 10n ** 18n, reserve1 = 2_000n * 10n
 function fixtureState() {
   const pool = poolRecord("uniswap-v2");
   pool.onchainState = {
+    confidence: "exact_onchain_state", token0: pool.token0, token1: pool.token1,
     status: "complete", adapterFamily: "reserve_pool_state", protocolFamily: "uniswap_v2_compatible", reasonCode: "v2_reserve_spot",
     observedAt: NOW.toISOString(), blockNumber: 50_000_000, blockHash: HASH, decimals0: 18, decimals1: 6,
     observedPrice0In1: 2, observedPrice1In0: 0.5,

@@ -1,0 +1,131 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
+import { getEventListeners } from "node:events";
+import { BASE_USDC, BASE_WETH, FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
+import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
+import { OnchainDiscoveryCollector } from "../collector/service.mjs";
+import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT } from "../collector/pool-backfill.mjs";
+import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
+import { calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
+
+const NOW = new Date("2026-09-03T20:00:00Z");
+const TOKEN = `0x${"1".repeat(40)}`, OTHER = `0x${"2".repeat(40)}`, HASH = `0x${"a".repeat(64)}`;
+const registry = FACTORY_REGISTRY.find((row) => row.id === "uniswap-v2");
+function pool(key, extra = {}) { return { poolKey: key, poolAddress: `0x${"3".repeat(40)}`, token0: TOKEN, token1: OTHER, status: "confirmed", verifiedSource: true, factoryId: registry.id, factoryAddress: registry.address, firstSeenAt: "2026-09-01T00:00:00Z", ...extra }; }
+function memoryStore(state) {
+  return {
+    read: () => structuredClone(state),
+    transact: async (_, mutator, after) => { const draft = structuredClone(state); const result = await mutator(draft); state = result ?? draft; await after?.(state); return structuredClone(state); }
+  };
+}
+
+test("backfill priority follows exact anchor, matched, quote, new, evidence, retry, supported", () => {
+  const rows = [pool("anchor", { token0: BASE_WETH, token1: BASE_USDC }), pool("matched", { providerEnrichment: { status: "matched" } }), pool("quote", { token1: BASE_USDC }), pool("new", { firstSeenAt: NOW.toISOString() }), pool("evidence", { volume24hUsd: 1 }), pool("retry", { onchainState: { status: "retryable" } }), pool("other")];
+  assert.deepEqual(rows.map((row) => backfillPriority(row, NOW)), [0, 1, 2, 3, 4, 5, 6]);
+});
+
+test("queue is bounded and aging eventually outranks recurring high-priority work", () => {
+  const state = initialState(NOW);
+  state.pools = Object.fromEntries(Array.from({ length: 600 }, (_, index) => [`matched-${index}`, pool(`matched-${index}`, { providerEnrichment: { status: "matched" } })]));
+  state.pools.old = pool("old", { backfill: { attempts: 2, createdAt: "2026-09-03T19:40:00Z", nextAttemptAt: "2026-09-03T19:40:00Z" } });
+  seedBackfillQueue(state, NOW);
+  assert.equal(state.onchainQueue.length, BACKFILL_QUEUE_LIMIT);
+  assert.equal(state.onchainQueue[0].poolKey, "old");
+  assert.equal(new Set(state.onchainQueue.map((job) => job.poolKey)).size, state.onchainQueue.length);
+});
+
+test("persistent attempts/cooldown survive dequeue and actual durable restart", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "base-backfill-resilience-"));
+  let store = new DurableDiscoveryStore(directory);
+  try {
+    await store.open();
+    await store.transact("seed", (draft) => { draft.pools.one = pool("one"); seedBackfillQueue(draft, NOW); });
+    await store.transact("retry", (draft) => {
+      recordBackfillOutcome(draft.pools.one, { status: "retryable", reasonCode: "rpc_error_-32016", endpointLabel: "primary" }, NOW, { usedRpc: true });
+      draft.onchainQueue = []; seedBackfillQueue(draft, NOW);
+    });
+    assert.equal(store.read().onchainQueue.length, 0);
+    await store.close(); store = new DurableDiscoveryStore(directory); await store.open();
+    const after = await store.transact("resume", (draft) => { seedBackfillQueue(draft, new Date(NOW.getTime() + 31_000)); });
+    assert.equal(after.onchainQueue[0].attempts, 1);
+    assert.equal(after.onchainQueue[0].lastErrorClass, "rpc_error_-32016");
+    assert.equal(after.onchainQueue[0].lastEndpointLabel, "primary");
+    assert.equal(after.onchainQueue[0].createdAt, NOW.toISOString());
+    assert.equal(store.integrityCheck().ok, true);
+  } finally { await store.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("dead/dust/unsupported pools have long cooldown and never convert RPC failure into rejection", () => {
+  for (const status of ["rejected", "unsupported", "retryable"]) {
+    const row = pool(status);
+    recordBackfillOutcome(row, { status, reasonCode: status === "rejected" ? "zero_liquidity" : "rpc_error_-32016" }, NOW, { usedRpc: status !== "unsupported" });
+    if (status !== "retryable") assert(row.backfill.cooldownMs >= 3_600_000);
+    assert.equal(row.backfill.lastStatus, status);
+  }
+});
+
+test("failed pool refresh preserves last-good block/hash and does not renew freshness", async () => {
+  const state = initialState(NOW);
+  state.pools.one = pool("one", { onchainState: { status: "complete", blockNumber: 90, blockHash: HASH, observedAt: NOW.toISOString(), decimals0: 18, decimals1: 6, observedPrice0In1: 2 } });
+  state.tokenMetadata = { [TOKEN]: { decimals: 18 }, [OTHER]: { decimals: 6 } };
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test", stateRpcClient: { blockNumber: async () => { throw Object.assign(new Error("rpc_error_-32016"), { reasonCode: "rpc_error_-32016", endpointLabel: "primary" }); }, circuitSnapshot: () => ({}) }, onchainStateBatchSize: 1 });
+  collector.store = memoryStore(state);
+  await collector.runOnchainStateCycle(new Date(NOW.getTime() + 61_000));
+  const row = collector.store.read().pools.one;
+  assert.equal(row.onchainState.status, "complete"); assert.equal(row.onchainState.blockNumber, 90);
+  assert.equal(row.onchainState.observedAt, NOW.toISOString()); assert.equal(row.onchainState.blockHash, HASH);
+  assert.equal(row.backfill.lastStatus, "retryable"); assert.equal(row.backfill.attempts, 1);
+});
+
+test("cursor commits independently while anchor is stuck; loop timeout cleans parent listeners", async () => {
+  const state = initialState(NOW);
+  for (const row of Object.values(state.cursors)) row.blockNumber = 50;
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test", rpcClient: { blockNumber: async () => 100, getLogs: async () => [], getBlock: async (number) => ({ number: `0x${number.toString(16)}`, hash: HASH, timestamp: "0x64" }) } });
+  collector.store = memoryStore(state); collector.running = true;
+  const controller = new AbortController();
+  const anchor = collector.runLoop("anchor", 1, 5, () => new Promise(() => {}), controller.signal);
+  await collector.reconcileHead();
+  await collector.scanOnce();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(collector.store.read().cursors[registry.id].blockNumber, 98);
+  assert.equal(collector.loopHealth.anchor.lastError.reasonCode, "anchor_cycle_deadline_exceeded");
+  collector.running = false; controller.abort(); await anchor;
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
+
+test("late metadata completion after cancellation cannot commit", async () => {
+  const state = initialState(NOW);
+  state.metadataQueue = [{ tokenAddress: TOKEN, blockNumber: 100 }];
+  const controller = new AbortController();
+  const collector = new OnchainDiscoveryCollector({ httpUrl: "https://example.invalid", storeDirectory: ".data/test", metadataBatchSize: 1, rpcClient: { getCode: async () => { controller.abort(new Error("cancelled")); return "0x01"; }, batchOutcomes: async () => [] } });
+  collector.store = memoryStore(state);
+  await assert.rejects(collector.drainMetadata(controller.signal), /cancelled/);
+  assert.equal(collector.store.read().tokenMetadata[TOKEN], undefined);
+});
+
+test("duplicate/out-of-order/hash-conflicting state cannot replace durable proof", () => {
+  const old = { status: "complete", blockNumber: 100, blockHash: HASH };
+  assert.equal(acceptOnchainStateUpdate(old, { ...old, blockNumber: 99 }).accepted, false);
+  assert.equal(acceptOnchainStateUpdate(old, { ...old, blockHash: `0x${"b".repeat(64)}` }).accepted, false);
+  assert.equal(acceptOnchainStateUpdate(old, old).accepted, false);
+});
+
+test("relay first snapshot has no historical transition and reconnect sees only greater IDs", () => {
+  const ring = [{ id: "9" }, { id: "10" }, { id: "11" }];
+  assert.deepEqual(eventsAfterId(ring), []);
+  assert.deepEqual(eventsAfterId(ring, "10"), [{ id: "11" }]);
+  assert.deepEqual(eventsAfterId(ring, "11"), []);
+});
+
+test("provider-only price is not canonical; fresh exact proof is required and remains authoritative", () => {
+  const row = pool("one", { token1: BASE_USDC, liquidityUsd: 10_000, priceToken1PerToken0: 999, observedAt: NOW.toISOString() });
+  assert.equal(calculateCanonicalUsdcPrice(TOKEN, [row], NOW).tier, "UNPRICED");
+  row.onchainState = { status: "complete", confidence: "exact_onchain_state", token0: TOKEN, token1: BASE_USDC, decimals0: 18, decimals1: 6, observedAt: NOW.toISOString(), blockNumber: 100, blockHash: HASH, observedPrice0In1: 2 };
+  const price = calculateCanonicalUsdcPrice(TOKEN, [row], NOW);
+  assert.equal(price.value, 2); assert.equal(price.sourceBlocks[0].blockHash, HASH);
+  row.onchainState.observedAt = new Date(NOW.getTime() - 180_000).toISOString();
+  assert.equal(calculateCanonicalUsdcPrice(TOKEN, [row], NOW).tier, "UNPRICED");
+});

@@ -7,6 +7,7 @@ export type CanonicalPrice = {
   anchor?: string;
   observedAt?: string;
   blockNumber?: number;
+  sourceBlocks?: Array<{ poolKey: string; blockNumber: number; blockHash: string; observedAt: string }>;
   freshness: "fresh" | "unavailable";
   reasonCode: string;
   qualityStatus?: "consensus" | "single_path";

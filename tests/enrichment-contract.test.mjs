@@ -164,6 +164,9 @@ test("trusted anchor refresh has a dedicated loop independent of pool enrichment
   let refreshes = 0;
   const subject = {
     running: true,
+    config: {},
+    store: { transact: async () => {} },
+    runLoop: OnchainDiscoveryCollector.prototype.runLoop,
     refreshAnchorIfDue: async () => {
       refreshes += 1;
       subject.running = false;
@@ -177,6 +180,7 @@ test("trusted anchor loop survives an unexpected refresh rejection", async () =>
   let refreshes = 0;
   const subject = {
     running: true,
+    runLoop: OnchainDiscoveryCollector.prototype.runLoop,
     config: { anchorCycleTimeoutMs: 50, anchorLoopIntervalMs: 1 },
     provider: { circuitSnapshot: () => ({}) },
     store: { transact: async (_reason, mutator) => { await mutator({ health: {}, priceAnchors: { wethUsdc: {} }, counters: { enrichmentFailure: 0 }, pools: {}, opportunities: [], enrichmentQueue: [] }); } },
@@ -195,6 +199,7 @@ test("trusted anchor loop aborts a stuck refresh and advances to the next cycle"
   let aborted = false;
   const subject = {
     running: true,
+    runLoop: OnchainDiscoveryCollector.prototype.runLoop,
     config: { anchorCycleTimeoutMs: 5, anchorLoopIntervalMs: 1 },
     provider: { circuitSnapshot: () => ({}) },
     store: { transact: async (_reason, mutator) => { await mutator({ health: {}, priceAnchors: { wethUsdc: {} }, counters: { enrichmentFailure: 0 }, pools: {}, opportunities: [], enrichmentQueue: [] }); } },
@@ -227,7 +232,7 @@ test("trusted anchor provider lookup receives the cycle abort signal", async () 
     }
   });
   await assert.rejects(client.lookupWethPools({ signal: controller.signal }));
-  assert.equal(requestSignal.aborted, true);
+  assert.equal(requestSignal, undefined); // already-aborted requests never start
 });
 
 test("trusted anchor refresh uses only bounded exact pair endpoints", async () => {
@@ -248,7 +253,7 @@ test("trusted anchor refresh uses only bounded exact pair endpoints", async () =
   assert.equal(urls.some((url) => url.includes("/token-pairs/")), false);
 });
 
-test("trusted immutable anchor identity refreshes without repeating RPC validation", async () => {
+test("trusted identity cannot refresh an anchor without fresh exact RPC state", async () => {
   const now = new Date();
   const observedAt = now.toISOString();
   let state = initialState(now);
@@ -272,7 +277,7 @@ test("trusted immutable anchor identity refreshes without repeating RPC validati
         })];
       }
     },
-    anchorRpc: new Proxy({}, { get: () => () => { rpcCalls += 1; throw new Error("trusted refresh must not use RPC"); } }),
+    anchorRpc: new Proxy({}, { get: () => () => { rpcCalls += 1; throw new Error("rpc_timeout"); } }),
     provider: { circuitSnapshot: () => ({}) },
     store: {
       read: () => structuredClone(state),
@@ -285,10 +290,11 @@ test("trusted immutable anchor identity refreshes without repeating RPC validati
     },
     publishSemanticDeltas: async (_before, after) => after
   };
-  await OnchainDiscoveryCollector.prototype.refreshAnchorIfDue.call(subject, now);
-  assert.equal(rpcCalls, 0);
+  await assert.rejects(OnchainDiscoveryCollector.prototype.refreshAnchorIfDue.call(subject, now), /rpc_timeout/);
+  assert.equal(rpcCalls, 1);
   assert.equal(state.priceAnchors.wethUsdc.status, "ready");
   assert.equal(state.priceAnchors.wethUsdc.observedAt, observedAt);
+  assert.equal(state.health.lastAnchorLoopFailure, "rpc_timeout");
 });
 
 test("trusted anchor owns isolated provider and bounded RPC clients", () => {
@@ -464,7 +470,10 @@ test("pricing-path labels retain exact TR/EN parity", async () => {
 function dexRow(overrides = {}) { return { chainId: "base", dexId: "uniswap", pairAddress: POOL, baseToken: { address: TOKEN, symbol: "TOKEN" }, quoteToken: { address: BASE_WETH, symbol: "WETH" }, priceNative: "0.5", priceUsd: "1000", liquidity: { usd: 10_000 }, volume: { h24: 2_000 }, txns: { h24: { buys: 4, sells: 6 } }, ...overrides }; }
 function providerObservation(overrides = {}) { return { provider: "dexscreener", chainId: 8453, poolAddress: POOL, baseTokenAddress: TOKEN, quoteTokenAddress: BASE_WETH, priceNative: 0.5, priceUsd: 1000, liquidityUsd: 10_000, volumes: { h24: 2_000 }, transactions: { h24: { buys: 4, sells: 6 } }, observedAt: NOW.toISOString(), receivedAt: NOW.toISOString(), fieldProvenance: {}, ...overrides }; }
 function poolRecord() { return { poolKey: POOL, poolAddress: POOL, token0: TOKEN, token1: BASE_WETH, status: "confirmed", verifiedSource: true }; }
-function pricingPool(overrides = {}) { return { ...poolRecord(), token1: BASE_USDC, orphaned: false, observedAt: NOW.toISOString(), confirmedAt: NOW.toISOString(), blockNumber: 50_000_000, priceToken1PerToken0: 1, liquidityUsd: 100_000, providers: ["onchain"], ...overrides }; }
+function pricingPool(overrides = {}) {
+  const row = { ...poolRecord(), token1: BASE_USDC, orphaned: false, observedAt: NOW.toISOString(), confirmedAt: NOW.toISOString(), blockNumber: 50_000_000, priceToken1PerToken0: 1, liquidityUsd: 100_000, providers: ["onchain"], ...overrides };
+  return { ...row, onchainState: { status: "complete", confidence: "exact_onchain_state", token0: row.token0, token1: row.token1, decimals0: 18, decimals1: 6, blockNumber: row.blockNumber, blockHash: `0x${"a".repeat(64)}`, observedAt: row.observedAt, observedPrice0In1: row.priceToken1PerToken0 } };
+}
 function anchorCandidate(overrides = {}) { return { poolAddress: POOL, token0: BASE_WETH, token1: BASE_USDC, registeredFactory: true, decimalsVerified: true, priceToken1PerToken0: 2_000, liquidityUsd: 100_000, observedAt: NOW.toISOString(), providers: ["dexscreener"], factoryId: "uniswap-v3", factoryAddress: FACTORY_REGISTRY.find((entry) => entry.id === "uniswap-v3").address, protocolVersion: "v3", ...overrides }; }
 function response(status, payload) { return { ok: status >= 200 && status < 300, status, json: async () => payload }; }
 function word(value) { return value.toString(16).padStart(64, "0"); }

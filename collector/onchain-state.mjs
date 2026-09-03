@@ -133,6 +133,7 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
       confidence: "unavailable",
       reasonCode: normalizeOutcomeReason(requiredFailure[1], `${requiredFailure[0]}_read_failed`),
       failureMethod: requiredFailure[0],
+      endpointLabel: requiredFailure[1]?.endpointLabel,
       retryable: requiredFailure[1]?.retryable !== false
     });
   }
@@ -160,7 +161,8 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
       balance1Raw: balance1?.toString(),
       sourceMethod: "erc20_balanceOf_pool"
     },
-    failureReasons: balanceFailures
+    failureReasons: balanceFailures,
+    endpointLabel: outcomes.find((outcome) => outcome.endpointLabel)?.endpointLabel
   });
 
   if (adapter.kind === "v2" || adapter.kind === "aerodrome-classic") {

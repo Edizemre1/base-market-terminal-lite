@@ -11,6 +11,7 @@ const SELECTOR = Object.freeze({
 });
 
 import { FACTORY_REGISTRY } from "./factory-registry.mjs";
+import { abortableDelay, throwIfAborted, withDeadline } from "./async-control.mjs";
 
 export class JsonRpcClient {
   constructor(url, { timeoutMs = 12_000, retries = 3, circuitFailureThreshold = 4, circuitCooldownMs = 15_000, batchPaceMs = 0, now = () => new Date(), fetchImpl = fetch, delayImpl = delay } = {}) {
@@ -35,14 +36,15 @@ export class JsonRpcClient {
     return (await this.batch([{ method, params }], options))[0];
   }
 
-  async batch(calls, { signal } = {}) {
-    const outcomes = await this.batchOutcomes(calls, { signal });
+  async batch(calls, options = {}) {
+    const outcomes = await this.batchOutcomes(calls, options);
     const failure = outcomes.find((outcome) => !outcome.ok);
     if (failure) throw new JsonRpcRequestError(failure.reasonCode, failure);
     return outcomes.map((outcome) => outcome.value);
   }
 
   async batchOutcomes(calls, { signal } = {}) {
+    throwIfAborted(signal);
     if (!calls.length) return [];
     this.metrics.calls += calls.length;
     if (this.now().getTime() < this.openUntil) {
@@ -52,16 +54,20 @@ export class JsonRpcClient {
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       try {
         this.metrics.requests += 1;
-        const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
-        const response = await this.fetchImpl(this.url, {
+        const payload = await withDeadline(async (attemptSignal) => {
+          const response = await this.fetchImpl(this.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(requests),
-          signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+          signal: attemptSignal
         });
         if (!response.ok) throw new JsonRpcRequestError(`rpc_http_${response.status}`, { retryable: response.status === 408 || response.status === 429 || response.status >= 500 });
-        const payload = await response.json();
+          return response.json();
+        }, this.timeoutMs, { signal });
         const rows = Array.isArray(payload) ? payload : [payload];
+        if (rows.length !== requests.length || rows.some((row) => !row || row.jsonrpc !== "2.0" || !requests.some((request) => request.id === row.id) || (Object.hasOwn(row, "result") === Object.hasOwn(row, "error"))) || new Set(rows.map((row) => row.id)).size !== rows.length) {
+          throw new JsonRpcRequestError("rpc_malformed_response", { retryable: false });
+        }
         const byId = new Map(rows.map((row) => [row.id, row]));
         const outcomes = requests.map((request) => {
           const row = byId.get(request.id);
@@ -74,7 +80,7 @@ export class JsonRpcClient {
         const retryableBatchFailure = outcomes.every((outcome) => !outcome.ok && outcome.retryable);
         if (retryableBatchFailure && attempt < this.retries) {
           this.metrics.retries += 1;
-          await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
+          await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt), signal);
           continue;
         }
         this.consecutiveFailures = retryableBatchFailure ? this.consecutiveFailures + 1 : 0;
@@ -88,6 +94,7 @@ export class JsonRpcClient {
         this.metrics.failures += outcomes.filter((outcome) => !outcome.ok).length;
         return outcomes;
       } catch (error) {
+        throwIfAborted(signal);
         const reasonCode = classifyTransportError(error);
         if (reasonCode === "rpc_timeout") this.metrics.timeouts += 1;
         if (attempt === this.retries || error?.retryable === false) {
@@ -97,10 +104,10 @@ export class JsonRpcClient {
             this.openUntil = this.now().getTime() + this.circuitCooldownMs;
             this.metrics.circuitOpens += 1;
           }
-          return calls.map(() => ({ ok: false, reasonCode, retryable: error?.retryable !== false }));
+          return calls.map((call) => ({ ok: false, reasonCode, method: call.method, retryable: error?.retryable !== false && !(error instanceof SyntaxError) }));
         }
         this.metrics.retries += 1;
-        await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt));
+        await this.delayImpl(Math.min(2_000, 250 * 2 ** attempt), signal);
       }
     }
     return calls.map(() => ({ ok: false, reasonCode: "rpc_retry_exhausted", retryable: true }));
@@ -121,7 +128,7 @@ export class JsonRpcClient {
     const nowMs = this.now().getTime();
     const elapsedMs = Number.isFinite(this.lastBatchStartedAt) ? nowMs - this.lastBatchStartedAt : this.batchPaceMs;
     const waitMs = Math.max(0, this.batchPaceMs - elapsedMs);
-    if (waitMs > 0) await this.delayImpl(waitMs);
+    if (waitMs > 0) await this.delayImpl(waitMs, signal);
     if (signal?.aborted) throw signal.reason ?? new Error("rpc_batch_pacing_aborted");
     this.lastBatchStartedAt = this.now().getTime();
   }
@@ -130,15 +137,16 @@ export class JsonRpcClient {
     return hexToSafeNumber(await this.request("eth_blockNumber", [], options));
   }
 
-  async getLogs({ fromBlock, toBlock, addresses, topics }) {
+  async getLogs({ fromBlock, toBlock, addresses, topics }, options = {}) {
     const filter = {
       fromBlock: toHex(fromBlock),
       toBlock: toHex(toBlock),
       address: addresses,
       topics: [topics]
     };
-    const logs = await this.request("eth_getLogs", [filter]);
-    return Array.isArray(logs) ? logs : [];
+    const logs = await this.request("eth_getLogs", [filter], options);
+    if (!Array.isArray(logs)) throw new JsonRpcRequestError("rpc_malformed_response", { retryable: false, method: "eth_getLogs" });
+    return logs;
   }
 
   async getBlock(blockNumber, options = {}) {
@@ -471,21 +479,23 @@ function sanitizeText(bytes) {
   } catch { return undefined; }
 }
 
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
+const delay = abortableDelay;
 
 export class JsonRpcRequestError extends Error {
-  constructor(reasonCode, { retryable = true, rpcCode } = {}) {
+  constructor(reasonCode, { retryable = true, rpcCode, method, endpointLabel, retryAt } = {}) {
     super(reasonCode);
     this.name = "JsonRpcRequestError";
     this.reasonCode = reasonCode;
     this.retryable = retryable;
     this.rpcCode = rpcCode;
+    this.method = method;
+    this.endpointLabel = endpointLabel;
+    this.retryAt = retryAt;
   }
 }
 
 function classifyRpcError(error) {
+  if (error?.code === -32016) return "rpc_error_-32016";
   const message = String(error?.message ?? "").toLowerCase();
   if (message.includes("proxy") || message.includes("implementation")) return "rpc_proxy_mismatch";
   if (message.includes("revert") || error?.code === 3) return "rpc_execution_reverted";

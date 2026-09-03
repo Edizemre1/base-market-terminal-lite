@@ -1,4 +1,5 @@
 import { getOnchainRelayClientCount, readRelayEventsAfter, registerOnchainRelayClient } from "@/lib/base-terminal/onchainRelay";
+import { collectorFreshness } from "@/lib/base-terminal/onchainDiscovery";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +18,7 @@ export function GET(request: Request) {
   let release = () => {};
   let closed = false;
   let lastStatusSignature = "";
+  let closeStream = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -28,8 +30,10 @@ export function GET(request: Request) {
         if (pollTimer) clearInterval(pollTimer);
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         release();
+        request.signal.removeEventListener("abort", close);
         try { controller.close(); } catch { /* connection already closed */ }
       };
+      closeStream = close;
       const push = () => {
         if (closed) return;
         const result = readRelayEventsAfter(lastEventId);
@@ -43,16 +47,21 @@ export function GET(request: Request) {
           return;
         }
         const status = {
-          ready: Boolean(result.state.health.ready && result.state.health.storeIntegrity === "ok"),
+          ...collectorFreshness(result.state),
           mode: result.state.health.mode ?? result.state.mode,
           storeIntegrity: result.state.health.storeIntegrity,
           confirmedHead: result.state.confirmedHead,
+          requiresSnapshot: result.resetRequired,
           readOnly: true
         };
         const signature = JSON.stringify(status);
         if (signature !== lastStatusSignature) {
           controller.enqueue(encoder.encode(`event: collector_status\ndata: ${signature}\n\n`));
           lastStatusSignature = signature;
+        }
+        if (!lastEventId || result.resetRequired) {
+          lastEventId = result.checkpoint ?? "0";
+          if (lastEventId) controller.enqueue(encoder.encode(`id: ${lastEventId}\nevent: collector_checkpoint\ndata: ${JSON.stringify({ requiresSnapshot: true })}\n\n`));
         }
         for (const event of result.events) {
           controller.enqueue(encoder.encode(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify({ ...event.data, observedAt: event.at })}\n\n`));
@@ -70,13 +79,10 @@ export function GET(request: Request) {
         if (!closed) controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`));
       }, 15_000);
       request.signal.addEventListener("abort", close, { once: true });
+      if (request.signal.aborted) close();
     },
     cancel() {
-      closed = true;
-      if (initialPushTimer) clearTimeout(initialPushTimer);
-      if (pollTimer) clearInterval(pollTimer);
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      release();
+      closeStream();
     }
   });
 
