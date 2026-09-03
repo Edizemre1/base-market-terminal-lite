@@ -3,7 +3,7 @@ import { appendRelayEvent, applyCanonicalEvents, buildCanonicalOpportunities, co
 import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcRequestError, readTokenDecimals, verifyPoolBinding, verifyPoolBindings } from "./rpc.mjs";
 import { configuredRpcEndpoints, RpcTransportPool, validBlock } from "./rpc-transport.mjs";
 import { throwIfAborted, withDeadline } from "./async-control.mjs";
-import { seedBackfillQueue, recordBackfillOutcome, backfillHealth, backfillPriority } from "./pool-backfill.mjs";
+import { seedBackfillQueue, recordBackfillOutcome, backfillHealth, backfillPriority, selectBackfillRpcBatch } from "./pool-backfill.mjs";
 import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
 import { acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
 import {
@@ -330,7 +330,7 @@ export class OnchainDiscoveryCollector {
     const scheduled = structuredClone(before);
     if (hasOnchainSeedCandidate(scheduled, now)) seedOnchainQueue(scheduled, now);
     const dueNow = (scheduled.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime());
-    const rpcDue = dueNow.filter((item) => poolNeedsOnchainRpc(before, item)).slice(0, this.config.onchainStateBatchSize);
+    const rpcDue = selectBackfillRpcBatch(dueNow.filter((item) => poolNeedsOnchainRpc(before, item)), before.pools, this.config.onchainStateBatchSize, before.counters.backfillRpcAttempts ?? 0);
     const localDue = dueNow.filter((item) => !poolNeedsOnchainRpc(before, item)).slice(0, this.config.onchainLocalClassificationBatchSize ?? 128);
     const due = [...rpcDue, ...localDue];
     if (!due.length) return before;

@@ -7,7 +7,7 @@ import { getEventListeners } from "node:events";
 import { BASE_USDC, BASE_WETH, FACTORY_REGISTRY } from "../collector/factory-registry.mjs";
 import { initialState, DurableDiscoveryStore } from "../collector/store.mjs";
 import { OnchainDiscoveryCollector, seedMetadataQueue } from "../collector/service.mjs";
-import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT } from "../collector/pool-backfill.mjs";
+import { seedBackfillQueue, recordBackfillOutcome, backfillPriority, BACKFILL_QUEUE_LIMIT, selectBackfillRpcBatch } from "../collector/pool-backfill.mjs";
 import { acceptOnchainStateUpdate } from "../collector/onchain-state.mjs";
 import { buildCanonicalOpportunities, calculateCanonicalUsdcPrice, eventsAfterId } from "../collector/model.mjs";
 
@@ -77,6 +77,18 @@ test("queue is bounded and aging eventually outranks recurring high-priority wor
   assert.equal(state.onchainQueue.length, BACKFILL_QUEUE_LIMIT);
   assert.equal(state.onchainQueue[0].poolKey, "old");
   assert.equal(new Set(state.onchainQueue.map((job) => job.poolKey)).size, state.onchainQueue.length);
+});
+
+test("overdue legacy refreshes cannot starve newly unlocked unproved pools", () => {
+  const pools = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`proved-${index}`, pool(`proved-${index}`, { backfill: { lastSuccessfulHash: HASH } })]));
+  pools.unproved = pool("unproved");
+  const queue = Object.keys(pools).map((poolKey) => ({ poolKey }));
+  for (const attempts of [0, 1, 2]) assert.equal(selectBackfillRpcBatch(queue, pools, 1, attempts)[0].poolKey, "proved-0");
+  assert.equal(selectBackfillRpcBatch(queue, pools, 1, 3)[0].poolKey, "unproved");
+  const batch = selectBackfillRpcBatch(queue, pools, 4, 0);
+  assert.equal(batch.length, 4); assert.equal(new Set(batch.map((row) => row.poolKey)).size, 4);
+  assert.equal(batch[3].poolKey, "unproved");
+  assert.equal(selectBackfillRpcBatch(queue, structuredClone(pools), 1, 7)[0].poolKey, "unproved", "restart cadence uses the persisted attempt count");
 });
 
 test("persistent attempts/cooldown survive dequeue and actual durable restart", async () => {

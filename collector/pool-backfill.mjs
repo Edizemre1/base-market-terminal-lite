@@ -3,6 +3,22 @@ import { ONCHAIN_STATE_REFRESH_MS, resolveOnchainAdapter } from "./onchain-state
 
 export const BACKFILL_QUEUE_LIMIT = 512;
 
+export function selectBackfillRpcBatch(queue, pools, maximum = 1, attempts = 0) {
+  const remaining = [...queue];
+  const selected = [];
+  for (let index = 0; index < Math.max(1, maximum) && remaining.length; index += 1) {
+    // Initial legacy proofs can all be overdue by many hours. Their refresh
+    // age must not consume every slot after metadata unlocks an unproved pool.
+    // Reserve one of four existing slots; keep the normal priority order in
+    // both groups and persist cadence through the cumulative attempt counter.
+    const unproved = (attempts + index) % 4 === 3
+      ? remaining.findIndex((job) => !pools[job.poolKey]?.backfill?.lastSuccessfulHash)
+      : -1;
+    selected.push(...remaining.splice(unproved < 0 ? 0 : unproved, 1));
+  }
+  return selected;
+}
+
 export function backfillPriority(pool, now = new Date()) {
   const tokens = [pool.token0, pool.token1];
   if (!resolveOnchainAdapter(pool) || !pool.poolAddress) return 8;
