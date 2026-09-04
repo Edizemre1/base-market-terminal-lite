@@ -17,17 +17,17 @@ export function TerminalPanel({
   bodyClassName?: string;
 }) {
   return (
-    <section className={cx("border border-base-line bg-base-panel", className)}>
+    <section className={cx("border border-border-subtle bg-surface-panel", className)}>
       {(label || title || meta) ? (
-        <div className="flex min-h-8 items-center justify-between gap-3 border-b border-base-line bg-base-raised px-2">
+        <div className="flex min-h-8 items-center justify-between gap-3 border-b border-border-subtle bg-surface-raised px-2">
           <div>
             {label ? (
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-mint">
+              <p className="text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
                 {label}
               </p>
             ) : null}
             {title ? (
-              <h2 className="text-[12px] font-semibold text-base-text">{title}</h2>
+              <h2 className="text-label font-semibold text-content-primary">{title}</h2>
             ) : null}
           </div>
           {meta ? <div className="shrink-0">{meta}</div> : null}
@@ -46,17 +46,17 @@ export function StatusPill({
   tone?: "mint" | "blue" | "amber" | "rose" | "muted";
 }) {
   const tones = {
-    mint: "border-base-mint/45 bg-base-mint/10 text-base-mint",
-    blue: "border-base-blue/25 bg-base-blue/5 text-base-electric",
-    amber: "border-base-amber/45 bg-base-amber/10 text-base-amber",
-    rose: "border-base-rose/45 bg-base-rose/10 text-base-rose",
-    muted: "border-base-line bg-base-elevated text-base-muted"
+    mint: "border-brand-accent/45 bg-brand-accent/10 text-brand-accent",
+    blue: "border-network-base/25 bg-network-base/5 text-network-base",
+    amber: "border-freshness-delayed/45 bg-freshness-delayed/10 text-freshness-delayed",
+    rose: "border-market-negative/45 bg-market-negative/10 text-market-negative",
+    muted: "border-border-subtle bg-surface-interactive text-content-secondary"
   };
 
   return (
     <span
       className={cx(
-        "inline-flex border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+        "inline-flex border px-2 py-1 text-meta font-semibold uppercase tracking-eyebrow",
         tones[tone]
       )}
     >

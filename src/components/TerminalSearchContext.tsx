@@ -11,6 +11,8 @@ import {
 } from "react";
 import type { FeedStatusLabel, MarketDataMode } from "@/data/providers/types";
 import type { BasePair } from "@/types/baseTerminal";
+import { safeGetStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
+import { sanitizeTokenLogoUrl } from "@/lib/safeUrl";
 
 type SelectPairHandler = (pairId: string) => void;
 const PINNED_PAIRS_STORAGE_KEY = "base-terminal-lite:pinned-pairs";
@@ -30,6 +32,8 @@ export type ProviderHealthState = {
 
 export type PinnedPair = {
   key: string;
+  opportunityId?: string;
+  focusTokenAddress?: string;
   pairIdentity: string;
   id?: string;
   pairAddress?: string;
@@ -42,10 +46,10 @@ export type PinnedPair = {
   dex: string;
   price: string;
   priceUsd: string;
-  change24h: number;
-  volume24h: number;
-  liquidity: number;
-  dataSource?: "mock" | "dexscreener";
+  change24h?: number;
+  volume24h?: number;
+  liquidity?: number;
+  dataSource?: "mock" | "dexscreener" | "geckoterminal" | "onchain";
   stale: boolean;
 };
 
@@ -84,7 +88,7 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    window.localStorage.setItem(
+    safeSetStorageItem(
       PINNED_PAIRS_STORAGE_KEY,
       JSON.stringify(pinnedSnapshots.map(toStoredPinnedPair))
     );
@@ -146,7 +150,7 @@ export function TerminalSearchProvider({ children }: { children: ReactNode }) {
         return current.filter((_, index) => index !== existingIndex);
       }
 
-      return [toPinnedPair(pair), ...current].slice(0, 24);
+      return [toPinnedPair(pair), ...current].slice(0, 4);
     });
   }, []);
 
@@ -208,14 +212,14 @@ function readPinnedPairs() {
   }
 
   try {
-    const rawValue = window.localStorage.getItem(PINNED_PAIRS_STORAGE_KEY);
+    const rawValue = safeGetStorageItem(PINNED_PAIRS_STORAGE_KEY);
     const parsedValue = rawValue ? (JSON.parse(rawValue) as unknown) : [];
 
     if (!Array.isArray(parsedValue)) {
       return [];
     }
 
-    return parsedValue.map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
+    return parsedValue.slice(0, 4).map(normalizePinnedPair).filter((pair): pair is PinnedPair => Boolean(pair));
   } catch {
     return [];
   }
@@ -228,27 +232,36 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
 
   const candidate = value as Partial<PinnedPair>;
 
-  if (!candidate.key || !candidate.pair || !candidate.baseToken || !candidate.quoteToken) {
+  const key = readStoredText(candidate.key, 128);
+  const pair = readStoredText(candidate.pair, 80);
+  const baseToken = readStoredText(candidate.baseToken, 32);
+  const quoteToken = readStoredText(candidate.quoteToken, 32);
+  if (!key || !pair || !baseToken || !quoteToken || !isOptionalFiniteNumber(candidate.change24h) || !isOptionalFiniteNumber(candidate.volume24h) || !isOptionalFiniteNumber(candidate.liquidity)) {
     return undefined;
   }
 
+  const pairAddress = readStoredText(candidate.pairAddress, 42);
+  if (pairAddress && !/^0x[0-9a-f]{40}$/i.test(pairAddress)) return undefined;
+
   return {
-    key: candidate.key,
-    pairIdentity: candidate.pairIdentity ?? normalizePairIdentity(candidate.pair),
-    id: candidate.id,
-    pairAddress: candidate.pairAddress,
-    tokenLogoUrl: candidate.tokenLogoUrl,
-    quoteTokenLogoUrl: candidate.quoteTokenLogoUrl,
-    pair: candidate.pair,
-    baseToken: candidate.baseToken,
-    quoteToken: candidate.quoteToken,
-    dex: candidate.dex ?? "Unknown",
-    price: candidate.price ?? "N/A",
-    priceUsd: candidate.priceUsd ?? "N/A",
-    change24h: toNumber(candidate.change24h),
-    volume24h: toNumber(candidate.volume24h),
-    liquidity: toNumber(candidate.liquidity),
-    dataSource: candidate.dataSource,
+    key,
+    opportunityId: readStoredText(candidate.opportunityId, 180),
+    focusTokenAddress: readStoredText(candidate.focusTokenAddress, 42)?.toLowerCase(),
+    pairIdentity: normalizePairIdentity(readStoredText(candidate.pairIdentity, 128) ?? pair),
+    id: readStoredText(candidate.id, 128),
+    pairAddress,
+    tokenLogoUrl: sanitizeTokenLogoUrl(candidate.tokenLogoUrl),
+    quoteTokenLogoUrl: sanitizeTokenLogoUrl(candidate.quoteTokenLogoUrl),
+    pair,
+    baseToken,
+    quoteToken,
+    dex: readStoredText(candidate.dex, 64) ?? "Unknown",
+    price: readStoredText(candidate.price, 64) ?? "N/A",
+    priceUsd: readStoredText(candidate.priceUsd, 64) ?? "N/A",
+    change24h: candidate.change24h,
+    volume24h: candidate.volume24h,
+    liquidity: candidate.liquidity,
+    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" || candidate.dataSource === "geckoterminal" || candidate.dataSource === "onchain" ? candidate.dataSource : undefined,
     stale: true
   };
 }
@@ -256,6 +269,8 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
 function toPinnedPair(pair: BasePair): PinnedPair {
   return {
     key: getPinnedPairKey(pair),
+    opportunityId: pair.opportunityId,
+    focusTokenAddress: pair.focusTokenAddress,
     pairIdentity: normalizePairIdentity(pair.pair),
     id: pair.id,
     pairAddress: pair.pairAddress,
@@ -279,6 +294,8 @@ function toPinnedPair(pair: BasePair): PinnedPair {
 function toStoredPinnedPair(pair: PinnedPair) {
   return {
     key: pair.key,
+    opportunityId: pair.opportunityId,
+    focusTokenAddress: pair.focusTokenAddress,
     pairIdentity: pair.pairIdentity,
     id: pair.id,
     pairAddress: pair.pairAddress,
@@ -298,7 +315,8 @@ function toStoredPinnedPair(pair: PinnedPair) {
 }
 
 function findCurrentPair(pairs: BasePair[], pinnedPair: PinnedPair) {
-  return pairs.find((pair) => !pair.stale && pairsMatchPinnedPair(pair, pinnedPair));
+  const exactPool = pairs.find((pair) => !pair.stale && Boolean(pair.pairAddress && pinnedPair.pairAddress) && pair.pairAddress?.toLowerCase() === pinnedPair.pairAddress?.toLowerCase());
+  return exactPool ?? pairs.find((pair) => !pair.stale && pairsMatchPinnedPair(pair, pinnedPair));
 }
 
 function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {
@@ -308,23 +326,32 @@ function pairsMatchPinnedPair(pair: BasePair, pinnedPair: PinnedPair) {
     Boolean(pair.pairAddress && pinnedPair.pairAddress) &&
     pair.pairAddress?.toLowerCase() === pinnedPair.pairAddress?.toLowerCase();
   const idMatches = Boolean(pinnedPair.id) && pair.id === pinnedPair.id;
+  const opportunityMatches = Boolean(pair.opportunityId && pinnedPair.opportunityId) && pair.opportunityId === pinnedPair.opportunityId;
+  const focusTokenMatches = Boolean(pair.focusTokenAddress && pinnedPair.focusTokenAddress) && pair.focusTokenAddress?.toLowerCase() === pinnedPair.focusTokenAddress?.toLowerCase();
 
-  return (
-    pairKey === pinnedKey ||
-    idMatches ||
-    pairAddressMatches ||
-    normalizePairIdentity(pair.pair) === pinnedPair.pairIdentity
-  );
+  if (opportunityMatches || focusTokenMatches || pairAddressMatches || pairKey === pinnedKey) return true;
+  if (pair.pairAddress && pinnedPair.pairAddress) return false;
+  return idMatches || normalizePairIdentity(pair.pair) === pinnedPair.pairIdentity;
 }
 
 function getPinnedPairKey(pair: BasePair) {
-  return pair.pairAddress?.toLowerCase() ?? pair.id;
+  return pair.opportunityId ?? pair.focusTokenAddress?.toLowerCase() ?? pair.pairAddress?.toLowerCase() ?? pair.id;
 }
 
 function normalizePairIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function toNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isOptionalFiniteNumber(value: unknown) {
+  return value === undefined || isFiniteNumber(value);
+}
+
+function readStoredText(value: unknown, maximumLength: number) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return normalized ? normalized.slice(0, maximumLength) : undefined;
 }

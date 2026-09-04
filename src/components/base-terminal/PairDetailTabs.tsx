@@ -1,14 +1,20 @@
-import { useState } from "react";
-import { Copy, ExternalLink, ShieldCheck } from "lucide-react";
-import { cx, formatCompactCurrency, formatPercent } from "@/lib/format";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { AlertTriangle, Copy, ExternalLink } from "lucide-react";
+import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
 import type { DetailTab } from "@/components/base-terminal/types";
+import { useI18n } from "@/i18n/I18nProvider";
+import { localizeAgeLabel, type TranslationKey } from "@/i18n/dictionaries";
+import { getChange24h, getVolume24h } from "@/lib/base-terminal/discovery";
+import { getBaseScanAddressUrl } from "@/lib/safeUrl";
+import { MarketSignalBadges } from "@/components/base-terminal/MarketSignalBadges";
+import { AssetTradeabilityBadges } from "@/components/base-terminal/AssetTradeabilityBadges";
 
-const tabs: Array<{ id: DetailTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "risk", label: "Risk" },
-  { id: "liquidity", label: "Liquidity" },
-  { id: "activity", label: "Activity" }
+const tabs: Array<{ id: DetailTab; labelKey: TranslationKey }> = [
+  { id: "overview", labelKey: "details.overview" },
+  { id: "risk", labelKey: "details.risk" },
+  { id: "liquidity", labelKey: "details.liquidity" },
+  { id: "activity", labelKey: "details.activity" }
 ];
 
 export function PairDetailTabs({
@@ -22,50 +28,63 @@ export function PairDetailTabs({
   onTabChange: (tab: DetailTab) => void;
   providerStale: boolean;
 }) {
+  const i18n = useI18n();
   return (
-    <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel">
-      <div className="grid h-8 shrink-0 grid-cols-4 border-b border-base-line bg-base-raised">
+    <section id="risk" className="flex min-h-0 flex-col overflow-hidden border border-border-subtle bg-surface-panel">
+      <div className="grid h-10 shrink-0 grid-cols-4 border-b border-border-subtle bg-surface-raised" role="tablist" aria-label={i18n.t("details.aria")}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            id={`pair-detail-tab-${tab.id}`}
+            aria-controls={`pair-detail-panel-${tab.id}`}
+            aria-selected={activeTab === tab.id}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             onClick={() => onTabChange(tab.id)}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.id, onTabChange)}
             className={cx(
-              "h-full min-w-0 border-r border-base-line px-2 text-[11px] font-semibold uppercase tracking-[0.14em] last:border-r-0",
+              "h-full min-w-0 border-r border-border-subtle px-2 text-meta font-semibold uppercase tracking-eyebrow last:border-r-0",
               activeTab === tab.id
-                ? "bg-base-panel text-base-mint"
-                : "text-base-muted hover:text-base-text"
+                ? "bg-surface-panel text-brand-accent"
+                : "text-content-secondary hover:text-content-primary"
             )}
           >
-            {tab.label}
+            {i18n.t(tab.labelKey)}
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {renderTab(pair, activeTab, providerStale)}
+      <div id={`pair-detail-panel-${activeTab}`} role="tabpanel" aria-labelledby={`pair-detail-tab-${activeTab}`} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto p-2 outline-none">
+        {renderTab(pair, activeTab, providerStale, i18n)}
       </div>
     </section>
   );
 }
 
-function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean) {
+function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean, i18n: ReturnType<typeof useI18n>) {
+  const { t, locale, formatCompactCurrency, formatPercent } = i18n;
+  const change24h = getChange24h(pair);
+  const volume24h = getVolume24h(pair);
   if (activeTab === "overview") {
     return (
       <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2 border border-border-subtle bg-surface-interactive p-2">
+          <AssetTradeabilityBadges pair={pair} compact={false} />
+        </div>
         <div className="grid gap-2 md:grid-cols-4">
-          <OverviewCell label="Pair" value={pair.pair} />
+          <OverviewCell label={t("details.pair")} value={pair.pair} />
           <OverviewCell label="DEX" value={pair.dexName ?? pair.dex} />
-          <OverviewCell label="Chain" value={pair.chainId ?? "Base"} />
-          <OverviewCell label="Pair age" value={pair.age} />
-          <OverviewCell label="Price USD" value={pair.priceUsd} />
-          <OverviewCell label="Price native" value={pair.priceNative ?? pair.price} />
-          <OverviewCell label="FDV" value={formatOptionalCurrency(pair.fdv)} />
-          <OverviewCell label="Market cap" value={formatOptionalCurrency(pair.marketCap)} />
+          <OverviewCell label={t("details.chain")} value={pair.chainId ?? "Base"} />
+          <OverviewCell label={t("details.pairAge")} value={localizeAgeLabel(pair.age, locale)} />
+          <OverviewCell label={t("details.priceUsd")} value={pair.priceUsd} />
+          <OverviewCell label={t("details.priceNative")} value={pair.priceNative ?? pair.price} />
+          <OverviewCell label="FDV" value={formatOptionalCurrency(pair.fdv, formatCompactCurrency, t("common.noData"))} />
+          <OverviewCell label={t("details.marketCap")} value={formatOptionalCurrency(pair.marketCap, formatCompactCurrency, t("common.noData"))} />
         </div>
 
         <div className="grid gap-2 lg:grid-cols-3">
           <AddressCell
-            label="Pair address"
+            label={t("details.pairAddress")}
             value={pair.pairAddress}
             links={[
               getExternalLink("DexScreener", pair.sourceUrl),
@@ -73,12 +92,12 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
             ]}
           />
           <AddressCell
-            label="Base token address"
+            label={t("details.baseTokenAddress")}
             value={pair.baseTokenAddress}
             links={[getExternalLink("BaseScan", getBaseScanAddressUrl(pair.baseTokenAddress))]}
           />
           <AddressCell
-            label="Quote token address"
+            label={t("details.quoteTokenAddress")}
             value={pair.quoteTokenAddress}
             links={[getExternalLink("BaseScan", getBaseScanAddressUrl(pair.quoteTokenAddress))]}
           />
@@ -86,42 +105,42 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
 
         <div className="grid gap-2 md:grid-cols-4">
           <OverviewCell
-            label="5m change"
-            value={formatOptionalPercent(pair.priceChanges?.m5)}
+            label={t("details.change", { timeframe: "5m" })}
+            value={formatOptionalPercent(pair.priceChanges?.m5, formatPercent, t("common.noData"))}
             tone={getChangeTone(pair.priceChanges?.m5)}
           />
           <OverviewCell
-            label="1h change"
-            value={formatOptionalPercent(pair.priceChanges?.h1)}
+            label={t("details.change", { timeframe: "1h" })}
+            value={formatOptionalPercent(pair.priceChanges?.h1, formatPercent, t("common.noData"))}
             tone={getChangeTone(pair.priceChanges?.h1)}
           />
           <OverviewCell
-            label="6h change"
-            value={formatOptionalPercent(pair.priceChanges?.h6)}
+            label={t("details.change", { timeframe: "6h" })}
+            value={formatOptionalPercent(pair.priceChanges?.h6, formatPercent, t("common.noData"))}
             tone={getChangeTone(pair.priceChanges?.h6)}
           />
           <OverviewCell
-            label="24h change"
-            value={formatOptionalPercent(pair.priceChanges?.h24 ?? pair.change24h)}
-            tone={getChangeTone(pair.priceChanges?.h24 ?? pair.change24h)}
+            label={t("details.change", { timeframe: "24h" })}
+            value={formatOptionalPercent(change24h, formatPercent, t("common.noData"))}
+            tone={getChangeTone(change24h)}
           />
         </div>
 
         <div className="grid gap-2 md:grid-cols-4">
-          <OverviewCell label="5m volume" value={formatOptionalCompactCurrency(pair.volumes?.m5)} />
-          <OverviewCell label="1h volume" value={formatOptionalCompactCurrency(pair.volumes?.h1)} />
-          <OverviewCell label="6h volume" value={formatOptionalCompactCurrency(pair.volumes?.h6)} />
+          <OverviewCell label={t("details.volume", { timeframe: "5m" })} value={formatOptionalCompactCurrency(pair.volumes?.m5, formatCompactCurrency, t("common.noData"))} />
+          <OverviewCell label={t("details.volume", { timeframe: "1h" })} value={formatOptionalCompactCurrency(pair.volumes?.h1, formatCompactCurrency, t("common.noData"))} />
+          <OverviewCell label={t("details.volume", { timeframe: "6h" })} value={formatOptionalCompactCurrency(pair.volumes?.h6, formatCompactCurrency, t("common.noData"))} />
           <OverviewCell
-            label="24h volume"
-            value={formatOptionalCompactCurrency(pair.volumes?.h24 ?? pair.volume24h)}
+            label={t("details.volume", { timeframe: "24h" })}
+            value={formatOptionalCompactCurrency(volume24h, formatCompactCurrency, t("common.noData"))}
           />
         </div>
 
         <div className="grid gap-2 md:grid-cols-4">
-          <OverviewCell label="5m buys/sells" value={formatTxnWindow(pair.txns?.m5)} />
-          <OverviewCell label="1h buys/sells" value={formatTxnWindow(pair.txns?.h1)} />
-          <OverviewCell label="6h buys/sells" value={formatTxnWindow(pair.txns?.h6)} />
-          <OverviewCell label="24h buys/sells" value={formatTxnWindow(pair.txns?.h24)} />
+          <OverviewCell label={t("details.buysSells", { timeframe: "5m" })} value={formatTxnWindow(pair.txns?.m5, t("common.noData"))} />
+          <OverviewCell label={t("details.buysSells", { timeframe: "1h" })} value={formatTxnWindow(pair.txns?.h1, t("common.noData"))} />
+          <OverviewCell label={t("details.buysSells", { timeframe: "6h" })} value={formatTxnWindow(pair.txns?.h6, t("common.noData"))} />
+          <OverviewCell label={t("details.buysSells", { timeframe: "24h" })} value={formatTxnWindow(pair.txns?.h24, t("common.noData"))} />
         </div>
 
         <PublicSignalsPanel pair={pair} providerStale={providerStale} />
@@ -132,10 +151,10 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
   if (activeTab === "liquidity") {
     return (
       <div className="grid gap-2 md:grid-cols-4">
-        <OverviewCell label="Pool liquidity" value={pair.liquidityDetail.poolLiquidity} />
-        <OverviewCell label="LP change" value={pair.liquidityDetail.lpChange} />
-        <OverviewCell label="Depth" value={pair.liquidityDetail.depth} />
-        <OverviewCell label="Route source" value={pair.liquidityDetail.routeSource} />
+        <OverviewCell label={t("details.poolLiquidity")} value={pair.liquidityDetail.poolLiquidity} />
+        <OverviewCell label={t("details.lpChange")} value={pair.liquidityDetail.lpChange} />
+        <OverviewCell label={t("details.depth")} value={pair.liquidityDetail.depth} />
+        <OverviewCell label={t("details.routeSource")} value={pair.liquidityDetail.routeSource} />
       </div>
     );
   }
@@ -143,31 +162,22 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
   if (activeTab === "activity") {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
+        <table className="w-full min-w-[720px] border-collapse text-left text-meta">
           <thead>
-            <tr className="border-b border-base-line bg-base-elevated text-[10px] uppercase tracking-[0.12em] text-base-muted">
-              <th className="px-2 py-1.5">Time</th>
-              <th className="px-2 py-1.5">Side</th>
-              <th className="px-2 py-1.5">Amount</th>
-              <th className="px-2 py-1.5">Value</th>
-              <th className="px-2 py-1.5">Wallet</th>
+            <tr className="border-b border-border-subtle bg-surface-interactive text-meta uppercase tracking-eyebrow text-content-secondary">
+              <th className="px-2 py-2">{t("details.window")}</th>
+              <th className="px-2 py-2">{t("details.transactions")}</th>
+              <th className="px-2 py-2">{t("chart.volume")}</th>
+              <th className="px-2 py-2">{t("details.source")}</th>
             </tr>
           </thead>
           <tbody>
             {pair.activity.map((event) => (
-              <tr key={`${event.time}-${event.wallet}`} className="h-8 border-b border-base-line last:border-b-0">
-                <td className="px-2 py-1.5 font-mono text-base-muted">{event.time}</td>
-                <td
-                  className={cx(
-                    "px-2 py-1.5 font-mono uppercase",
-                    event.side === "buy" ? "text-base-mint" : "text-base-rose"
-                  )}
-                >
-                  {event.side}
-                </td>
-                <td className="px-2 py-1.5 font-mono text-base-text">{event.amount}</td>
-                <td className="px-2 py-1.5 font-mono text-base-text">{event.value}</td>
-                <td className="px-2 py-1.5 font-mono text-base-muted">{event.wallet}</td>
+              <tr key={`${event.time}-${event.wallet}`} className="h-8 border-b border-border-subtle last:border-b-0">
+                <td className="px-2 py-2 font-mono text-content-secondary">{event.time}</td>
+                <td className="px-2 py-2 font-mono text-content-primary">{event.amount}</td>
+                <td className="px-2 py-2 font-mono text-content-primary">{event.value}</td>
+                <td className="px-2 py-2 font-mono text-content-secondary">{event.wallet}</td>
               </tr>
             ))}
           </tbody>
@@ -179,60 +189,21 @@ function renderTab(pair: BasePair, activeTab: DetailTab, providerStale: boolean)
   return (
     <div className="space-y-2">
       <PublicSignalsPanel pair={pair} providerStale={providerStale} />
+      <div className="rounded-control border border-freshness-delayed/35 bg-freshness-delayed/10 p-3 text-meta leading-5 text-freshness-delayed">
+        <p className="font-semibold text-content-primary">
+          {pair.dataSource === "mock" ? t("details.demoSafetyTitle") : t("details.safetyUnavailableTitle")}
+        </p>
+        <p>
+          {pair.dataSource === "mock"
+            ? t("details.demoSafetyBody")
+            : t("details.safetyUnavailableBody")}
+        </p>
+      </div>
 
-      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr]">
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Contract Risk
-          </h3>
-          <div className="space-y-1">
-            {pair.riskChecks.slice(0, 4).map((check) => (
-              <RiskRow key={check.label} label={check.label} value={check.value} ok={check.ok} />
-            ))}
-          </div>
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Holder Concentration
-          </h3>
-          <RiskRow label="Top 10 Holders" value={pair.holders.top10} ok />
-          <RiskRow label="Top 50 Holders" value={pair.holders.top50} ok />
-          <RiskRow label="Top 100 Holders" value={pair.holders.top100} ok={pair.riskScore < 50} />
-          <RiskRow label="Active Holders (24h)" value={pair.holders.active24h} ok />
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            LP & Security
-          </h3>
-          <RiskRow label="LP Provider" value={pair.dex} ok />
-          <RiskRow label="LP Lock" value={pair.lpLock.status} ok={pair.riskScore < 50} />
-          <RiskRow label="Lock Provider" value={pair.lpLock.provider} ok />
-          <RiskRow label="Lock Expires" value={pair.lpLock.expires} ok />
-        </div>
-        <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-            Demo Risk UI
-          </h3>
-          <div className="flex items-center gap-4">
-            <div
-              className="grid h-20 w-20 place-items-center rounded-full border border-base-line"
-              style={{
-                background: `conic-gradient(rgb(var(--color-mint)) ${(100 - pair.riskScore) * 3.6}deg, rgb(var(--color-raised)) 0deg)`
-              }}
-            >
-              <div className="grid h-12 w-12 place-items-center rounded-full border border-base-line bg-base-panel">
-                <span className="font-mono text-lg font-semibold text-base-mint">
-                  {pair.riskScore}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-1 text-[11px] text-base-muted">
-              <p><span className="text-base-mint">0-30</span> Lower</p>
-              <p><span className="text-base-amber">31-60</span> Medium</p>
-              <p><span className="text-base-rose">61-100</span> Higher</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <RiskGroup title={t("details.contractChecks")} rows={pair.riskChecks.slice(0, 4).map((check) => [check.label, check.value])} />
+        <RiskGroup title={t("details.holderData")} rows={[[t("details.topHolders", { count: 10 }), pair.holders.top10], [t("details.topHolders", { count: 50 }), pair.holders.top50], [t("details.topHolders", { count: 100 }), pair.holders.top100], [t("details.activeHolders"), pair.holders.active24h]]} />
+        <RiskGroup title={t("details.lpToken")} rows={[["DEX", pair.dexName ?? pair.dex], [t("details.lpLock"), pair.lpLock.status], [t("details.lockProvider"), pair.lpLock.provider], [t("details.tax"), `${pair.taxes.buy} / ${pair.taxes.sell}`]]} />
       </div>
     </div>
   );
@@ -248,16 +219,16 @@ function OverviewCell({
   tone?: "default" | "mint" | "rose";
 }) {
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
         className={cx(
-          "mt-1 font-mono text-[13px] font-semibold",
+          "mt-1 font-mono text-data font-semibold",
           tone === "mint"
-            ? "text-base-mint"
+            ? "text-brand-accent"
             : tone === "rose"
-              ? "text-base-rose"
-              : "text-base-text"
+              ? "text-market-negative"
+              : "text-content-primary"
         )}
       >
         {value}
@@ -275,18 +246,19 @@ function AddressCell({
   value: string | undefined;
   links: Array<{ label: string; href: string } | undefined>;
 }) {
+  const { t } = useI18n();
   const usableLinks = links.filter((link): link is { label: string; href: string } =>
     Boolean(link?.href)
   );
 
   return (
-    <div className="min-w-0 border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="min-w-0 border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
-        className="mt-1 break-all font-mono text-[11px] font-semibold text-base-text"
+        className="mt-1 break-all font-mono text-meta font-semibold text-content-primary"
         title={value}
       >
-        {value ?? "N/A"}
+        {value ?? t("common.noData")}
       </p>
       {value || usableLinks.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-1">
@@ -302,12 +274,22 @@ function AddressCell({
 
 function CopyValueButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
+  const { t } = useI18n();
+
+  useEffect(() => () => {
+    if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+  }, []);
 
   async function copyValue() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => {
+        resetTimerRef.current = undefined;
+        setCopied(false);
+      }, 1200);
     } catch {
       setCopied(false);
     }
@@ -317,11 +299,11 @@ function CopyValueButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       onClick={copyValue}
-      className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-panel px-1.5 font-mono text-[10px] text-base-muted hover:border-base-mint hover:text-base-mint"
-      aria-label={`Copy ${label}`}
+      className="inline-flex h-5 items-center gap-1 border border-border-subtle bg-surface-panel px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary"
+      aria-label={t("details.copyAria", { label })}
     >
       <Copy size={10} aria-hidden="true" />
-      {copied ? "Copied" : "Copy"}
+      {copied ? t("details.copied") : t("details.copy")}
     </button>
   );
 }
@@ -331,8 +313,8 @@ function ExternalDataLink({ href, label }: { href: string; label: string }) {
     <a
       href={href}
       target="_blank"
-      rel="noreferrer"
-      className="inline-flex h-5 items-center gap-1 border border-base-line bg-base-panel px-1.5 font-mono text-[10px] text-base-muted hover:border-base-mint hover:text-base-mint"
+      rel="noopener noreferrer"
+      className="inline-flex h-5 items-center gap-1 border border-border-subtle bg-surface-panel px-2 font-mono text-meta text-content-secondary hover:border-border-strong hover:text-content-primary"
     >
       <ExternalLink size={10} aria-hidden="true" />
       {label}
@@ -347,87 +329,39 @@ function PublicSignalsPanel({
   pair: BasePair;
   providerStale: boolean;
 }) {
-  const signals = getPublicMarketSignals(pair, providerStale);
+  const { t } = useI18n();
 
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
+    <div className="border border-border-subtle bg-surface-interactive p-2" data-provider-stale={providerStale || undefined}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-base-muted">
-          Public data signals
+        <p className="text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
+          {t("details.publicSignals")}
         </p>
-        <span className="font-mono text-[10px] text-base-muted">Read-only heuristics</span>
+        <span className="font-mono text-meta text-content-secondary">{t("details.heuristics")}</span>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {signals.map((signal) => (
-          <span
-            key={signal}
-            className="border border-base-amber/40 bg-base-amber/10 px-1.5 py-0.5 font-mono text-[10px] text-base-amber"
-          >
-            {signal}
-          </span>
-        ))}
-      </div>
-      <p className="mt-2 text-[10px] text-base-muted">
-        These signals use displayed public market data only. They are not financial advice.
+      <MarketSignalBadges pair={pair} maximumMarketBadges={2} />
+      <AssetTradeabilityBadges pair={pair} compact={false} className="mt-1" />
+      <p className="mt-2 text-meta text-content-secondary">
+        {t("details.signalsBody")}
       </p>
     </div>
   );
-}
-
-function getPublicMarketSignals(pair: BasePair, providerStale: boolean) {
-  const signals: string[] = [];
-  const volumeLiquidityRatio = pair.liquidity > 0 ? pair.volume24h / pair.liquidity : 0;
-  const shortTermMove = Math.max(
-    Math.abs(pair.priceChanges?.m5 ?? 0),
-    Math.abs(pair.priceChanges?.h1 ?? 0),
-    Math.abs(pair.priceChanges?.h6 ?? 0)
-  );
-
-  if (pair.stale || providerStale) {
-    signals.push("Stale provider data");
-  }
-
-  if (pair.liquidity > 0 && pair.liquidity < 50_000) {
-    signals.push("Low liquidity");
-  }
-
-  if (volumeLiquidityRatio >= 2) {
-    signals.push("High volume versus liquidity");
-  }
-
-  if (pair.ageMinutes > 0 && pair.ageMinutes <= 24 * 60) {
-    signals.push("Very new pair");
-  }
-
-  if (!pair.pairCreatedAt && pair.ageMinutes >= 999_999) {
-    signals.push("Missing age data");
-  }
-
-  if (shortTermMove >= 15) {
-    signals.push("Large short-term move");
-  }
-
-  return signals.length > 0 ? signals : ["No notable public signal"];
 }
 
 function getExternalLink(label: string, href: string | undefined) {
   return href ? { label, href } : undefined;
 }
 
-function getBaseScanAddressUrl(address: string | undefined) {
-  return address ? `https://basescan.org/address/${address}` : undefined;
+function formatOptionalCurrency(value: number | undefined, formatter: (value: number) => string, fallback: string) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? formatter(value) : fallback;
 }
 
-function formatOptionalCurrency(value: number | undefined) {
-  return value && value > 0 ? formatCompactCurrency(value) : "N/A";
+function formatOptionalCompactCurrency(value: number | undefined, formatter: (value: number) => string, fallback: string) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? formatter(value) : fallback;
 }
 
-function formatOptionalCompactCurrency(value: number | undefined) {
-  return typeof value === "number" && value > 0 ? formatCompactCurrency(value) : "N/A";
-}
-
-function formatOptionalPercent(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? formatPercent(value) : "N/A";
+function formatOptionalPercent(value: number | undefined, formatter: (value: number) => string, fallback: string) {
+  return typeof value === "number" && Number.isFinite(value) ? formatter(value) : fallback;
 }
 
 function getChangeTone(value: number | undefined) {
@@ -438,20 +372,43 @@ function getChangeTone(value: number | undefined) {
   return value > 0 ? "mint" : "rose";
 }
 
-function formatTxnWindow(window: { buys: number; sells: number } | undefined) {
-  return window ? `${window.buys} / ${window.sells}` : "N/A";
+function formatTxnWindow(window: { buys: number; sells: number } | undefined, fallback: string) {
+  return window ? `${window.buys} / ${window.sells}` : fallback;
 }
 
-function RiskRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+function RiskGroup({ title, rows }: { title: string; rows: Array<[string, string]> }) {
   return (
-    <div className="grid grid-cols-[1fr_auto_18px] items-center gap-2 border-b border-base-line py-1 text-[11px] last:border-b-0">
-      <span className="text-base-text">{label}</span>
-      <span className="font-mono text-base-text">{value}</span>
-      <ShieldCheck
+    <div className="rounded-control bg-surface-interactive p-3">
+      <h3 className="mb-2 text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">{title}</h3>
+      {rows.map(([label, value]) => <RiskRow key={label} label={label} value={value} />)}
+    </div>
+  );
+}
+
+function RiskRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto_18px] items-center gap-2 border-b border-border-subtle py-1 text-meta last:border-b-0">
+      <span className="text-content-primary">{label}</span>
+      <span className="font-mono text-content-primary">{value}</span>
+      <AlertTriangle
         size={13}
-        className={ok ? "text-base-mint" : "text-base-amber"}
+        className="text-freshness-delayed"
         aria-hidden="true"
       />
     </div>
   );
+}
+
+function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentTab: DetailTab, onTabChange: (tab: DetailTab) => void) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+  event.preventDefault();
+  const currentIndex = tabs.findIndex((tab) => tab.id === currentTab);
+  const nextIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? tabs.length - 1
+      : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  onTabChange(nextTab.id);
+  window.requestAnimationFrame(() => document.getElementById(`pair-detail-tab-${nextTab.id}`)?.focus());
 }

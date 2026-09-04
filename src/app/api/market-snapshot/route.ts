@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const mode = resolveUrlMarketDataMode(searchParams.get("data"));
-    const snapshot = await getMarketTerminalSnapshot(mode);
+    const snapshot = await getMarketTerminalSnapshot(mode, { force: searchParams.get("onchain") === "1" });
 
     return NextResponse.json(snapshot, {
       headers: MARKET_SNAPSHOT_HEADERS

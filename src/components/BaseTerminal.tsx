@@ -1,356 +1,438 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
-} from "react";
+import { BriefcaseBusiness, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { AlertCenter } from "@/components/base-terminal/AlertCenter";
 import { useChartData } from "@/components/base-terminal/hooks/useChartData";
-import { useRadarFilters } from "@/components/base-terminal/hooks/useRadarFilters";
 import { useSelectedPairState } from "@/components/base-terminal/hooks/useSelectedPairState";
 import { PairDetailTabs } from "@/components/base-terminal/PairDetailTabs";
-import { OpportunityFeed, PinnedPairsPanel } from "@/components/base-terminal/RadarFeedColumn";
-import { RadarFilterPanel } from "@/components/base-terminal/RadarFilters";
+import {
+  MarketActivityPanel
+} from "@/components/base-terminal/PulseTerminalPanels";
 import { SelectedPairPanel } from "@/components/base-terminal/SelectedPairPanel";
-import { SwapTicket } from "@/components/base-terminal/SwapPreviewPanel";
+import { TradeDock } from "@/components/base-terminal/TradeDock";
+import { LiveMarketTape, MarketMatrix, PinnedMarketGrid } from "@/components/base-terminal/TerminalMarketSurface";
+import { LiveMarketWall, LivePulseRail } from "@/components/base-terminal/LiveMarketWall";
+import { ContextInspector } from "@/components/base-terminal/ContextInspector";
+import { MarketSignalProvider } from "@/components/base-terminal/MarketSignalBadges";
+import { TradeabilityProvider } from "@/components/base-terminal/AssetTradeabilityBadges";
 import type { DetailTab } from "@/components/base-terminal/types";
 import {
   useTerminalSearch,
   type ProviderHealthState
 } from "@/components/TerminalSearchContext";
 import type { MarketTerminalSnapshot } from "@/data/providers";
+import { getChartCacheKey, getShareablePairKey } from "@/lib/base-terminal/pairs";
+import { coalescePendingOpportunityIds, getSnapshotRefreshCadence, shouldAutoApplyPendingUpdate, shouldQueueMarketUpdate, UPDATE_AUTO_APPLY_QUIET_MS } from "@/lib/base-terminal/liveUpdates";
 import {
-  DEFAULT_RADAR_STATE,
-  pairMatchesRadarState,
-  pinnedPairMatchesRadarState,
-  sortPinnedPairs,
-  sortRadarPairs
-} from "@/lib/base-terminal/radar";
-import { getChartCacheKey } from "@/lib/base-terminal/pairs";
+  diffMarketSnapshots,
+  getChangedPairIds,
+  mergePulseSignals,
+  type PulseSignal
+} from "@/lib/base-terminal/pulse";
 import {
   buildProviderHealth,
   preserveSelectedPair,
+  shouldAcceptMarketSnapshot,
   shouldKeepCurrentSnapshotOnRefresh
 } from "@/lib/base-terminal/providerHealth";
+import { cx } from "@/lib/format";
 import type { BasePair } from "@/types/baseTerminal";
+import { useI18n } from "@/i18n/I18nProvider";
+import { APP_NAME } from "@/lib/appInfo";
+import { orientPairToOpportunity } from "@/lib/base-terminal/opportunityModel";
+import { useOverlayManager } from "@/components/OverlayManager";
+import { StatePanel } from "@/components/ui/CalmComponents";
 
-const SNAPSHOT_REFRESH_MS = 60_000;
+type PendingSnapshot = {
+  snapshot: MarketTerminalSnapshot;
+  signals: PulseSignal[];
+  changedPairIds: string[];
+};
+
+type TerminalView = "terminal" | "markets" | "watchlist" | "portfolio" | "alerts" | "workspace";
 
 export function BaseTerminal({
   data,
-  initialPairParam
+  initialPairParam,
+  initialViewParam
 }: {
   data: MarketTerminalSnapshot;
   initialPairParam?: string;
+  initialViewParam?: string;
 }) {
+  const router = useRouter();
+  const { t } = useI18n();
+  const overlay = useOverlayManager();
+  const openOverlay = overlay.open;
   const {
+    pinnedPairs,
     registerPairs,
     registerProviderHealth,
     registerSelectedPair,
     registerSelectPairHandler,
-    pinnedPairs,
     isPairPinned,
-    togglePinnedPair,
-    unpinPinnedPair
+    togglePinnedPair
   } = useTerminalSearch();
   const [snapshotData, setSnapshotData] = useState(data);
-  const [activeTab, setActiveTab] = useState<DetailTab>("risk");
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [amount, setAmount] = useState("0.10");
-  const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() =>
-    buildProviderHealth(data, "idle")
-  );
-  const { radarState, setRadarState, radarFiltersActive } = useRadarFilters();
+  const [tradeSide, setTradeSide] = useState<"buy" | "sell">("buy");
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() => buildProviderHealth(data, "idle"));
+  const [pulseSignals, setPulseSignals] = useState<PulseSignal[]>(data.recentSignals);
+  const [pendingSnapshot, setPendingSnapshot] = useState<PendingSnapshot>();
+  const [interactionLocked, setInteractionLocked] = useState(false);
+  const [view, setView] = useState<TerminalView>(() => normalizeTerminalView(initialViewParam));
   const snapshotRef = useRef(snapshotData);
+  const selectedPairRef = useRef<BasePair | undefined>(undefined);
+  const activeOverlayTypeRef = useRef(overlay.active.type);
+  activeOverlayTypeRef.current = overlay.active.type;
+  const interactionLockedRef = useRef(false);
+  const watchedPairIdsRef = useRef<string[]>([]);
+  const snapshotRefreshInFlightRef = useRef(false);
+  const snapshotRefreshRequestIdRef = useRef(0);
+  const refreshAbortRef = useRef<AbortController | undefined>(undefined);
+  const interactionLocksRef = useRef(new Set<string>());
+  const setInteractionLock = useCallback((reason: string, locked: boolean) => {
+    if (locked) interactionLocksRef.current.add(reason);
+    else interactionLocksRef.current.delete(reason);
+    setInteractionLocked(interactionLocksRef.current.size > 0);
+  }, []);
   const { selectedPair, handleSelectPairById } = useSelectedPairState({
     initialSnapshot: data,
     snapshotData,
     snapshotRef,
     initialPairParam
   });
-  const selectedPairRef = useRef<BasePair | undefined>(undefined);
-  const snapshotRefreshInFlightRef = useRef(false);
-  const snapshotRefreshRequestIdRef = useRef(0);
   const { chartOverrides, chartRefreshStatus, refreshPairChart } = useChartData(snapshotRef);
+  const selectedPairWithLiveChart = useMemo(() => {
+    if (!selectedPair) return undefined;
+    const hydrated = { ...selectedPair, ...chartOverrides[getChartCacheKey(selectedPair)] };
+    const opportunity = snapshotData.opportunities.find((item) => item.id === selectedPair.opportunityId);
+    const oriented = orientPairToOpportunity(hydrated, opportunity);
+    const displayPrice = opportunity?.canonicalPrice.value ?? opportunity?.observedPriceUsd?.value;
+    return displayPrice === undefined ? oriented : { ...oriented, priceUsdValue: displayPrice, priceUsd: formatUsd(displayPrice), price: formatUsd(displayPrice), qualityBand: opportunity?.qualityBand, liquidityState: opportunity?.liquidityState };
+  }, [chartOverrides, selectedPair, snapshotData.opportunities]);
+  const selectedOpportunity = useMemo(() => snapshotData.opportunities.find((item) => item.id === selectedPairWithLiveChart?.opportunityId), [selectedPairWithLiveChart?.opportunityId, snapshotData.opportunities]);
+  const viewTitle = useMemo(() => {
+    if (view === "markets") return t("route.marketsTitle");
+    if (view === "watchlist") return t("route.watchlistTitle");
+    if (view === "alerts") return t("route.alertsTitle");
+    if (view === "portfolio") return t("route.portfolioTitle");
+    if (view === "workspace") return t("route.pairTitle", { pair: selectedPairWithLiveChart?.pair ?? "Base" });
+    return t("route.terminalTitle");
+  }, [selectedPairWithLiveChart?.pair, t, view]);
 
   useEffect(() => {
-    setSnapshotData(data);
-    setProviderHealth(buildProviderHealth(data, "idle"));
-  }, [data]);
+    document.title = `${viewTitle} | ${APP_NAME}`;
+  }, [viewTitle]);
+
+  const navigateView = useCallback((nextView: TerminalView) => {
+    setView(nextView);
+    if (typeof window === "undefined") return;
+    const nextUrl = new URL(window.location.href);
+    if (nextView === "terminal") nextUrl.searchParams.delete("view");
+    else nextUrl.searchParams.set("view", nextView);
+    router.replace(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
+  }, [router]);
+
+  const openPair = useCallback((pairId: string) => {
+    handleSelectPairById(pairId);
+    const nextPair = snapshotRef.current.allPairs.find((pair) => pair.id === pairId);
+    if (!nextPair || typeof window === "undefined") return;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("pair", getShareablePairKey(nextPair));
+    router.push(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
+    overlay.open("market_inspector", { pairId: nextPair.id });
+  }, [handleSelectPairById, overlay, router]);
+
+  const openTrade = useCallback((pair: BasePair, side: "buy" | "sell") => {
+    handleSelectPairById(pair.id);
+    const opportunity = snapshotRef.current.opportunities.find((item) => item.id === pair.opportunityId);
+    // Mock mode exercises the disabled-by-default transaction UI; live non-ranked opportunities remain read-only.
+    if (!opportunity?.rankingEligibility && !(snapshotRef.current.mode === "mock" && pair.dataSource === "mock")) {
+      overlay.open("market_inspector", { pairId: pair.id, tab: "overview" });
+      return;
+    }
+    setTradeSide(side);
+    overlay.open("trade_drawer", { pairId: pair.id, side });
+  }, [handleSelectPairById, overlay]);
+
+  const openWorkspace = useCallback((pair: BasePair) => {
+    handleSelectPairById(pair.id);
+    setView("workspace");
+    overlay.closeAll();
+    if (typeof window === "undefined") return;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("view", "workspace");
+    nextUrl.searchParams.set("pair", getShareablePairKey(pair));
+    router.push(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, { scroll: false });
+  }, [handleSelectPairById, overlay, router]);
 
   useEffect(() => {
     snapshotRef.current = snapshotData;
   }, [snapshotData]);
 
-  const selectedPairWithChart = useMemo(
-    () =>
-      selectedPair
-        ? {
-            ...selectedPair,
-            ...chartOverrides[getChartCacheKey(selectedPair)]
-          }
-        : undefined,
-    [chartOverrides, selectedPair]
-  );
-  const amountNumber = Number.parseFloat(amount);
-  const cleanAmount = Number.isFinite(amountNumber) && amountNumber > 0 ? amountNumber : 0;
-  const filteredNewPairs = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.newPairs.filter((pair) => pairMatchesRadarState(pair, radarState, isPairPinned)),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.newPairs]
-  );
-  const filteredVolumeInflows = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.volumeInflows.filter((pair) =>
-          pairMatchesRadarState(pair, radarState, isPairPinned)
-        ),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.volumeInflows]
-  );
-  const filteredMomentumPairs = useMemo(
-    () =>
-      sortRadarPairs(
-        snapshotData.momentumPairs.filter((pair) =>
-          pairMatchesRadarState(pair, radarState, isPairPinned)
-        ),
-        radarState.sort
-      ),
-    [isPairPinned, radarState, snapshotData.momentumPairs]
-  );
-  const filteredPinnedPairs = useMemo(
-    () =>
-      sortPinnedPairs(
-        pinnedPairs.filter((pair) => pinnedPairMatchesRadarState(pair, radarState)),
-        radarState.sort
-      ),
-    [pinnedPairs, radarState]
-  );
-  const selectedPairOutsideFilter = selectedPairWithChart
-    ? !pairMatchesRadarState(selectedPairWithChart, radarState, isPairPinned)
-    : false;
+  useEffect(() => {
+    const nextView = normalizeTerminalView(initialViewParam);
+    setView(nextView);
+  }, [initialPairParam, initialViewParam]);
 
-  const refreshProviderSnapshot = useCallback(async () => {
-    if (snapshotRefreshInFlightRef.current) {
-      return;
-    }
+  useEffect(() => {
+    if (!initialPairParam || view === "workspace" || normalizeTerminalView(initialViewParam) === "workspace") return;
+    if (activeOverlayTypeRef.current !== "none") return;
+    openOverlay("market_inspector");
+  }, [initialPairParam, initialViewParam, openOverlay, view]);
+
+  useEffect(() => {
+    watchedPairIdsRef.current = pinnedPairs
+      .map((pair) => pair.currentPairId ?? pair.id)
+      .filter((id): id is string => Boolean(id));
+  }, [pinnedPairs]);
+
+  useEffect(() => {
+    interactionLockedRef.current = interactionLocked;
+  }, [interactionLocked]);
+
+  useEffect(() => {
+    setInteractionLock("overlay", overlay.active.type !== "none");
+    return () => setInteractionLock("overlay", false);
+  }, [overlay.active.type, setInteractionLock]);
+
+  useEffect(() => {
+    setSnapshotData(data);
+    snapshotRef.current = data;
+    setPulseSignals((current) => mergePulseSignals(current, data.recentSignals));
+    setProviderHealth(buildProviderHealth(data, "idle"));
+  }, [data]);
+
+  const applySnapshot = useCallback((candidate: PendingSnapshot) => {
+    const current = snapshotRef.current;
+    const next = preserveSelectedPair(candidate.snapshot, selectedPairRef.current);
+    const events = candidate.signals.length > 0
+      ? candidate.signals
+      : diffMarketSnapshots(current, next, { watchedPairIds: watchedPairIdsRef.current });
+    snapshotRef.current = next;
+    setSnapshotData(next);
+    setPulseSignals((existing) => mergePulseSignals(existing, events));
+    setPendingSnapshot(undefined);
+    setProviderHealth(buildProviderHealth(next, "idle"));
+  }, []);
+
+  const refreshProviderSnapshot = useCallback(async (forceOnchain = false) => {
+    if (snapshotRefreshInFlightRef.current) return;
 
     const requestId = snapshotRefreshRequestIdRef.current + 1;
     snapshotRefreshRequestIdRef.current = requestId;
     snapshotRefreshInFlightRef.current = true;
-    setProviderHealth((current) =>
-      current
-        ? { ...current, status: "refreshing", failureReason: undefined }
-        : buildProviderHealth(snapshotRef.current, "refreshing")
-    );
+    refreshAbortRef.current?.abort();
+    const abortController = new AbortController();
+    refreshAbortRef.current = abortController;
+    setProviderHealth((current) => current
+      ? { ...current, status: "refreshing", failureReason: undefined }
+      : buildProviderHealth(snapshotRef.current, "refreshing"));
 
     try {
       const mode = snapshotRef.current.mode === "dexscreener" ? "dexscreener" : "mock";
-      const response = await fetch(`/api/market-snapshot?data=${mode}`, {
-        cache: "no-store"
+      const response = await fetch(`/api/market-snapshot?data=${mode}${forceOnchain ? "&onchain=1" : ""}`, {
+        cache: "no-store",
+        signal: abortController.signal
       });
-
-      if (!response.ok) {
-        throw new Error("Snapshot refresh failed");
-      }
-
+      if (!response.ok) throw new Error("Snapshot refresh failed");
       const nextSnapshot = (await response.json()) as MarketTerminalSnapshot;
-
-      if (snapshotRefreshRequestIdRef.current !== requestId) {
+      if (snapshotRefreshRequestIdRef.current !== requestId) return;
+      if (!shouldAcceptMarketSnapshot(snapshotRef.current, nextSnapshot)) {
+        setProviderHealth(buildProviderHealth(snapshotRef.current, "idle"));
         return;
       }
-
       if (shouldKeepCurrentSnapshotOnRefresh(snapshotRef.current, nextSnapshot)) {
         throw new Error("Provider returned fallback-only refresh");
       }
 
-      const snapshotWithSelection = preserveSelectedPair(nextSnapshot, selectedPairRef.current);
-      setSnapshotData(snapshotWithSelection);
-      setProviderHealth(buildProviderHealth(snapshotWithSelection, "idle"));
+      const changedPairIds = getChangedPairIds(snapshotRef.current, nextSnapshot);
+      const changedOpportunityIds = coalescePendingOpportunityIds([], changedPairIds.map((pairId) => nextSnapshot.opportunities.find((opportunity) => opportunity.poolMarketIds.includes(pairId))?.id ?? pairId));
+      const signals = mergePulseSignals(nextSnapshot.recentSignals, diffMarketSnapshots(snapshotRef.current, nextSnapshot, {
+        watchedPairIds: watchedPairIdsRef.current
+      }));
+      const candidate = { snapshot: nextSnapshot, signals, changedPairIds: changedOpportunityIds };
+      if (shouldQueueMarketUpdate(changedPairIds.length, interactionLockedRef.current)) {
+        setPendingSnapshot((current) => ({
+          snapshot: candidate.snapshot,
+          signals: mergePulseSignals(current?.signals ?? [], candidate.signals),
+          changedPairIds: coalescePendingOpportunityIds(current?.changedPairIds ?? [], candidate.changedPairIds)
+        }));
+        setProviderHealth(buildProviderHealth(nextSnapshot, "idle"));
+      } else {
+        applySnapshot(candidate);
+      }
     } catch {
+      if (abortController.signal.aborted) return;
       if (snapshotRefreshRequestIdRef.current === requestId) {
-        setProviderHealth((current) =>
-          current
-            ? {
-                ...current,
-                status: "failed",
-                stale: true,
-                failureReason: "Refresh failed; using last good data."
-              }
-            : buildProviderHealth(
-                snapshotRef.current,
-                "failed",
-                "Refresh failed; using last good data."
-              )
-        );
+        setProviderHealth((current) => current
+          ? { ...current, status: "failed", stale: true, failureReason: "Refresh failed; using last good data." }
+          : buildProviderHealth(snapshotRef.current, "failed", "Refresh failed; using last good data."));
       }
     } finally {
-      if (snapshotRefreshRequestIdRef.current === requestId) {
-        snapshotRefreshInFlightRef.current = false;
-      }
+      if (snapshotRefreshRequestIdRef.current === requestId) snapshotRefreshInFlightRef.current = false;
     }
-  }, []);
+  }, [applySnapshot]);
+
+  useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") return;
+    const source = new EventSource("/api/opportunity-stream");
+    const handleConfirmedPool = () => void refreshProviderSnapshot(true);
+    source.addEventListener("pool_confirmed", handleConfirmedPool);
+    return () => {
+      source.removeEventListener("pool_confirmed", handleConfirmedPool);
+      source.close();
+    };
+  }, [refreshProviderSnapshot, snapshotData.mode]);
+
+  useEffect(() => {
+    if (!pendingSnapshot || !shouldAutoApplyPendingUpdate({ interactionLocked, overlayOpen: overlay.active.type !== "none", quietForMs: UPDATE_AUTO_APPLY_QUIET_MS })) return;
+    const timeoutId = window.setTimeout(() => applySnapshot(pendingSnapshot), UPDATE_AUTO_APPLY_QUIET_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [applySnapshot, interactionLocked, overlay.active.type, pendingSnapshot]);
 
   useEffect(() => {
     registerPairs(snapshotData.allPairs);
-
     return () => registerPairs([]);
-  }, [snapshotData.allPairs, registerPairs]);
+  }, [registerPairs, snapshotData.allPairs]);
 
   useEffect(() => {
     registerProviderHealth(providerHealth);
-
     return () => registerProviderHealth(undefined);
   }, [providerHealth, registerProviderHealth]);
 
   useEffect(() => {
-    registerSelectedPair(selectedPairWithChart?.id);
-
+    registerSelectedPair(selectedPairWithLiveChart?.id);
     return () => registerSelectedPair(undefined);
-  }, [registerSelectedPair, selectedPairWithChart?.id]);
+  }, [registerSelectedPair, selectedPairWithLiveChart?.id]);
 
   useEffect(() => {
-    selectedPairRef.current = selectedPairWithChart;
-  }, [selectedPairWithChart]);
+    selectedPairRef.current = selectedPairWithLiveChart;
+  }, [selectedPairWithLiveChart]);
 
   useEffect(() => {
-    registerSelectPairHandler(handleSelectPairById);
-
+    registerSelectPairHandler(openPair);
     return () => registerSelectPairHandler(undefined);
-  }, [handleSelectPairById, registerSelectPairHandler]);
+  }, [openPair, registerSelectPairHandler]);
 
   useEffect(() => {
-    if (!selectedPair) {
-      return;
-    }
+    if (selectedPair) void refreshPairChart(selectedPair);
+  }, [refreshPairChart, selectedPair, view]);
 
-    void refreshPairChart(selectedPair);
-  }, [refreshPairChart, selectedPair]);
+  const pinnedMarketPairs = useMemo(() => snapshotData.allPairs.filter(isPairPinned).slice(0, 4).map((pair) => ({ ...pair, ...chartOverrides[getChartCacheKey(pair)] })), [chartOverrides, isPairPinned, snapshotData.allPairs]);
 
   useEffect(() => {
-    if (snapshotData.mode !== "dexscreener") {
-      return;
-    }
+    if (view !== "terminal" && view !== "watchlist") return;
+    let active = true;
+    void (async () => {
+      for (const pair of snapshotRef.current.allPairs.filter(isPairPinned).slice(0, 4)) {
+        if (!active) return;
+        if (!chartOverrides[getChartCacheKey(pair)]?.chartCandles) await refreshPairChart(pair);
+      }
+    })();
+    return () => { active = false; };
+  }, [chartOverrides, isPairPinned, refreshPairChart, view]);
 
-    const intervalId = window.setInterval(() => {
-      void refreshProviderSnapshot();
-    }, SNAPSHOT_REFRESH_MS);
-
-    return () => window.clearInterval(intervalId);
+  useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") return;
+    let timeoutId: number | undefined;
+    let active = true;
+    const schedule = (delay?: number) => {
+      if (!active) return;
+      const cadence = getSnapshotRefreshCadence(document.visibilityState === "visible" ? "visible" : "hidden");
+      timeoutId = window.setTimeout(async () => {
+        await refreshProviderSnapshot();
+        schedule();
+      }, delay ?? cadence);
+    };
+    const handleVisibility = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      schedule(document.visibilityState === "visible" ? 750 : getSnapshotRefreshCadence("hidden"));
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    schedule();
+    return () => {
+      active = false;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      refreshAbortRef.current?.abort();
+    };
   }, [refreshProviderSnapshot, snapshotData.mode]);
 
-  const estimatedOutput = useMemo(() => {
-    if (!selectedPairWithChart) {
-      return 0;
-    }
+  useEffect(() => {
+    if (snapshotData.mode !== "dexscreener") return;
+    const handleOnline = () => void refreshProviderSnapshot();
+    const handleOffline = () => setProviderHealth((current) => current
+      ? { ...current, status: "failed", stale: true, failureReason: "Offline; using last good data." }
+      : buildProviderHealth(snapshotRef.current, "failed", "Offline; using last good data."));
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [refreshProviderSnapshot, snapshotData.mode]);
 
-    const base = selectedPairWithChart.liquidity / Math.max(selectedPairWithChart.riskScore, 1);
-    return cleanAmount * base * selectedPairWithChart.volumeMultiple;
-  }, [cleanAmount, selectedPairWithChart]);
-
-  if (!selectedPairWithChart) {
+  if (!selectedPairWithLiveChart) {
     return (
-      <main className="min-h-[calc(100vh-40px)] w-full overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
-        <section className="border border-base-line bg-base-panel p-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-muted">
-            Mergen.finance
-          </p>
-          <p className="mt-2 font-mono text-sm text-base-text">
-            No demo pairs are available from the active read-only provider.
-          </p>
-        </section>
+      <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] scroll-mt-16 bg-surface-canvas p-4 outline-none">
+        <StatePanel kind="unavailable" className="mx-auto max-w-3xl" title={t("terminal.unavailableTitle")} body={t("terminal.unavailableBody")} />
       </main>
     );
   }
 
-  return (
-    <main className="flex min-h-[calc(100vh-40px)] w-full flex-col overflow-x-hidden bg-base-black p-2 xl:h-[calc(100vh-40px)] xl:min-h-0 xl:overflow-hidden">
-      {snapshotData.fallbackReason ? (
-        <div className="mb-2 shrink-0 border border-base-amber/45 bg-base-amber/10 px-2 py-1.5 font-mono text-[10px] tracking-[0.12em] text-base-amber">
-          {snapshotData.fallbackReason}
-        </div>
-      ) : null}
-      <section className="grid min-w-0 grid-cols-1 gap-2.5 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_400px] xl:overflow-hidden 2xl:grid-cols-[300px_minmax(0,1fr)_410px]">
-        <aside className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[auto_minmax(76px,0.55fr)_repeat(3,minmax(0,1fr))] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
-          <RadarFilterPanel
-            state={radarState}
-            onChange={setRadarState}
-            onReset={() => setRadarState(DEFAULT_RADAR_STATE)}
-          />
-          <PinnedPairsPanel
-            pairs={filteredPinnedPairs}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            onUnpin={unpinPinnedPair}
-            filtersActive={radarFiltersActive}
-          />
-          <OpportunityFeed
-            id="new-pairs"
-            title="New Pairs"
-            marker="A"
-            kind="new"
-            pairs={filteredNewPairs}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            isPairPinned={isPairPinned}
-            onTogglePin={togglePinnedPair}
-          />
-          <OpportunityFeed
-            title="Volume Inflow"
-            marker="B"
-            kind="inflow"
-            pairs={filteredVolumeInflows}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            isPairPinned={isPairPinned}
-            onTogglePin={togglePinnedPair}
-          />
-          <OpportunityFeed
-            title="Momentum"
-            marker="C"
-            kind="momentum"
-            pairs={filteredMomentumPairs}
-            showFallbackLabels={snapshotData.mode === "dexscreener"}
-            selectedPairId={selectedPairWithChart.id}
-            onSelect={handleSelectPairById}
-            isPairPinned={isPairPinned}
-            onTogglePin={togglePinnedPair}
-          />
-        </aside>
+  const inspectorOpen = overlay.active.type === "market_inspector";
+  const marketBoard = <MarketMatrix snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} onInteractionChange={(locked) => setInteractionLock("market-board", locked)} watchlistOnly={view === "watchlist"} />;
+  return <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] w-full scroll-mt-16 overflow-x-hidden bg-surface-canvas px-3 py-3 outline-none sm:px-4 lg:px-6" data-testid="pulse-terminal"><h1 className="sr-only">{viewTitle}</h1>
+    <MarketSignalProvider snapshot={snapshotData}><TradeabilityProvider><div className="mx-auto max-w-[2200px] space-y-3">
+      {snapshotData.fallbackReason ? <div className="rounded-card bg-freshness-delayed/10 px-3 py-2 text-meta text-freshness-delayed">{t("terminal.unavailableBody")}</div> : null}
 
-        <section className="min-w-0 space-y-2 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(132px,0.28fr)] xl:gap-2 xl:space-y-0 xl:overflow-hidden">
-          <SelectedPairPanel
-            pair={selectedPairWithChart}
-            marketDataMode={snapshotData.mode}
-            outsideCurrentFilter={selectedPairOutsideFilter}
-            chartRefreshStatus={
-              chartRefreshStatus[getChartCacheKey(selectedPairWithChart)] ?? "idle"
-            }
-            onRefreshChart={refreshPairChart}
-          />
-          <PairDetailTabs
-            pair={selectedPairWithChart}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            providerStale={providerHealth.stale}
-          />
-        </section>
+      {view === "terminal" ? <><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} delayed={providerHealth.stale} pendingUpdateCount={pendingSnapshot?.changedPairIds.length} onApplyUpdates={pendingSnapshot ? () => applySnapshot(pendingSnapshot) : undefined} /><LivePulseRail signals={pulseSignals} onSelect={openPair} onInteractionChange={(locked) => setInteractionLock("pulse-rail", locked)} /><LiveMarketWall snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} onInteractionChange={(locked) => setInteractionLock("live-wall", locked)} /><section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")} data-testid="terminal-workspace"><div className="min-w-0">{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section></> : null}
 
-        <SwapTicket
-          pair={selectedPairWithChart}
-          marketDataMode={snapshotData.mode}
-          amount={amount}
-          onAmountChange={setAmount}
-          estimatedOutput={estimatedOutput}
-        />
-      </section>
-    </main>
-  );
+      {view === "markets" ? <section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")}><div className="min-w-0 space-y-3"><LiveMarketTape snapshot={snapshotData} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} delayed={providerHealth.stale} pendingUpdateCount={pendingSnapshot?.changedPairIds.length} onApplyUpdates={pendingSnapshot ? () => applySnapshot(pendingSnapshot) : undefined} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
+
+      {view === "watchlist" ? <section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")}><div className="min-w-0 space-y-3"><PinnedMarketGrid pairs={pinnedMarketPairs} onSelect={openPair} onUnpin={togglePinnedPair} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
+
+      {view === "workspace" ? <section className="space-y-3" data-testid="pair-workspace"><div className="flex items-center justify-between gap-2 px-1"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("workspace.selected")}</p><h1 className="text-base font-semibold">{selectedPairWithLiveChart.pair}</h1></div><button type="button" onClick={() => navigateView("terminal")} className="min-h-10 rounded-control bg-surface-interactive px-3 text-meta text-content-secondary">{t("common.backToMarkets")}</button></div><section className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]"><SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} /><MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} /></section><PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} />{selectedOpportunity?.rankingEligibility || snapshotData.mode === "mock" ? <div className="flex justify-end"><button type="button" onClick={() => openTrade(selectedPairWithLiveChart, "buy")} className="min-h-11 rounded-control bg-brand-action px-6 text-meta font-bold text-content-on-accent">{t("trade.checkQuote")}</button></div> : null}</section> : null}
+
+      {view === "alerts" ? <section className="mx-auto w-full max-w-3xl" data-testid="alerts-workspace"><AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} embedded /></section> : null}
+      {view === "portfolio" ? <section className="pulse-surface rounded-panel p-6" data-testid="portfolio-workspace"><BriefcaseBusiness size={20} className="text-content-secondary" /><h2 className="mt-3 text-lg font-semibold">{t("portfolio.title")}</h2><p className="mt-2 max-w-2xl text-meta leading-6 text-content-secondary">{t("portfolio.scope")}</p><div className="mt-4 rounded-card bg-surface-interactive p-4 text-meta text-content-secondary">{t("portfolio.empty")}</div></section> : null}
+
+      {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={(locked) => setInteractionLock("trade", locked)} /></TradeDrawer> : null}
+    </div></TradeabilityProvider></MarketSignalProvider>
+  </main>;
+}
+
+function TradeDrawer({ onClose, children, suspended = false }: { onClose: () => void; children: ReactNode; suspended?: boolean }) {
+  const { t } = useI18n();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!sheetRef.current) return;
+    sheetRef.current.querySelector<HTMLElement>("button")?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !sheetRef.current) return;
+      const focusable = [...sheetRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]")];
+      if (!focusable.length) return;
+      const first = focusable[0]; const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", trapFocus);
+    return () => document.removeEventListener("keydown", trapFocus);
+  }, []);
+  return <div className="fixed inset-0 z-layer-drawer flex items-end justify-end bg-surface-scrim/75 lg:bg-surface-scrim/35" aria-hidden={suspended || undefined} onMouseDown={(event) => { if (!suspended && event.target === event.currentTarget) onClose(); }}><div ref={sheetRef} role="dialog" aria-modal="true" aria-label={t("trade.dock")} data-overlay-root="trade_drawer" className={cx("max-h-[calc(100dvh-56px)] w-full overflow-y-auto rounded-t-overlay bg-surface-panel px-2 cmi-safe-footer pt-2 shadow-overlay lg:h-full lg:max-h-none lg:w-inspector lg:max-w-inspector lg:rounded-l-overlay lg:rounded-tr-seam lg:border-l lg:border-border-subtle lg:p-3", suspended && "pointer-events-none")}><button type="button" onClick={onClose} className="mb-2 ml-auto grid h-11 w-11 place-items-center rounded-pill bg-surface-interactive text-content-secondary" aria-label={t("trade.closeDock")}><X size={16} aria-hidden="true" /></button>{children}</div></div>;
+}
+
+function normalizeTerminalView(value: string | undefined): TerminalView {
+  if (value === "markets" || value === "watchlist" || value === "alerts" || value === "portfolio" || value === "workspace") return value;
+  if (value === "wallet") return "portfolio";
+  return "terminal";
+}
+
+function formatUsd(value: number) {
+  return value >= 1 ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 6 })}` : `$${value.toPrecision(6)}`;
 }

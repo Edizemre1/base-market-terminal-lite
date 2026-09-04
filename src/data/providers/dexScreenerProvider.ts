@@ -2,23 +2,29 @@ import type { BasePair, PairActivity } from "@/types/baseTerminal";
 import {
   fetchJsonWithTimeout,
   readArray,
-  readHttpUrl,
+  readAllowedHttpsUrl,
   readNumber,
   readRecord,
   readString
 } from "./responseValidation";
 import type { MarketDataProvider, PairRiskDetails } from "./types";
+import { parseStrictFiniteNumber } from "@/lib/marketMath";
+import { mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
+import { loadGeckoTerminalDiscovery } from "./geckoTerminalDiscoveryProvider";
 
 const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const BASE_CHAIN_ID = "base";
 const REVALIDATE_SECONDS = 60;
 const REQUEST_TIMEOUT_MS = 8_000;
-const MAX_PROFILE_TOKENS = 12;
+const MAX_PROFILE_TOKENS = 36;
+const REQUEST_CONCURRENCY = 6;
 const FEED_LIMIT = 8;
+const MARKET_UNIVERSE_LIMIT = 1_000;
 const MIN_LIQUIDITY_USD = 10_000;
 const MIN_VOLUME_24H_USD = 5_000;
 const MIN_VOLUME_INFLOW_24H_USD = 10_000;
 const MAX_NEW_PAIR_AGE_MINUTES = 7 * 24 * 60;
+const UNKNOWN_AGE_MINUTES = Number.MAX_SAFE_INTEGER;
 const CURATED_BASE_QUERIES = [
   "WETH USDC",
   "AERO USDC",
@@ -26,7 +32,25 @@ const CURATED_BASE_QUERIES = [
   "BRETT WETH",
   "TOSHI WETH",
   "VIRTUAL WETH",
-  "CLANKER WETH"
+  "CLANKER WETH",
+  "USDC WETH",
+  "CBBTC WETH",
+  "EURC USDC",
+  "WETH USDBC",
+  "CBBTC USDC",
+  "CBETH WETH",
+  "AERO WETH",
+  "WELL USDC",
+  "MORPHO USDC",
+  "BRETT USDC",
+  "HIGHER WETH",
+  "KEYCAT WETH",
+  "MOG WETH",
+  "SKI WETH",
+  "VIRTUAL USDC",
+  "ZORA WETH",
+  "DAI USDC",
+  "USDS USDC"
 ];
 
 type DexToken = {
@@ -98,36 +122,45 @@ export function normalizeDexScreenerPair(payload: unknown): BasePair | undefined
 }
 
 export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
-  const { searchPairs, profilePairs } = await loadDexScreenerPairs();
+  const [{ searchPairs, profilePairs }, geckoDiscovery] = await Promise.all([
+    loadDexScreenerPairs(),
+    loadGeckoTerminalDiscovery()
+  ]);
   const normalizedSearchPairs = normalizePairs(searchPairs);
   const normalizedProfilePairs = normalizePairs(profilePairs);
-  const allPairs = dedupePairs([...normalizedProfilePairs, ...normalizedSearchPairs]);
+  const allPairs = mergePoolPairs([...geckoDiscovery.pairs, ...normalizedProfilePairs, ...normalizedSearchPairs])
+    .sort((left, right) => getBasePairQualityScore(right) - getBasePairQualityScore(left) || left.id.localeCompare(right.id))
+    .slice(0, MARKET_UNIVERSE_LIMIT);
   const pairsById = new Map(allPairs.map((pair) => [pair.id, pair]));
 
   return {
     mode: "dexscreener",
-    name: "DexScreener read-only Base data",
+    name: "GeckoTerminal + DexScreener read-only Base data",
     readOnly: true,
+    coverage: {
+      providers: geckoDiscovery.pairs.length > 0 ? ["GeckoTerminal", "DexScreener"] : ["DexScreener"],
+      pagesRequested: geckoDiscovery.coverage.pagesRequested,
+      pagesLoaded: geckoDiscovery.coverage.pagesLoaded,
+      capabilities: ["new_pools", "trending_pools", "top_pools", "token_profiles", "pair_enrichment"]
+    },
+    getAllPairs: () => allPairs,
     getNewPairs: () => {
       const freshProfilePairs = normalizedProfilePairs.filter(isFreshPair);
       const freshPairs = allPairs.filter(isFreshPair);
       const source = freshProfilePairs.length > 0 ? freshProfilePairs : freshPairs;
       return [...source]
-        .sort(
-          (left, right) =>
-            left.ageMinutes - right.ageMinutes || right.volume24h - left.volume24h
-        )
+        .sort((left, right) => (left.ageMinutes ?? Number.POSITIVE_INFINITY) - (right.ageMinutes ?? Number.POSITIVE_INFINITY) || (right.volume24h ?? 0) - (left.volume24h ?? 0) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT);
     },
     getVolumeInflows: () =>
       [...allPairs]
         .filter((pair) => hasMinimumMarketQuality(pair, MIN_VOLUME_INFLOW_24H_USD))
-        .sort((left, right) => right.volume24h - left.volume24h)
+        .sort((left, right) => (right.volume24h ?? 0) - (left.volume24h ?? 0) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT),
     getMomentumPairs: () =>
       [...allPairs]
         .filter((pair) => hasMinimumMarketQuality(pair))
-        .sort((left, right) => getMomentumRank(right) - getMomentumRank(left))
+        .sort((left, right) => getMomentumRank(right) - getMomentumRank(left) || left.id.localeCompare(right.id))
         .slice(0, FEED_LIMIT),
     getPairById: async (id) => {
       const cachedPair = pairsById.get(id);
@@ -142,7 +175,7 @@ export async function createDexScreenerProvider(): Promise<MarketDataProvider> {
     getPairChart: (id) => pairsById.get(id)?.chart ?? [],
     getRiskDetails: (id) => {
       const pair = pairsById.get(id);
-      return pair ? getDerivedRiskDetails(pair) : undefined;
+      return pair ? getUnverifiedRiskDetails(pair) : undefined;
     },
     getLiquidityDetails: (id) => pairsById.get(id)?.liquidityDetail,
     getActivityFeed: (id) => pairsById.get(id)?.activity ?? []
@@ -159,34 +192,41 @@ async function loadDexScreenerPairs(): Promise<DexPairBucket> {
 }
 
 async function loadCuratedSearchPairs() {
-  const searchResults = await Promise.all(
-    CURATED_BASE_QUERIES.map(async (query) => {
+  const searchResults = await mapWithConcurrency(
+    CURATED_BASE_QUERIES,
+    REQUEST_CONCURRENCY,
+    async (query) => {
       const response = await fetchDexJson(
         `/latest/dex/search?q=${encodeURIComponent(query)}`
       );
       return filterBasePairs(parseDexSearchResponse(response));
-    })
+    }
   );
 
   return dedupeDexPairs(searchResults.flat());
 }
 
 async function loadProfilePairs() {
-  const profiles = parseDexTokenProfiles(
-    await fetchDexJson("/token-profiles/latest/v1")
-  );
+  const profilePayloads = await Promise.all([
+    fetchDexJson("/token-profiles/latest/v1"),
+    fetchDexJson("/token-boosts/latest/v1"),
+    fetchDexJson("/token-boosts/top/v1")
+  ]);
+  const profiles = dedupeTokenProfiles(profilePayloads.flatMap(parseDexTokenProfiles));
   const baseProfiles = profiles
     .filter((profile) => profile.chainId === BASE_CHAIN_ID && profile.tokenAddress)
     .slice(0, MAX_PROFILE_TOKENS);
-  const pairResults = await Promise.all(
-    baseProfiles.map(async (profile) => {
+  const pairResults = await mapWithConcurrency(
+    baseProfiles,
+    REQUEST_CONCURRENCY,
+    async (profile) => {
       const pairs = parseDexPairList(
         await fetchDexJson(
           `/token-pairs/v1/${BASE_CHAIN_ID}/${profile.tokenAddress}`
         )
       );
       return selectProfilePairs(filterBasePairs(pairs));
-    })
+    }
   );
 
   return dedupeDexPairs(pairResults.flat());
@@ -218,15 +258,15 @@ function toDexPair(payload: unknown): DexPair | undefined {
   }
 
   const normalized = {
-    chainId: readString(pair.chainId),
-    dexId: readString(pair.dexId),
-    pairAddress: readString(pair.pairAddress),
-    url: readHttpUrl(pair.url),
+    chainId: readBoundedString(pair.chainId, 32),
+    dexId: readBoundedString(pair.dexId, 64),
+    pairAddress: readEvmAddress(pair.pairAddress),
+    url: readAllowedHttpsUrl(pair.url, ["dexscreener.com"]),
     info: toDexPairInfo(pair.info),
     baseToken: toDexToken(pair.baseToken),
     quoteToken: toDexToken(pair.quoteToken),
-    priceNative: readString(pair.priceNative),
-    priceUsd: readString(pair.priceUsd) ?? readNumber(pair.priceUsd)?.toString() ?? null,
+    priceNative: readStrictNumericString(pair.priceNative),
+    priceUsd: readStrictNumericString(pair.priceUsd) ?? readNumber(pair.priceUsd)?.toString() ?? null,
     fdv: readNumber(pair.fdv) ?? null,
     marketCap: readNumber(pair.marketCap) ?? null,
     txns: toDexTxnWindows(pair.txns),
@@ -255,7 +295,7 @@ function toDexPairInfo(payload: unknown): DexPair["info"] {
     return undefined;
   }
 
-  const imageUrl = readHttpUrl(info.imageUrl);
+  const imageUrl = readAllowedHttpsUrl(info.imageUrl, ["dexscreener.com", "coingecko.com"]);
   return imageUrl ? { imageUrl } : undefined;
 }
 
@@ -266,9 +306,9 @@ function toDexToken(payload: unknown): DexToken | undefined {
     return undefined;
   }
 
-  const address = readString(token.address);
-  const name = readString(token.name);
-  const symbol = readString(token.symbol);
+  const address = readEvmAddress(token.address);
+  const name = readBoundedString(token.name, 120);
+  const symbol = readBoundedString(token.symbol, 32);
 
   if (!address && !name && !symbol) {
     return undefined;
@@ -284,8 +324,8 @@ function toDexTokenProfile(payload: unknown): DexTokenProfile | undefined {
     return undefined;
   }
 
-  const chainId = readString(profile.chainId);
-  const tokenAddress = readString(profile.tokenAddress);
+  const chainId = readBoundedString(profile.chainId, 32);
+  const tokenAddress = readEvmAddress(profile.tokenAddress);
 
   if (!chainId && !tokenAddress) {
     return undefined;
@@ -395,23 +435,23 @@ function normalizePair(pair: DexPair): BasePair | undefined {
   const volume6h = toNumber(pair.volume?.h6);
   const liquidity = toNumber(pair.liquidity?.usd);
   const change24h = toNumber(pair.priceChange?.h24);
-  const ageMinutes = getAgeMinutes(pair.pairCreatedAt);
+  const pairCreatedAtMs = getValidPairCreatedAtMs(pair.pairCreatedAt);
+  const ageMinutes = getAgeMinutes(pairCreatedAtMs);
   const h24Txns = pair.txns?.h24;
   const buys = toNumber(h24Txns?.buys);
   const sells = toNumber(h24Txns?.sells);
   const totalTxns = buys + sells;
-  const buyPressure = totalTxns > 0 ? Math.round((buys / totalTxns) * 100) : 50;
-  const sellPressure = 100 - buyPressure;
-  const riskScore = getDerivedRiskScore({ ageMinutes, liquidity, sells, totalTxns });
   const momentumScore = getMomentumScore({ change24h, liquidity, volume24h, totalTxns });
   const priceNative = pair.priceNative ?? pair.priceUsd ?? "0";
   const priceUsd = toNumber(pair.priceUsd);
   const fdv = toNumber(pair.fdv);
   const marketCap = toNumber(pair.marketCap);
-  const pairCreatedAtMs = toNumber(pair.pairCreatedAt);
 
   return {
     dataSource: "dexscreener",
+    dataProviders: ["dexscreener"],
+    sourceUpdatedAt: new Date().toISOString(),
+    firstSeenAt: new Date().toISOString(),
     pairAddress: pairAddress.toLowerCase(),
     baseTokenAddress: baseToken.address?.toLowerCase(),
     quoteTokenAddress: quoteToken.address?.toLowerCase(),
@@ -449,54 +489,38 @@ function normalizePair(pair: DexPair): BasePair | undefined {
     inflow24h: Math.max(0, volume24h - volume6h),
     momentumScore,
     volumeMultiple: liquidity > 0 ? Number((volume24h / liquidity).toFixed(2)) : 0,
-    riskScore,
-    riskLabel: "Derived/demo risk UI",
-    chart: buildSyntheticChart(change24h, volume24h, liquidity),
-    pressure: { buy: buyPressure, sell: sellPressure },
+    chart: [],
     holders: {
-      top10: "N/A",
-      top50: "N/A",
-      top100: "N/A",
+      top10: "Not provided",
+      top50: "Not provided",
+      top100: "Not provided",
       total: "Not provided",
-      active24h: totalTxns > 0 ? totalTxns.toString() : "N/A"
+      active24h: "Not provided"
     },
     poolAge: formatAgeLabel(ageMinutes),
-    flags: ["Derived/demo risk UI", "Not a safety guarantee"],
+    flags: ["Contract checks not performed", "Unknown does not mean safe"],
     taxes: { buy: "Unknown", sell: "Unknown" },
     lpLock: { status: "Unknown", provider: "Not provided", expires: "N/A" },
-    riskChecks: getDerivedRiskDetailsFromValues(riskScore).riskChecks,
+    riskChecks: getUnverifiedRiskDetails().riskChecks,
     liquidityDetail: {
       poolLiquidity: formatUsd(liquidity),
-      lpChange: change24h === 0 ? "Not provided" : `${formatSigned(change24h)} price change`,
-      depth: liquidity > 0 ? `${formatUsd(liquidity * 0.02)} within 2% est.` : "Not provided",
+      lpChange: "Not provided",
+      depth: "Not provided",
       routeSource: pair.dexId ?? "DexScreener"
     },
     activity: buildActivityFeed(pair, baseToken.symbol)
   };
 }
 
-function getDerivedRiskDetails(pair: BasePair): PairRiskDetails {
+function getUnverifiedRiskDetails(pair?: BasePair): PairRiskDetails {
   return {
-    ...getDerivedRiskDetailsFromValues(pair.riskScore),
-    riskLabel: pair.riskLabel,
-    flags: pair.flags,
-    holders: pair.holders,
-    taxes: pair.taxes,
-    lpLock: pair.lpLock
-  };
-}
-
-function getDerivedRiskDetailsFromValues(riskScore: number): PairRiskDetails {
-  return {
-    riskScore,
-    riskLabel: "Derived/demo risk UI",
-    flags: ["Derived/demo risk UI", "Not a safety guarantee"],
+    flags: pair?.flags ?? ["Contract checks not performed", "Unknown does not mean safe"],
     holders: {
-      top10: "N/A",
-      top50: "N/A",
-      top100: "N/A",
+      top10: "Not provided",
+      top50: "Not provided",
+      top100: "Not provided",
       total: "Not provided",
-      active24h: "Dex aggregate"
+      active24h: "Not provided"
     },
     taxes: { buy: "Unknown", sell: "Unknown" },
     lpLock: { status: "Unknown", provider: "Not provided", expires: "N/A" },
@@ -507,10 +531,32 @@ function getDerivedRiskDetailsFromValues(riskScore: number): PairRiskDetails {
       { label: "Honeypot", value: "Not checked", ok: false },
       { label: "LP lock", value: "Unknown", ok: false },
       { label: "Holder concentration", value: "Not provided", ok: false },
-      { label: "Deployer activity", value: "Not provided", ok: false },
-      { label: "Demo score", value: `${riskScore} / 100 derived UI`, ok: false }
+      { label: "Deployer activity", value: "Not provided", ok: false }
     ]
   };
+}
+
+function dedupeTokenProfiles(profiles: DexTokenProfile[]) {
+  const unique = new Map<string, DexTokenProfile>();
+  for (const profile of profiles) {
+    if (!profile.chainId || !profile.tokenAddress) continue;
+    unique.set(`${profile.chainId}:${profile.tokenAddress}`.toLowerCase(), profile);
+  }
+  return [...unique.values()];
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], concurrency: number, operation: (item: T) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function buildActivityFeed(pair: DexPair, symbol: string): PairActivity[] {
@@ -541,10 +587,10 @@ function getActivityRow(
 
 function normalizeNumberWindows(windows: Record<string, number | undefined> | undefined | null) {
   return {
-    m5: getPositiveWindowValue(windows?.m5),
-    h1: getPositiveWindowValue(windows?.h1),
-    h6: getPositiveWindowValue(windows?.h6),
-    h24: getPositiveWindowValue(windows?.h24)
+    m5: getNonNegativeWindowValue(windows?.m5),
+    h1: getNonNegativeWindowValue(windows?.h1),
+    h6: getNonNegativeWindowValue(windows?.h6),
+    h24: getNonNegativeWindowValue(windows?.h24)
   };
 }
 
@@ -576,16 +622,11 @@ function normalizeTxnWindow(window: DexTxnWindow | undefined) {
   const buys = toNumber(window.buys);
   const sells = toNumber(window.sells);
 
-  if (buys <= 0 && sells <= 0) {
-    return undefined;
-  }
-
   return { buys, sells };
 }
 
-function getPositiveWindowValue(value: number | undefined) {
-  const parsed = toNumber(value);
-  return parsed > 0 ? parsed : undefined;
+function getNonNegativeWindowValue(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function getFiniteWindowValue(value: number | undefined) {
@@ -595,25 +636,6 @@ function getFiniteWindowValue(value: number | undefined) {
 
   const parsed = toNumber(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function getDerivedRiskScore({
-  ageMinutes,
-  liquidity,
-  sells,
-  totalTxns
-}: {
-  ageMinutes: number;
-  liquidity: number;
-  sells: number;
-  totalTxns: number;
-}) {
-  const agePenalty = ageMinutes < 60 ? 24 : ageMinutes < 360 ? 14 : 6;
-  const liquidityPenalty = liquidity < 50_000 ? 26 : liquidity < 150_000 ? 16 : 8;
-  const sellPressure = totalTxns > 0 ? sells / totalTxns : 0.5;
-  const pressurePenalty = sellPressure > 0.6 ? 18 : sellPressure > 0.5 ? 10 : 4;
-
-  return clamp(Math.round(agePenalty + liquidityPenalty + pressurePenalty), 18, 78);
 }
 
 function getMomentumScore({
@@ -628,31 +650,20 @@ function getMomentumScore({
   totalTxns: number;
 }) {
   const priceSignal = clamp(change24h + 20, 0, 45);
-  const volumeSignal = liquidity > 0 ? clamp((volume24h / liquidity) * 18, 0, 35) : 0;
+  const volumeSignal = clamp(Math.log10(Math.max(volume24h, 0) + 1) * 4, 0, 25);
+  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(volume24h, liquidity), 0) + 1) * 2, 0, 10);
   const txnSignal = clamp(totalTxns / 10, 0, 20);
 
-  return clamp(Math.round(priceSignal + volumeSignal + txnSignal), 1, 100);
+  return clamp(Math.round(priceSignal + volumeSignal + matchedActivitySignal + txnSignal), 1, 100);
 }
 
 function getMomentumRank(pair: BasePair) {
-  const priceSignal = clamp(pair.change24h, -35, 85);
-  const volumeLiquiditySignal = clamp((pair.volume24h / Math.max(pair.liquidity, 1)) * 35, 0, 45);
-  const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity, 1)) * 3, 0, 18);
+  const priceSignal = clamp(pair.change24h ?? 0, -35, 85);
+  const volumeSignal = clamp(Math.log10(Math.max(pair.volume24h ?? 0, 0) + 1) * 6, 0, 45);
+  const matchedActivitySignal = clamp(Math.log10(Math.max(Math.min(pair.volume24h ?? 0, pair.liquidity ?? 0), 0) + 1) * 3, 0, 24);
+  const liquiditySignal = clamp(Math.log10(Math.max(pair.liquidity ?? 0, 1)) * 3, 0, 18);
 
-  return priceSignal + volumeLiquiditySignal + liquiditySignal + pair.momentumScore * 0.2;
-}
-
-function buildSyntheticChart(change24h: number, volume24h: number, liquidity: number) {
-  const direction = change24h >= 0 ? 1 : -1;
-  const volatility = liquidity > 0 ? clamp(volume24h / liquidity, 0.08, 1.1) : 0.2;
-  const base = 1;
-
-  return Array.from({ length: 12 }, (_, index) => {
-    const progress = index / 11;
-    const trend = (Math.abs(change24h) / 100) * progress * direction;
-    const wave = Math.sin(index * 1.7) * volatility * 0.025;
-    return Number((base + trend + wave).toFixed(4));
-  });
+  return priceSignal + volumeSignal + matchedActivitySignal + liquiditySignal + (pair.momentumScore ?? 0) * 0.2;
 }
 
 function dedupeDexPairs(pairs: DexPair[]) {
@@ -671,43 +682,7 @@ function dedupeDexPairs(pairs: DexPair[]) {
     }
   }
 
-  const pairsByTokenRoute = new Map<string, DexPair>();
-
-  for (const pair of pairsByAddress.values()) {
-    const key = getDexTokenPairKey(pair);
-    const current = pairsByTokenRoute.get(key);
-
-    if (!current || getDexPairQualityScore(pair) > getDexPairQualityScore(current)) {
-      pairsByTokenRoute.set(key, pair);
-    }
-  }
-
-  return [...pairsByTokenRoute.values()];
-}
-
-function dedupePairs(pairs: BasePair[]) {
-  const pairsById = new Map<string, BasePair>();
-
-  for (const pair of pairs) {
-    const current = pairsById.get(pair.id);
-
-    if (!current || getBasePairQualityScore(pair) > getBasePairQualityScore(current)) {
-      pairsById.set(pair.id, pair);
-    }
-  }
-
-  const pairsByTokenRoute = new Map<string, BasePair>();
-
-  for (const pair of pairsById.values()) {
-    const key = `${pair.baseToken.toLowerCase()}-${pair.quoteToken.toLowerCase()}`;
-    const current = pairsByTokenRoute.get(key);
-
-    if (!current || getBasePairQualityScore(pair) > getBasePairQualityScore(current)) {
-      pairsByTokenRoute.set(key, pair);
-    }
-  }
-
-  return [...pairsByTokenRoute.values()];
+  return [...pairsByAddress.values()];
 }
 
 function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
@@ -717,17 +692,17 @@ function isQualityBasePair(pair: DexPair, minVolume24h = MIN_VOLUME_24H_USD) {
     Boolean(pair.baseToken?.symbol && pair.baseToken.address) &&
     Boolean(pair.quoteToken?.symbol && pair.quoteToken.address) &&
     toNumber(pair.priceUsd) > 0 &&
-    toNumber(pair.liquidity?.usd) > MIN_LIQUIDITY_USD &&
-    toNumber(pair.volume?.h24) > minVolume24h
+    toNumber(pair.liquidity?.usd) >= MIN_LIQUIDITY_USD &&
+    toNumber(pair.volume?.h24) >= minVolume24h
   );
 }
 
 function hasMinimumMarketQuality(pair: BasePair, minVolume24h = MIN_VOLUME_24H_USD) {
-  return pair.liquidity > MIN_LIQUIDITY_USD && pair.volume24h > minVolume24h;
+  return (pair.liquidity ?? Number.NEGATIVE_INFINITY) >= MIN_LIQUIDITY_USD && (pair.volume24h ?? Number.NEGATIVE_INFINITY) >= minVolume24h;
 }
 
 function isFreshPair(pair: BasePair) {
-  return pair.ageMinutes > 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
+  return pair.ageMinutes !== undefined && pair.ageMinutes >= 0 && pair.ageMinutes <= MAX_NEW_PAIR_AGE_MINUTES;
 }
 
 function getDexPairQualityScore(pair: DexPair) {
@@ -739,34 +714,26 @@ function getDexPairQualityScore(pair: DexPair) {
 }
 
 function getBasePairQualityScore(pair: BasePair) {
-  return pair.volume24h * 2 + pair.liquidity + Math.abs(pair.change24h) * 1_000;
-}
-
-function getDexTokenPairKey(pair: DexPair) {
-  const base =
-    pair.baseToken?.address?.toLowerCase() ??
-    pair.baseToken?.symbol?.toLowerCase() ??
-    "unknown-base";
-  const quote =
-    pair.quoteToken?.address?.toLowerCase() ??
-    pair.quoteToken?.symbol?.toLowerCase() ??
-    "unknown-quote";
-
-  return `${base}-${quote}`;
+  return (pair.volume24h ?? 0) * 2 + (pair.liquidity ?? 0) + Math.abs(pair.change24h ?? 0) * 1_000;
 }
 
 function getAgeMinutes(pairCreatedAt: number | null | undefined) {
   const createdAt = toNumber(pairCreatedAt);
 
-  if (createdAt <= 0) {
-    return 999_999;
+  if (createdAt <= 0 || createdAt > Date.now() + 60_000) {
+    return UNKNOWN_AGE_MINUTES;
   }
 
-  return Math.max(1, Math.floor((Date.now() - createdAt) / 60_000));
+  return Math.max(0, Math.floor((Date.now() - createdAt) / 60_000));
+}
+
+function getValidPairCreatedAtMs(pairCreatedAt: number | null | undefined) {
+  const createdAt = toNumber(pairCreatedAt);
+  return createdAt > 0 && createdAt <= Date.now() + 60_000 ? createdAt : 0;
 }
 
 function formatAgeLabel(minutes: number) {
-  if (minutes >= 999_999) {
+  if (minutes === UNKNOWN_AGE_MINUTES) {
     return "N/A";
   }
 
@@ -784,10 +751,10 @@ function formatAgeLabel(minutes: number) {
 }
 
 function formatNativePrice(value: string) {
-  const parsed = Number.parseFloat(value);
+  const parsed = parseStrictFiniteNumber(value);
 
-  if (!Number.isFinite(parsed)) {
-    return value || "0";
+  if (parsed === undefined) {
+    return "N/A";
   }
 
   if (parsed > 0 && parsed < 0.0001) {
@@ -808,10 +775,6 @@ function formatUsd(value: number, maximumFractionDigits = 1) {
     notation: value >= 100_000 ? "compact" : "standard",
     maximumFractionDigits
   }).format(value);
-}
-
-function formatSigned(value: number) {
-  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 function formatDexName(dexId: string | undefined) {
@@ -849,16 +812,22 @@ function getKnownTokenLogoUrl(symbol: string | undefined) {
 }
 
 function toNumber(value: number | string | null | undefined) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
+  return parseStrictFiniteNumber(value) ?? 0;
+}
 
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
+function readEvmAddress(value: unknown) {
+  const address = readString(value);
+  return address && /^0x[0-9a-f]{40}$/i.test(address) ? address : undefined;
+}
 
-  return 0;
+function readBoundedString(value: unknown, maximumLength: number) {
+  const text = readString(value)?.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return text ? text.slice(0, maximumLength) : undefined;
+}
+
+function readStrictNumericString(value: unknown) {
+  const number = parseStrictFiniteNumber(value);
+  return number === undefined ? undefined : String(number);
 }
 
 function clamp(value: number, min: number, max: number) {

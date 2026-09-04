@@ -18,7 +18,7 @@ export function buildProviderHealth(
     feedStatusLabel: snapshot.feedStatusLabel,
     status,
     lastSuccessAt,
-    stale: status === "failed" || isSnapshotStale(lastSuccessAt),
+    stale: status === "failed" || snapshot.freshness === "delayed" || isSnapshotStale(lastSuccessAt),
     fallbackReason: snapshot.fallbackReason,
     failureReason
   };
@@ -62,7 +62,26 @@ export function shouldKeepCurrentSnapshotOnRefresh(
 }
 
 function getSnapshotLastSuccessAt(snapshot: MarketTerminalSnapshot) {
-  return snapshot.generatedAt === "mock-static" ? undefined : snapshot.generatedAt;
+  return snapshot.generatedAt === "mock-static" ? undefined : snapshot.sourceUpdatedAt;
+}
+
+export function shouldAcceptMarketSnapshot(
+  currentSnapshot: MarketTerminalSnapshot,
+  nextSnapshot: MarketTerminalSnapshot,
+  now = Date.now()
+) {
+  if (currentSnapshot.mode === "mock" || nextSnapshot.mode === "mock") return true;
+  const currentSourceTime = parseSnapshotTime(currentSnapshot.sourceUpdatedAt);
+  const nextSourceTime = parseSnapshotTime(nextSnapshot.sourceUpdatedAt);
+  if (nextSourceTime !== undefined && nextSourceTime > now + 5 * 60_000) return false;
+  if (currentSourceTime !== undefined && nextSourceTime === undefined) return false;
+  if (currentSourceTime !== undefined && nextSourceTime !== undefined && nextSourceTime < currentSourceTime) return false;
+  return !(
+    currentSnapshot.generatedAt === nextSnapshot.generatedAt &&
+    currentSnapshot.sourceUpdatedAt === nextSnapshot.sourceUpdatedAt &&
+    currentSnapshot.freshness === nextSnapshot.freshness &&
+    currentSnapshot.fallbackReason === nextSnapshot.fallbackReason
+  );
 }
 
 function isSnapshotStale(lastSuccessAt: string | undefined) {
@@ -80,5 +99,10 @@ function isSnapshotStale(lastSuccessAt: string | undefined) {
 }
 
 function hasLiveProviderPairs(snapshot: MarketTerminalSnapshot) {
-  return snapshot.allPairs.some((pair) => pair.dataSource === "dexscreener");
+  return snapshot.allPairs.some((pair) => pair.dataSource === "dexscreener" || pair.dataSource === "geckoterminal");
+}
+
+function parseSnapshotTime(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
