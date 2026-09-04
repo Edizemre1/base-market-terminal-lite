@@ -18,7 +18,7 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
-    await expect(page.getByTestId("live-market-wall").getByRole("button", { name: /Buy|Sell|Al|Sat/, exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("live-market-wall").locator("button").filter({ hasText: /^(Buy|Sell|Al|Sat)$/ })).toHaveCount(0);
     await expect(page.getByTestId("market-matrix").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).first()).toBeVisible();
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button", { name: /Inspect|incele/ }).click();
     await expect(page.getByTestId("context-inspector")).toBeVisible();

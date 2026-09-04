@@ -70,7 +70,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       if (current.type === "none") {
         returnFocusRef.current = trigger;
       }
-      if (MODALS.has(type) && DRAWERS.has(current.type)) {
+      const nestedContext = (MODALS.has(type) && DRAWERS.has(current.type)) || (type === "pool_drawer" && current.type === "market_inspector");
+      if (nestedContext) {
         modalReturnFocusRef.current = trigger;
         setSuspended(current);
       }
@@ -80,8 +81,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const close = useCallback(() => {
-    setActive((current) => {
-      if (MODALS.has(current.type) && suspended) {
+    setActive(() => {
+      if (suspended) {
         const restored = suspended;
         restoringModalFocusRef.current = true;
         setSuspended(undefined);
