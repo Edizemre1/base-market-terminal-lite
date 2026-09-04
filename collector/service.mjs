@@ -359,6 +359,7 @@ export class OnchainDiscoveryCollector {
       }
     }));
     throwIfAborted(signal);
+    this.proofCost ??= { successfulProofs: 0 };
     this.proofCost.successfulProofs += outcomes.filter(outcome => outcome.state?.status === "complete").length;
     const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
     let semanticBefore;
@@ -411,7 +412,7 @@ export class OnchainDiscoveryCollector {
       };
       draft.health.lastOnchainStateCycle = now.toISOString();
       draft.health.backfill = backfillHealth(draft, now);
-      draft.health.providerRequestUsage = this.provider.usageSnapshot?.();
+      draft.health.providerRequestUsage = this.provider?.usageSnapshot?.();
     }, (draft) => appendSemanticDeltas(draft, semanticBefore, touchedPoolKeys));
     return after;
   }

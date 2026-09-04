@@ -17,7 +17,7 @@ test("normal collector cadence is measured start-to-start", () => {
   const config = resolveCollectorConfig({ BASE_RPC_HTTP_URL: "https://mainnet.base.org" });
   assert.equal(config.pollIntervalMs, 10_000);
   assert.equal(config.metadataBatchSize, 1);
-  assert.equal(config.onchainStateBatchSize, 1);
+  assert.equal(config.onchainStateBatchSize, 4);
   assert.equal(config.onchainLocalClassificationBatchSize, 128);
   assert.equal(config.onchainStateIntervalMs, 30_000);
   assert.equal(config.onchainStateCycleTimeoutMs, 45_000);
