@@ -1,5 +1,5 @@
 import { BASE_USDC, BASE_WETH } from "./factory-registry.mjs";
-import { ONCHAIN_STATE_REFRESH_MS, resolveOnchainAdapter } from "./onchain-state.mjs";
+import { ONCHAIN_STATE_REFRESH_MS, resolveOnchainAdapter, validTokenDecimals } from "./onchain-state.mjs";
 
 export const BACKFILL_QUEUE_LIMIT = 512;
 
@@ -14,21 +14,35 @@ export function selectBackfillRpcBatch(queue, pools, maximum = 1, attempts = 0) 
     const unproved = (attempts + index) % 4 === 3
       ? remaining.findIndex((job) => !pools[job.poolKey]?.backfill?.lastSuccessfulHash)
       : -1;
-    selected.push(...remaining.splice(unproved < 0 ? 0 : unproved, 1));
+    // A dedicated oldest-due slot provides fairness without letting hours of
+    // accumulated age erase every high-value priority on every other slot.
+    const oldest = (attempts + index) % 4 === 2
+      ? remaining.reduce((best, job, i) => Date.parse(job.waitingSince ?? "") < Date.parse(remaining[best].waitingSince ?? "") ? i : best, 0) : 0;
+    selected.push(...remaining.splice(unproved < 0 ? oldest : unproved, 1));
   }
   return selected;
 }
 
-export function backfillPriority(pool, now = new Date()) {
+export function backfillPriority(pool, now = new Date(), metadata) {
   const tokens = [pool.token0, pool.token1];
   if (!resolveOnchainAdapter(pool) || !pool.poolAddress) return 8;
   if (tokens.includes(BASE_WETH) && tokens.includes(BASE_USDC)) return 0;
-  if (pool.providerEnrichment?.status === "matched") return 1;
+  const verified = metadata ? tokens.every(token => validTokenDecimals(metadata[token]?.decimals) && metadata[token]?.verificationState === "verified") : pool.decimalsVerified === true;
+  if (pool.providerEnrichment?.status === "matched" && verified) return 1;
   if (tokens.includes(BASE_USDC) || tokens.includes(BASE_WETH)) return 2;
-  if (now.getTime() - Date.parse(pool.firstSeenAt ?? "") < 10 * 60_000) return 3;
-  if ((pool.volume24hUsd ?? 0) > 0 || (pool.liquidityUsd ?? 0) > 0 || (pool.trades24h ?? 0) > 0) return 4;
-  if (pool.backfill?.lastStatus === "retryable" || pool.onchainState?.status === "retryable") return 5;
-  return 6;
+  if (pool.providerEnrichment?.status === "matched" && ((pool.providerLiquidityUsd ?? 0) > 0 || (pool.volume24hUsd ?? 0) > 0)) return 3;
+  if (now.getTime() - Date.parse(pool.firstSeenAt ?? "") < 10 * 60_000) return 4;
+  if (pool.backfill?.lastSuccessfulHash || pool.onchainState?.status === "complete") return 5;
+  if (pool.backfill?.lastStatus === "retryable" || pool.onchainState?.status === "retryable") return 6;
+  return 7;
+}
+
+export function proofWorkValue(pool) {
+  // These are scheduling hints, never canonical liquidity/price evidence.
+  const matched = pool.providerEnrichment?.status === "matched";
+  const liquidity = matched ? pool.providerLiquidityUsd : pool.onchainLiquidityUsd;
+  return Math.log1p(Math.max(0, liquidity ?? 0)) * 4
+    + (matched ? Math.log1p(Math.max(0, pool.volume24hUsd ?? 0)) : 0);
 }
 
 export function seedBackfillQueue(state, now = new Date()) {
@@ -48,15 +62,18 @@ export function seedBackfillQueue(state, now = new Date()) {
     };
     const history = pool.backfill;
     if (Date.parse(history.nextAttemptAt) > now.getTime()) continue;
-    const priority = backfillPriority(pool, now);
+    if (pool.onchainState?.status === "complete" && now.getTime() - Date.parse(pool.onchainState.observedAt) < ONCHAIN_STATE_REFRESH_MS) continue;
+    const priority = backfillPriority(pool, now, state.tokenMetadata);
     const waitingSince = history.nextAttemptAt ?? history.createdAt;
     const ageMs = Math.max(0, now.getTime() - Date.parse(waitingSince));
-    // Aging eventually outranks recurring high-priority jobs. Unsupported local
-    // classification never takes a network slot.
-    const score = priority - Math.floor(ageMs / 60_000);
-    jobs.push({ poolKey: pool.poolKey, poolAddress: pool.poolAddress, ...history, priority, score, waitingSince });
+    const score = priority - Math.min(0.5, ageMs / (60 * 60_000));
+    jobs.push({ poolKey: pool.poolKey, poolAddress: pool.poolAddress, ...history, priority, score, value: proofWorkValue(pool), waitingSince });
   }
-  state.onchainQueue = jobs.sort((a, b) => a.score - b.score || Date.parse(a.waitingSince) - Date.parse(b.waitingSince) || a.poolKey.localeCompare(b.poolKey)).slice(0, BACKFILL_QUEUE_LIMIT);
+  const ordered = jobs.sort((a, b) => a.priority - b.priority || b.value - a.value || a.score - b.score || a.poolKey.localeCompare(b.poolKey));
+  const oldest = [...jobs].sort((a,b) => Date.parse(a.waitingSince) - Date.parse(b.waitingSince) || a.poolKey.localeCompare(b.poolKey)).slice(0,64);
+  const admitted = new Set([...ordered.slice(0,BACKFILL_QUEUE_LIMIT-64),...oldest].map(job => job.poolKey));
+  for (const job of ordered) { if (admitted.size >= BACKFILL_QUEUE_LIMIT) break; admitted.add(job.poolKey); }
+  state.onchainQueue = ordered.filter(job => admitted.has(job.poolKey));
   state.health ??= {};
   state.health.onchainQueueDepth = state.onchainQueue.length;
 }
@@ -65,10 +82,11 @@ export function recordBackfillOutcome(pool, observed, now = new Date(), { usedRp
   const old = pool.backfill ?? {};
   const temporary = observed.status === "retryable" || observed.status === "pending";
   const consecutiveFailures = temporary ? (old.consecutiveFailures ?? 0) + 1 : 0;
+  const persistentFailure = /reverted|empty_response|malformed|invalid_decimals|mismatch/.test(observed.reasonCode ?? "");
   const cooldownMs = observed.status === "complete" ? ONCHAIN_STATE_REFRESH_MS
     : observed.status === "unsupported" ? 6 * 60 * 60_000
       : observed.status === "rejected" ? 60 * 60_000
-        : Math.min(15 * 60_000, 15_000 * 2 ** Math.min(consecutiveFailures, 6));
+        : Math.min(15 * 60_000, (persistentFailure ? 60_000 : 15_000) * 2 ** Math.min(consecutiveFailures, 6));
   const nextAttemptAt = new Date(now.getTime() + cooldownMs).toISOString();
   pool.backfill = {
     ...old, createdAt: old.createdAt ?? now.toISOString(), attempts: (old.attempts ?? 0) + Number(usedRpc),
@@ -94,6 +112,12 @@ export function backfillHealth(state, now = new Date()) {
     if (row.lastSuccessfulHash) result.successfulCoverage += 1;
     if (row.lastSuccessAt && (!result.lastPoolStateSuccess || row.lastSuccessAt > result.lastPoolStateSuccess)) result.lastPoolStateSuccess = row.lastSuccessAt;
     if (row.nextAttemptAt && row.lastStatus !== "complete") result.oldestPendingAgeMs = Math.max(result.oldestPendingAgeMs, now.getTime() - Date.parse(row.nextAttemptAt));
+  }
+  result.priorityDistribution = {};
+  result.oldestHighPriorityPendingMs = 0;
+  for (const job of state.onchainQueue ?? []) {
+    result.priorityDistribution[job.priority] = (result.priorityDistribution[job.priority] ?? 0) + 1;
+    if (job.priority <= 2) result.oldestHighPriorityPendingMs = Math.max(result.oldestHighPriorityPendingMs, now.getTime() - Date.parse(job.waitingSince));
   }
   return result;
 }

@@ -39,9 +39,9 @@ function memoryStore(state) {
   };
 }
 
-test("backfill priority follows exact anchor, matched, quote, new, evidence, retry, supported", () => {
-  const rows = [pool("anchor", { token0: BASE_WETH, token1: BASE_USDC }), pool("matched", { providerEnrichment: { status: "matched" } }), pool("quote", { token1: BASE_USDC }), pool("new", { firstSeenAt: NOW.toISOString() }), pool("evidence", { volume24hUsd: 1 }), pool("retry", { onchainState: { status: "retryable" } }), pool("other")];
-  assert.deepEqual(rows.map((row) => backfillPriority(row, NOW)), [0, 1, 2, 3, 4, 5, 6]);
+test("backfill priority follows exact anchor, verified match, quote, new, prior success, retry, supported", () => {
+  const rows = [pool("anchor", { token0: BASE_WETH, token1: BASE_USDC }), pool("matched", { decimalsVerified: true, providerEnrichment: { status: "matched" } }), pool("quote", { token1: BASE_USDC }), pool("new", { firstSeenAt: NOW.toISOString() }), pool("success", { backfill: { lastSuccessfulHash: HASH } }), pool("retry", { onchainState: { status: "retryable" } }), pool("other")];
+  assert.deepEqual(rows.map((row) => backfillPriority(row, NOW)), [0, 1, 2, 4, 5, 6, 7]);
 });
 
 test("metadata prerequisites preserve waiting jobs and attempts under bounded queue pressure", () => {
@@ -69,13 +69,16 @@ test("metadata prerequisites preserve waiting jobs and attempts under bounded qu
   assert.equal(restarted.metadataQueue[0].tokenAddress, oldUnsupported, "aging still provides fairness to lower priorities");
 });
 
-test("queue is bounded and aging eventually outranks recurring high-priority work", () => {
+test("queue is bounded and reserves old work without erasing high-priority ordering", () => {
   const state = initialState(NOW);
-  state.pools = Object.fromEntries(Array.from({ length: 600 }, (_, index) => [`matched-${index}`, pool(`matched-${index}`, { providerEnrichment: { status: "matched" } })]));
+  state.tokenMetadata = { [TOKEN]: { decimals: 18, verificationState: "verified" }, [OTHER]: { decimals: 18, verificationState: "verified" } };
+  state.pools = Object.fromEntries(Array.from({ length: 600 }, (_, index) => [`matched-${index}`, pool(`matched-${index}`, { decimalsVerified: true, providerEnrichment: { status: "matched" } })]));
   state.pools.old = pool("old", { backfill: { attempts: 2, createdAt: "2026-09-03T19:40:00Z", nextAttemptAt: "2026-09-03T19:40:00Z" } });
   seedBackfillQueue(state, NOW);
   assert.equal(state.onchainQueue.length, BACKFILL_QUEUE_LIMIT);
-  assert.equal(state.onchainQueue[0].poolKey, "old");
+  assert.equal(state.onchainQueue[0].poolKey, "matched-0");
+  assert(state.onchainQueue.some((job) => job.poolKey === "old"));
+  assert.equal(selectBackfillRpcBatch(state.onchainQueue, state.pools, 3, 0)[2].poolKey, "old");
   assert.equal(new Set(state.onchainQueue.map((job) => job.poolKey)).size, state.onchainQueue.length);
 });
 

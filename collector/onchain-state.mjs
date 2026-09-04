@@ -108,7 +108,8 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
   }
 
   const tag = typeof block.number === "number" ? toHex(block.number) : block.tag ?? "latest";
-  const calls = [
+  const cachedIdentity = trustedPoolIdentity(options.identityEvidence, pool);
+  const calls = cachedIdentity ? [] : [
     ethCall(pool.poolAddress, SELECTOR.token0, tag, "token0"),
     ethCall(pool.poolAddress, SELECTOR.token1, tag, "token1"),
     ethCall(pool.poolAddress, SELECTOR.factory, tag, "factory")
@@ -124,7 +125,7 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
 
   const outcomes = await batchOutcomes(rpc, calls, options);
   const byLabel = new Map(outcomes.map((outcome, index) => [calls[index].label, outcome]));
-  const requiredFailure = ["token0", "token1", "factory", adapter.kind === "v2" || adapter.kind === "aerodrome-classic" ? "getReserves" : "slot0"]
+  const requiredFailure = [...(cachedIdentity ? [] : ["token0", "token1", "factory"]), adapter.kind === "v2" || adapter.kind === "aerodrome-classic" ? "getReserves" : "slot0"]
     .map((label) => [label, byLabel.get(label)])
     .find(([, outcome]) => !outcome?.ok);
   if (requiredFailure) {
@@ -139,9 +140,9 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
     });
   }
 
-  const token0 = decodeAbiAddress(byLabel.get("token0").value);
-  const token1 = decodeAbiAddress(byLabel.get("token1").value);
-  const factory = byLabel.get("factory")?.ok ? decodeAbiAddress(byLabel.get("factory").value) : undefined;
+  const token0 = cachedIdentity?.token0 ?? decodeAbiAddress(byLabel.get("token0")?.value);
+  const token1 = cachedIdentity?.token1 ?? decodeAbiAddress(byLabel.get("token1")?.value);
+  const factory = cachedIdentity?.factory ?? (byLabel.get("factory")?.ok ? decodeAbiAddress(byLabel.get("factory").value) : undefined);
   if (!token0 || !token1) return stateBase(pool, adapter, block, now, { status: "rejected", confidence: "rejected", reasonCode: "malformed_pool_identity", retryable: false });
   if (token0 !== pool.token0) return stateBase(pool, adapter, block, now, { status: "rejected", confidence: "rejected", reasonCode: "token0_mismatch", retryable: false, token0, token1, factory });
   if (token1 !== pool.token1) return stateBase(pool, adapter, block, now, { status: "rejected", confidence: "rejected", reasonCode: "token1_mismatch", retryable: false, token0, token1, factory });
@@ -163,7 +164,10 @@ export async function readPoolOnchainState(rpc, pool, metadata = {}, block = {},
       sourceMethod: "erc20_balanceOf_pool"
     },
     failureReasons: balanceFailures,
-    endpointLabel: outcomes.find((outcome) => outcome.endpointLabel)?.endpointLabel
+    endpointLabel: outcomes.find((outcome) => outcome.endpointLabel)?.endpointLabel,
+    identityCacheHit: Boolean(cachedIdentity),
+    tokenDecimalsCacheHits: 2,
+    identityEvidence: cachedIdentity ?? { status: "verified", poolAddress: pool.poolAddress, token0, token1, factory, factoryId: pool.factoryId, verifiedAtBlockNumber: block.number, verifiedAtBlockHash: block.hash, source: "exact_rpc_pool_identity" }
   });
 
   if (adapter.kind === "v2" || adapter.kind === "aerodrome-classic") {
@@ -247,9 +251,14 @@ export function resolveOnchainPoolEvidence(state, now = new Date()) {
     const onchain = pool.onchainState;
     const onchainRate = SUCCESS.has(onchain?.status) ? positive(onchain.observedPrice0In1 ?? onchain.priceToken1PerToken0) : undefined;
     const providerRate = positive(pool.providerPriceToken1PerToken0) ?? providerPoolRate(pool);
+    const providerObservedAt = pool.marketObservedAt ?? pool.providerEnrichment?.observedAt;
+    // Legacy/unit rows with no provider timestamp retain conservative conflict
+    // behavior; only an explicitly old timestamp can be classified as stale.
+    const providerFresh = providerObservedAt ? evidenceFresh(providerObservedAt, now) : true;
     const priceReconciliation = {
-      ...reconcileOnchainProviderValues(providerRate, onchainRate, ONCHAIN_PRICE_MAX_DEVIATION, "price"),
-      providerObservedAt: pool.marketObservedAt ?? pool.providerEnrichment?.observedAt,
+      ...reconcileOnchainProviderValues(providerFresh ? providerRate : undefined, onchainRate, ONCHAIN_PRICE_MAX_DEVIATION, "price"),
+      ...(providerRate !== undefined && !providerFresh ? { provider: providerRate, reasonCode: onchainRate !== undefined ? "price_provider_stale" : "price_unavailable_provider_stale" } : {}),
+      providerObservedAt,
       onchainObservedAt: onchain?.observedAt,
       onchainBlockNumber: onchain?.blockNumber,
       onchainBlockHash: onchain?.blockHash
@@ -260,8 +269,9 @@ export function resolveOnchainPoolEvidence(state, now = new Date()) {
     const onchainLiquidityUsd = onchainRate && amounts ? liquidityFromEvidence(amounts, onchain.decimals0, onchain.decimals1, price0, price1, onchainRate) : undefined;
     const providerLiquidityUsd = finiteNonNegative(pool.providerLiquidityUsd) ?? (pool.providerEnrichment?.status === "matched" ? finiteNonNegative(pool.liquidityUsd) : undefined);
     const liquidityReconciliation = {
-      ...reconcileOnchainProviderValues(providerLiquidityUsd, onchainLiquidityUsd, ONCHAIN_LIQUIDITY_MAX_DEVIATION, "liquidity"),
-      providerObservedAt: pool.marketObservedAt ?? pool.providerEnrichment?.observedAt,
+      ...reconcileOnchainProviderValues(providerFresh ? providerLiquidityUsd : undefined, onchainLiquidityUsd, ONCHAIN_LIQUIDITY_MAX_DEVIATION, "liquidity"),
+      ...(providerLiquidityUsd !== undefined && !providerFresh ? { provider: providerLiquidityUsd, reasonCode: onchainLiquidityUsd !== undefined ? "liquidity_provider_stale" : "liquidity_unavailable_provider_stale" } : {}),
+      providerObservedAt,
       onchainObservedAt: onchain?.observedAt,
       onchainBlockNumber: onchain?.blockNumber
     };
@@ -271,7 +281,7 @@ export function resolveOnchainPoolEvidence(state, now = new Date()) {
       : liquidityReconciliation.status === "conflict"
         ? "conflicting_liquidity"
         : classifyOnchainLiquidity(onchainLiquidityUsd ?? providerLiquidityUsd);
-    const selectedRate = priceReconciliation.status === "conflict" ? undefined : onchainRate ?? providerRate;
+    const selectedRate = priceReconciliation.status === "conflict" ? undefined : onchainRate ?? (providerFresh ? providerRate : undefined);
     const selectedLiquidity = liquidityReconciliation.status === "conflict" || onchainFreshness === "stale" || onchainFreshness === "future" ? undefined : onchainLiquidityUsd ?? providerLiquidityUsd;
     const derivedPrices = onchainRate ? observedUsdPrices(pool, known, onchainRate) : {};
     Object.assign(pool, {
@@ -433,6 +443,18 @@ function freshAnchor(anchor, now) {
   if (anchor?.status !== "ready" || !positive(anchor.value)) return false;
   const observed = Date.parse(anchor.observedAt ?? "");
   return Number.isFinite(observed) && observed <= now.getTime() + 5_000 && now.getTime() - observed <= ONCHAIN_STATE_MAX_AGE_MS;
+}
+
+function evidenceFresh(observedAt, now) {
+  const value=Date.parse(observedAt??"");
+  return Number.isFinite(value)&&value<=now.getTime()+5_000&&now.getTime()-value<=ONCHAIN_STATE_MAX_AGE_MS;
+}
+
+export function trustedPoolIdentity(evidence, pool) {
+  if (evidence?.status!=="verified"||evidence.poolAddress!==pool?.poolAddress||evidence.token0!==pool?.token0||evidence.token1!==pool?.token1||evidence.factoryId!==pool?.factoryId) return undefined;
+  if (pool.factoryAddress&&evidence.factory!==pool.factoryAddress) return undefined;
+  if (!Number.isSafeInteger(evidence.verifiedAtBlockNumber)||!/^0x[0-9a-f]{64}$/i.test(evidence.verifiedAtBlockHash??"")) return undefined;
+  return evidence;
 }
 
 function rationalToFiniteNumber(numerator, denominator) {

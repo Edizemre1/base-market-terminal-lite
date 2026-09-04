@@ -328,21 +328,25 @@ function buildTokenOpportunity(
   const primarySelection = explainPrimarySelection(uniquePairs, primary, previous?.primaryMarketId);
   const canonicalPrice = calculateOpportunityUsdcPrice(focus.address, pricingPairs, new Date(nowMs));
   const canonicalPriced = canonicalPrice.tier !== "UNPRICED";
+  const proofPoolKeys = new Set(canonicalPrice.sourcePoolKeys);
+  const proofPairs = canonicalPriced ? uniquePairs.filter((pair) => proofPoolKeys.has((pair.pairAddress ?? pair.id).toLowerCase())) : uniquePairs;
+  const qualityPairs = proofPairs.length ? proofPairs : [primary];
+  const qualityPools = qualityPairs.map((pair) => poolsById.get(pair.id)).filter((pool): pool is PoolMarket => Boolean(pool));
   const metadataStatus = metadataQuality(uniquePairs);
   const aggregate = buildAggregate(uniquePairs);
-  const liquidityValues = uniquePairs.map((pair) => readNonNegative(pair.liquidityUsd));
-  const liquidityState = uniquePairs.some((pair) => pair.liquidityState === "conflicting_liquidity") ? "conflicting_liquidity"
-    : uniquePairs.some((pair) => pair.liquidityState === "stale_liquidity") ? "stale_liquidity"
+  const liquidityValues = qualityPairs.map((pair) => readNonNegative(pair.liquidityUsd));
+  const liquidityState = qualityPairs.some((pair) => pair.liquidityState === "conflicting_liquidity") ? "conflicting_liquidity"
+    : qualityPairs.some((pair) => pair.liquidityState === "stale_liquidity") ? "stale_liquidity"
       : classifyLiquidityState(liquidityValues);
   const bestLiquidityUsd = liquidityValues.filter((value): value is number => value !== undefined).sort((left, right) => right - left)[0];
-  const observedPriceUsd = buildWebObservedPrice(focus.address, uniquePairs, nowMs);
-  const providerDiscoveryState = uniquePairs.some((pair) => pair.providerDiscoveryState === "matched") ? "matched"
-    : uniquePairs.some((pair) => pair.providerDiscoveryState === "pending") ? "pending"
-      : uniquePairs.some((pair) => pair.providerDiscoveryState === "conflicting") ? "conflicting"
-        : uniquePairs.some((pair) => pair.providerDiscoveryState === "not_found") ? "not_found" : "detected";
+  const observedPriceUsd = buildWebObservedPrice(focus.address, qualityPairs, nowMs);
+  const providerDiscoveryState = qualityPairs.some((pair) => pair.providerDiscoveryState === "matched") ? "matched"
+    : qualityPairs.some((pair) => pair.providerDiscoveryState === "pending") ? "pending"
+      : qualityPairs.some((pair) => pair.providerDiscoveryState === "conflicting") ? "conflicting"
+        : qualityPairs.some((pair) => pair.providerDiscoveryState === "not_found") ? "not_found" : "detected";
   const metadataVerified = uniquePairs.some((pair) => pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified" || pair.onchainProvenance?.decimalsVerified === true);
-  const priceConflict = uniquePairs.some((pair) => pair.priceReconciliation?.status === "conflict");
-  const ranked = metadataVerified && !priceConflict && canonicalPriced && !primary.stale && bestLiquidityUsd !== undefined && bestLiquidityUsd >= MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd;
+  const priceConflict = qualityPairs.some((pair) => pair.priceReconciliation?.status === "conflict");
+  const ranked = metadataVerified && !priceConflict && canonicalPriced && qualityPools.every((pool) => pool.quality !== "expired") && bestLiquidityUsd !== undefined && bestLiquidityUsd >= MARKET_QUALITY_THRESHOLDS.rankingMinimumLiquidityUsd;
   const exclusionReason = priceConflict ? "price_conflict" : liquidityState === "conflicting_liquidity" || liquidityState === "stale_liquidity" ? liquidityState : !metadataVerified ? "token_metadata_pending" : canonicalPrice.reasonCode;
   const qualityBand = evaluateOpportunityQuality({ canonicalPrice, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState: providerDiscoveryState, exclusionReason });
   const qualityEligibility = buildQualityCategoryEligibility({

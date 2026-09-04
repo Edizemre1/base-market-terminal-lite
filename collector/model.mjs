@@ -178,20 +178,23 @@ export function buildCanonicalOpportunities(inputPools, metadata = {}, previous 
     const before = previousById.get(group.id);
     const selection = selectPrimaryPool(group.pools, before?.primaryPoolKey, now);
     const price = calculatePriceFromContext(group.tokenAddress, pricingContext, now);
+    const proofKeys = new Set(price.sourcePoolKeys ?? []);
+    const proofPools = price.tier === "UNPRICED" ? group.pools : group.pools.filter(pool => proofKeys.has(pool.poolKey));
+    const qualityPools = proofPools.length ? proofPools : selection.pool ? [selection.pool] : group.pools;
     const tokenMetadata = metadata[group.tokenAddress];
     const observed = group.pools.map((pool) => pool.observedAt ?? pool.confirmedAt).filter(Boolean).sort();
     const metadataVerified = tokenMetadata?.verificationState === "verified" || Number.isInteger(tokenMetadata?.decimals);
-    const ranked = metadataVerified && price.tier !== "UNPRICED" && group.pools.some((pool) => isUsableRankedPool(pool, now));
-    const observedPriceUsd = buildObservedPriceUsd(group.tokenAddress, group.pools, now);
-    const bestLiquidityUsd = bestKnownLiquidityUsd(group.pools);
-    const liquidityState = group.pools.some((pool) => pool.liquidityResolutionState === "conflicting_liquidity") ? "conflicting_liquidity"
-      : group.pools.some((pool) => pool.liquidityResolutionState === "stale_liquidity") ? "stale_liquidity"
-        : classifyLiquidityState(group.pools.map((pool) => pool.liquidityUsd));
-    const providerState = group.pools.some((pool) => pool.providerEnrichment?.status === "matched") ? "matched"
-      : group.pools.some((pool) => pool.providerEnrichment?.status === "pending") ? "pending"
-        : group.pools.some((pool) => pool.providerEnrichment?.status === "conflicting") ? "conflicting"
-          : group.pools.some((pool) => pool.providerEnrichment?.status === "unmatched") ? "not_found" : "detected";
-    const reconciliationConflict = group.pools.some((pool) => pool.priceReconciliation?.status === "conflict");
+    const ranked = metadataVerified && price.tier !== "UNPRICED" && qualityPools.some((pool) => isUsableRankedPool(pool, now));
+    const observedPriceUsd = buildObservedPriceUsd(group.tokenAddress, qualityPools, now);
+    const bestLiquidityUsd = bestKnownLiquidityUsd(qualityPools);
+    const liquidityState = qualityPools.some((pool) => pool.liquidityResolutionState === "conflicting_liquidity") ? "conflicting_liquidity"
+      : qualityPools.some((pool) => pool.liquidityResolutionState === "stale_liquidity") ? "stale_liquidity"
+        : classifyLiquidityState(qualityPools.map((pool) => pool.liquidityUsd));
+    const providerState = qualityPools.some((pool) => pool.providerEnrichment?.status === "matched") ? "matched"
+      : qualityPools.some((pool) => pool.providerEnrichment?.status === "pending") ? "pending"
+        : qualityPools.some((pool) => pool.providerEnrichment?.status === "conflicting") ? "conflicting"
+          : qualityPools.some((pool) => pool.providerEnrichment?.status === "unmatched") ? "not_found" : "detected";
+    const reconciliationConflict = qualityPools.some((pool) => pool.priceReconciliation?.status === "conflict");
     const exclusionReason = reconciliationConflict ? "price_conflict" : liquidityState === "conflicting_liquidity" || liquidityState === "stale_liquidity" ? liquidityState : !metadataVerified ? "token_metadata_pending" : price.reasonCode;
     const quality = evaluateOpportunityQuality({ canonicalPrice: price, observedPriceUsd, liquidityState, bestLiquidityUsd, ranked, providerState, exclusionReason });
     const poolCreatedTimes = group.pools.map((pool) => pool.blockTimestamp ?? pool.confirmedAt).filter(Boolean).sort();
@@ -272,7 +275,7 @@ function createPricingContext(pools, now, options = {}) {
 function calculatePriceFromContext(tokenAddress, { graph, rejectedByToken, rejectedAnchors }, now) {
   const token = normalizeAddress(tokenAddress);
   if (!token) return unpriced("invalid_token_address");
-  if (token === BASE_USDC) return { value: 1, tier: "A", kind: "direct", sourcePoolKeys: [], anchor: BASE_USDC, observedAt: now.toISOString(), freshness: "fresh", reasonCode: "canonical_usdc_unit" };
+  if (token === BASE_USDC) return buildCanonicalPriceProof({ token, now, unit: true });
   const queue = [{ token, value: 1, path: [], visited: new Set([token]), observedAt: now.toISOString(), blockNumber: undefined }];
   const candidates = [];
   while (queue.length) {
@@ -295,6 +298,7 @@ function calculatePriceFromContext(tokenAddress, { graph, rejectedByToken, rejec
   if (!candidates.length) {
     const tokenRejected = rejectedByToken.get(token) ?? [];
     const relevant = tokenRejected.length ? tokenRejected : rejectedAnchors;
+    if (relevant.some(({ reason }) => reason === "wrong_chain")) return unpriced("wrong_chain");
     if (relevant.some(({ reason }) => reason === "future_timestamp")) return unpriced("future_timestamp");
     if (relevant.some(({ reason }) => reason === "conflicting_pool_identity")) return unpriced("conflicting_pool_identity");
     if (relevant.some(({ reason }) => reason === "stale_anchor")) return unpriced("stale_anchor");
@@ -311,19 +315,44 @@ function calculatePriceFromContext(tokenAddress, { graph, rejectedByToken, rejec
   const winner = consensus.representative;
   const intermediates = winner.path.slice(0, -1).map((edge) => edge.to);
   const tier = winner.path.length === 1 ? "A" : winner.path.length === 2 && intermediates[0] === BASE_WETH ? "B" : "C";
+  return buildCanonicalPriceProof({ token, now, tier, winner, consensus });
+}
+
+export function buildCanonicalPriceProof({ token, now = new Date(), tier, winner, consensus, unit = false }) {
+  if (unit) return { chainId: BASE_CHAIN_ID, tokenAddress: token, value: 1, rawValue: "1.00000000000000", tier: "A", kind: "direct", sourcePoolKeys: [], anchor: BASE_USDC, observedAt: now.toISOString(), expiresAt: new Date(now.getTime() + MAX_PRICE_AGE_MS).toISOString(), freshness: "fresh", eligible: true, eligibilityReason: "canonical_usdc_unit", reasonCode: "canonical_usdc_unit" };
+  const first = winner.path[0], last = winner.path.at(-1);
+  const sourceEdges = [...new Map(consensus.members.flatMap(candidate => candidate.path.map(edge => [edge.poolKey, edge]))).values()];
+  const sourcePoolKeys = [...new Set(sourceEdges.flatMap(edge => edge.sourcePoolKeys ?? [edge.poolKey]))].sort();
+  const observedAt = winner.observedAt;
   return {
-    value: consensus.value,
-    rawValue: canonicalRawValue(consensus.value),
+    chainId: BASE_CHAIN_ID,
+    tokenAddress: token,
+    primaryPoolKey: first.poolKey,
+    adapterFamily: first.adapterFamily,
+    tokenOrientation: first.from === first.token0 ? "direct" : "inverted",
+    decimals: { token0: first.decimals0, token1: first.decimals1 },
+    rawPoolPrice: first.rawPriceRatio,
+    inversionApplied: first.from !== first.token0,
+    value: winner.value,
+    rawValue: canonicalRawValue(winner.value),
     tier,
     kind: tier === "A" ? "direct" : "converted",
-    sourcePoolKeys: [...new Set(consensus.members.flatMap((candidate) => candidate.path.flatMap((edge) => edge.sourcePoolKeys ?? [edge.poolKey])))].sort(),
-    anchor: tier === "B" ? BASE_WETH : winner.path.at(-1)?.from,
-    observedAt: winner.observedAt,
+    sourcePoolKeys,
+    sourceBlocks: sourceEdges.map(edge => ({ poolKey: edge.poolKey, blockNumber: edge.blockNumber, blockHash: edge.blockHash, observedAt: edge.observedAt })),
+    anchor: tier === "B" ? BASE_WETH : last?.from,
+    anchorPrice: tier === "B" ? last.rate : undefined,
+    anchorPoolKeys: tier === "B" ? (last.sourcePoolKeys ?? [last.poolKey]) : [],
+    providerProvenance: sourceEdges.map(edge => ({ poolKey: edge.poolKey, status: edge.providerStatus, providers: edge.providers, observedAt: edge.providerObservedAt })),
+    agreement: sourceEdges.map(edge => ({ poolKey: edge.poolKey, status: edge.agreementStatus, deviation: edge.agreementDeviation })),
+    liquidityEvidence: sourceEdges.map(edge => ({ poolKey: edge.poolKey, liquidityUsd: edge.liquidityUsd, state: edge.liquidityState, source: edge.onchainLiquidityUsd !== undefined ? "onchain_verified" : edge.providerLiquidityUsd !== undefined ? "provider_observed" : "unknown" })),
+    observedAt,
+    expiresAt: new Date(Date.parse(observedAt) + MAX_PRICE_AGE_MS).toISOString(),
     blockNumber: winner.blockNumber,
-    sourceBlocks: [...new Map(consensus.members.flatMap((candidate) => candidate.path.map((edge) => [edge.poolKey, { poolKey: edge.poolKey, blockNumber: edge.blockNumber, blockHash: edge.blockHash, observedAt: edge.observedAt }]))).values()],
     freshness: "fresh",
+    eligible: true,
+    eligibilityReason: tier === "A" ? "direct_usdc_pool" : tier === "B" ? "weth_usdc_anchor" : "bounded_verified_conversion",
     qualityStatus: consensus.members.length > 1 ? "consensus" : "single_path",
-    selectionReason: consensus.members.length > 1 ? "bounded_liquidity_consensus" : "highest_quality_verified_path",
+    selectionReason: consensus.members.length > 1 ? "deterministic_consensus_representative" : "highest_quality_verified_path",
     maximumDeviation: consensus.maximumDeviation,
     reasonCode: tier === "A" ? "direct_usdc_pool" : tier === "B" ? "weth_usdc_anchor" : "bounded_verified_conversion"
   };
@@ -456,6 +485,7 @@ function opportunityTokens(pool) {
 }
 
 function validatePricingPool(pool, nowMs, maxAgeMs, minimumLiquidityUsd) {
+  if (pool.chainId !== undefined && pool.chainId !== BASE_CHAIN_ID) return "wrong_chain";
   if (pool.status !== "confirmed" || pool.orphaned || !pool.verifiedSource) return "unverified_pool";
   if (pool.providerEnrichment?.status === "conflicting") return "conflicting_pool_identity";
   if (pool.priceReconciliation?.status === "conflict") return "price_conflict";
@@ -487,7 +517,7 @@ function buildPriceGraph(pools) {
   const graph = new Map();
   for (const pool of pools) {
     const rate = pool.onchainState.observedPrice0In1;
-    const provenance = { poolKey: pool.poolKey, sourcePoolKeys: pool.sourcePoolKeys, observedAt: pool.onchainState.observedAt, blockNumber: pool.onchainState.blockNumber, blockHash: pool.onchainState.blockHash, liquidityUsd: pool.liquidityUsd };
+    const provenance = { poolKey: pool.poolKey, sourcePoolKeys: pool.sourcePoolKeys, observedAt: pool.onchainState.observedAt, blockNumber: pool.onchainState.blockNumber, blockHash: pool.onchainState.blockHash, liquidityUsd: pool.liquidityUsd, liquidityState: pool.liquidityResolutionState, onchainLiquidityUsd: pool.onchainLiquidityUsd, providerLiquidityUsd: pool.providerLiquidityUsd, adapterFamily: pool.onchainState.adapterFamily, token0: pool.token0, token1: pool.token1, decimals0: pool.onchainState.decimals0, decimals1: pool.onchainState.decimals1, rawPriceRatio: pool.onchainState.rawPriceRatio, providerStatus: pool.providerEnrichment?.status, providers: pool.providerEnrichment?.providers ?? pool.providers, providerObservedAt: pool.providerEnrichment?.observedAt, agreementStatus: pool.priceReconciliation?.status, agreementDeviation: pool.priceReconciliation?.deviation };
     addEdge(graph, pool.token0, { to: pool.token1, from: pool.token0, rate, ...provenance });
     addEdge(graph, pool.token1, { to: pool.token0, from: pool.token1, rate: 1 / rate, ...provenance });
   }
@@ -518,19 +548,14 @@ function selectPriceConsensus(candidates) {
   const median = ordered[Math.floor(ordered.length / 2)]?.value;
   let members = ordered.filter((candidate) => relativeDistance(candidate.value, median) <= 0.15);
   if (!members.length) members = [ordered.sort((left, right) => comparePricePaths(left.path, right.path))[0]];
-  const rawWeights = members.map((candidate) => Math.sqrt(Math.max(1, Math.min(...candidate.path.map((edge) => edge.liquidityUsd)))));
-  const orderedWeights = [...rawWeights].sort((left, right) => left - right);
-  const medianWeight = orderedWeights[Math.floor(orderedWeights.length / 2)] || 1;
-  const weights = rawWeights.map((weight) => Math.min(weight, medianWeight * 4));
-  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
-  const value = members.reduce((sum, candidate, index) => sum + candidate.value * weights[index], 0) / totalWeight;
   const representative = [...members].sort((left, right) => comparePricePaths(left.path, right.path))[0];
+  const value = representative.value;
   const values = members.map((candidate) => candidate.value);
   return { value, members, representative, maximumDeviation: values.length > 1 ? Math.max(...values.map((item) => relativeDistance(item, value))) : 0 };
 }
 
 function unpriced(reasonCode) {
-  return { tier: "UNPRICED", kind: "unpriced", sourcePoolKeys: [], freshness: "unavailable", reasonCode };
+  return { chainId: BASE_CHAIN_ID, tier: "UNPRICED", kind: "unpriced", sourcePoolKeys: [], anchorPoolKeys: [], freshness: "unavailable", eligible: false, rejectionReason: reasonCode, reasonCode };
 }
 
 function primaryScore(pool, now) {

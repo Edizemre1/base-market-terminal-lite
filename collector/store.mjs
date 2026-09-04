@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BASE_CHAIN_ID, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
 import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_PRICE_AGE_MS, MAX_RECONCILIATION_RING } from "./model.mjs";
+import { calculateProofFunnel } from "./proof-coverage.mjs";
 import { resolveOnchainPoolEvidence } from "./onchain-state.mjs";
 
 export const STORE_SCHEMA_VERSION = 1;
@@ -317,6 +318,7 @@ function synchronizeDerivedHealth(state) {
   state.health.anchorObservedAt = anchor.observedAt;
   state.health.anchorFreshness = anchor.freshness ?? "unavailable";
   state.health.anchorReasonCode = anchor.reasonCode;
+  state.health.proofCoverage = calculateProofFunnel(state, new Date(state.updatedAt));
 }
 
 function keepNewestRecordEntries(record, maximum, rank) {

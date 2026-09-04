@@ -60,6 +60,7 @@ export type BasePair = {
     observedAt?: string;
     observedPrice0In1?: number;
     observedPrice1In0?: number;
+    rawPriceRatio?: { numerator: string; denominator: string };
     reserve0Raw?: string;
     reserve1Raw?: string;
     balance0Raw?: string;

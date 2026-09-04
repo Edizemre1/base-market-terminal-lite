@@ -45,6 +45,7 @@ type StoredPool = {
     status?: "complete" | "pending" | "retryable" | "rejected" | "unsupported";
     adapterFamily?: string; protocolFamily?: string; reasonCode?: string; confidence?: string; sourceMethod?: string;
     blockNumber?: number; blockHash?: string; observedAt?: string; observedPrice0In1?: number; observedPrice1In0?: number;
+    rawPriceRatio?: { numerator?: string; denominator?: string };
     reserveEvidence?: { reserve0Raw?: string; reserve1Raw?: string };
     balanceEvidence?: { balance0Raw?: string; balance1Raw?: string };
   };
@@ -422,6 +423,7 @@ function stateEvidence(pool: StoredPool): BasePair["onchainStateEvidence"] {
     observedAt: state.observedAt,
     observedPrice0In1: state.observedPrice0In1,
     observedPrice1In0: state.observedPrice1In0,
+    rawPriceRatio: state.rawPriceRatio?.numerator && state.rawPriceRatio?.denominator ? { numerator: state.rawPriceRatio.numerator, denominator: state.rawPriceRatio.denominator } : undefined,
     reserve0Raw: state.reserveEvidence?.reserve0Raw,
     reserve1Raw: state.reserveEvidence?.reserve1Raw,
     balance0Raw: state.balanceEvidence?.balance0Raw,

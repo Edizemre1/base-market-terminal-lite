@@ -41,7 +41,7 @@ export function resolveCollectorConfig(environment = process.env) {
     bootstrapBlocks: boundedInteger(environment.ONCHAIN_BOOTSTRAP_BLOCKS, 2_000, 64, 10_000),
     maximumChunksPerPass: boundedInteger(environment.ONCHAIN_MAX_CHUNKS_PER_PASS, 4, 1, 16),
     metadataBatchSize: boundedInteger(environment.ONCHAIN_METADATA_BATCH_SIZE, 1, 1, 32),
-    onchainStateBatchSize: boundedInteger(environment.ONCHAIN_STATE_BATCH_SIZE, 1, 1, 12),
+    onchainStateBatchSize: boundedInteger(environment.ONCHAIN_STATE_BATCH_SIZE, 4, 1, 12),
     onchainLocalClassificationBatchSize: boundedInteger(environment.ONCHAIN_LOCAL_CLASSIFICATION_BATCH_SIZE, 128, 1, 512),
     onchainStateIntervalMs: boundedInteger(environment.ONCHAIN_STATE_INTERVAL_MS, NORMAL_DERIVED_INTERVAL_MS, 500, 120_000),
     onchainStateCycleTimeoutMs: boundedInteger(environment.ONCHAIN_STATE_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
@@ -58,9 +58,9 @@ export class OnchainDiscoveryCollector {
   constructor(config = resolveCollectorConfig()) {
     this.config = config;
     this.transport = config.transport ?? new RpcTransportPool(config.rpcEndpoints ?? [{ label: "primary", url: config.httpUrl }], { timeoutMs: Math.min(8_000, config.providerTimeoutMs ?? 8_000) });
-    this.rpc = config.rpcClient ?? this.transport.client();
-    this.discoveryRpc = config.discoveryRpcClient ?? this.transport.client({ batchPaceMs: config.discoveryBatchPaceMs ?? 3_000 });
-    this.stateRpc = config.stateRpcClient ?? this.transport.client();
+    this.rpc = config.rpcClient ?? this.transport.client({ purpose: "binding" });
+    this.discoveryRpc = config.discoveryRpcClient ?? this.transport.client({ batchPaceMs: config.discoveryBatchPaceMs ?? 3_000, purpose: "discovery" });
+    this.stateRpc = config.stateRpcClient ?? this.transport.client({ purpose: "pool_state" });
     this.provider = config.providerClient ?? new ProviderEnrichmentClient({ timeoutMs: config.providerTimeoutMs });
     // Anchor availability is a pricing safety boundary. Keep its provider
     // request and bounded RPC validation independent from the normal exact-pool
@@ -69,7 +69,7 @@ export class OnchainDiscoveryCollector {
       timeoutMs: config.providerTimeoutMs,
       retries: 0
     });
-    this.anchorRpc = config.anchorRpcClient ?? this.transport.client();
+    this.anchorRpc = config.anchorRpcClient ?? this.transport.client({ purpose: "anchor" });
     this.store = new DurableDiscoveryStore(config.storeDirectory);
     this.running = false;
     this.websocket = undefined;
@@ -79,6 +79,7 @@ export class OnchainDiscoveryCollector {
     this.lastObservedConfirmedHead = undefined;
     this.managerCodeEvidence = new Map();
     this.loopHealth = {};
+    this.proofCost = { successfulProofs: 0 };
   }
 
   async open() {
@@ -352,12 +353,13 @@ export class OnchainDiscoveryCollector {
       if (!adapter) return { item, state: unsupportedOnchainState(pool, now) };
       try {
         if (poolNeedsOnchainRpc(before, item) && block.error) throw block.error;
-        return { item, state: await readPoolOnchainState(this.stateRpc, pool, before.tokenMetadata, block, { signal, blockProof: block.hash ? block : undefined }) };
+        return { item, state: await readPoolOnchainState(this.stateRpc, pool, before.tokenMetadata, block, { signal, blockProof: block.hash ? block : undefined, identityEvidence: pool.onchainState?.identityEvidence }) };
       } catch (error) {
         return { item, state: { ...unsupportedOnchainState(pool, now), status: "retryable", adapterFamily: adapter.adapterFamily, protocolFamily: adapter.protocolFamily, confidence: "unavailable", reasonCode: error?.reasonCode ?? "onchain_state_read_failed", endpointLabel: error?.endpointLabel, failureMethod: error?.method, retryable: true } };
       }
     }));
     throwIfAborted(signal);
+    this.proofCost.successfulProofs += outcomes.filter(outcome => outcome.state?.status === "complete").length;
     const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
     let semanticBefore;
     const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
@@ -390,14 +392,26 @@ export class OnchainDiscoveryCollector {
         if (observed.status === "complete") draft.counters.onchainStateSuccess += 1;
         else draft.counters.onchainStateFailure += 1;
         draft.counters.onchainStateClassified += 1;
+        draft.counters.poolIdentityCacheHits = (draft.counters.poolIdentityCacheHits ?? 0) + Number(observed.identityCacheHit);
+        draft.counters.tokenDecimalsCacheHits = (draft.counters.tokenDecimalsCacheHits ?? 0) + (observed.tokenDecimalsCacheHits ?? 0);
         remove.add(key);
       }
       draft.onchainQueue = draft.onchainQueue.filter((item) => !remove.has(item.poolKey));
       seedOnchainQueue(draft, now);
       draft.health.onchainQueueDepth = draft.onchainQueue.length;
       draft.health.onchainRpc = this.stateRpc.circuitSnapshot?.();
+      const usage = draft.health.onchainRpc?.byPurpose?.pool_state ?? {};
+      draft.health.proofRpcCost = {
+        actualRequests: usage.requests ?? 0,
+        actualCalls: usage.calls ?? 0,
+        successfulProofs: this.proofCost.successfulProofs,
+        callsPerSuccessfulProof: this.proofCost.successfulProofs ? (usage.calls ?? 0) / this.proofCost.successfulProofs : undefined,
+        cacheHits: draft.health.onchainRpc?.cacheHits ?? 0,
+        coalescingHits: draft.health.onchainRpc?.coalescingHits ?? 0
+      };
       draft.health.lastOnchainStateCycle = now.toISOString();
       draft.health.backfill = backfillHealth(draft, now);
+      draft.health.providerRequestUsage = this.provider.usageSnapshot?.();
     }, (draft) => appendSemanticDeltas(draft, semanticBefore, touchedPoolKeys));
     return after;
   }
@@ -825,6 +839,7 @@ function ensureEnrichmentState(state) {
   state.metadataQueue ??= [];
   state.priceAnchors ??= {};
   state.priceAnchors.wethUsdc ??= { status: "unavailable", reasonCode: "not_initialized", sourcePoolCount: 0, freshness: "unavailable" };
+  state.proofCoverageCohort ??= { capturedAt: state.updatedAt ?? new Date().toISOString(), poolKeys: Object.keys(state.pools ?? {}).sort() };
   state.counters ??= {};
   for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected", "exactLookupSuccess", "exactLookupPending", "exactLookupNotFound", "bandTransitions", "onchainStateSuccess", "onchainStateFailure", "onchainStateClassified", "onchainStateDuplicate", "onchainStateOutOfOrder", "tokenMetadataVerified"]) {
     if (!Number.isFinite(state.counters[key])) state.counters[key] = 0;
@@ -1013,14 +1028,19 @@ function semanticMetrics(opportunity) {
 }
 
 function enrichmentPriority(state, pool, containsAnchor, now) {
-  if (isRecentlyDetected(pool, now)) return 100;
-  if (containsAnchor) return 95;
+  if (containsAnchor) return 100;
+  const supportedVerified = Boolean(resolveOnchainAdapter(pool)) && [pool.token0,pool.token1].every(token => validTokenDecimals(state.tokenMetadata?.[token]?.decimals) && state.tokenMetadata[token]?.verificationState === "verified");
+  const value = Math.min(0.9, (Math.log1p(Math.max(0,pool.providerLiquidityUsd??0))+Math.log1p(Math.max(0,pool.volume24hUsd??0)))/100);
+  if (pool.providerEnrichment?.status === "matched" && supportedVerified) return 99 + value;
+  if ([pool.token0,pool.token1].includes(BASE_WETH)||[pool.token0,pool.token1].includes(BASE_USDC)) return 95 + value;
+  if (pool.providerEnrichment?.status === "matched" && value > 0) return 90 + value;
+  if (isRecentlyDetected(pool, now)) return 80;
   const opportunity = (state.opportunities ?? []).find((item) => item.poolKeys?.includes(pool.poolKey));
-  if (opportunity?.categoryEligibility?.new) return 90;
-  if (pool.providerEnrichment?.status === "matched") return 85;
-  if (opportunity?.qualityBand === "RANKED") return 80;
-  if (opportunity?.qualityBand === "EMERGING") return 60;
-  if (pool.providerEnrichment?.status === "pending") return 55;
+  if (pool.backfill?.lastSuccessfulHash) return 70 + value;
+  if (pool.providerEnrichment?.status === "pending" || pool.onchainState?.status === "retryable") return 60;
+  if (opportunity?.categoryEligibility?.new) return 55;
+  if (opportunity?.qualityBand === "RANKED") return 50;
+  if (opportunity?.qualityBand === "EMERGING") return 40;
   return 30;
 }
 

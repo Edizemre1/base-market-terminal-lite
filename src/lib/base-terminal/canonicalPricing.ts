@@ -20,6 +20,7 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
     if (!token0 || !token1 || !rate || !observedAt) return [];
     return [{
       poolKey,
+      chainId: 8453,
       token0,
       token1,
       status: "confirmed",
@@ -28,6 +29,9 @@ export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: 
       onchainState: { ...proof, token0, token1, observedPrice0In1: rate, decimals0: direct ? proof?.decimals0 : proof?.decimals1, decimals1: direct ? proof?.decimals1 : proof?.decimals0 },
       priceToken1PerToken0: rate,
       liquidityUsd: nonNegative(pair.liquidityUsd),
+      onchainLiquidityUsd: nonNegative(pair.liquidityReconciliation?.onchain),
+      providerLiquidityUsd: nonNegative(pair.liquidityReconciliation?.provider),
+      providerEnrichment: { status: pair.providerDiscoveryState, providers: pair.dataProviders, observedAt: pair.priceReconciliation?.providerObservedAt },
       priceReconciliation: pair.priceReconciliation,
       liquidityResolutionState: pair.liquidityState,
       volume24hUsd: nonNegative(pair.volumes?.h24),

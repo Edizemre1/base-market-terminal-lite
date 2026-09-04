@@ -78,7 +78,7 @@ test("trusted WETH/USDC anchor uses bounded liquidity consensus", () => {
   ], NOW);
   assert.equal(anchor.status, "ready");
   assert.equal(anchor.sourcePoolCount, 2);
-  assert.ok(anchor.value > 2_000 && anchor.value < 2_010);
+  assert.equal(anchor.value, 2_010, "consensus gates disagreement but the published value remains the exact highest-liquidity pool price");
   assert.ok(!anchor.consensusPools.includes("0xcccccccccccccccccccccccccccccccccccccccc"));
 });
 
@@ -416,7 +416,8 @@ test("outlier direct pool cannot capture canonical price", () => {
   ];
   const price = calculateCanonicalUsdcPrice(TOKEN, pools, NOW);
   assert.equal(price.tier, "A");
-  assert.ok(price.value > 1 && price.value < 1.02);
+  assert.equal(price.value, 1.02);
+  assert.equal(price.primaryPoolKey, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
   assert.ok(!price.sourcePoolKeys.includes("0xcccccccccccccccccccccccccccccccccccccccc"));
 });
 

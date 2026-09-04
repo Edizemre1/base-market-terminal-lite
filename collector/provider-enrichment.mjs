@@ -36,6 +36,7 @@ export class ProviderEnrichmentClient {
     this.providerGates = { dexscreener: new BoundedSemaphore(1), geckoterminal: new BoundedSemaphore(1) };
     this.exactLookupCache = new Map();
     this.exactLookupInFlight = new Map();
+    this.metrics = { lookups: 0, requests: 0, cacheHits: 0, coalescingHits: 0 };
     this.circuits = {
       dexscreener: newCircuit(),
       geckoterminal: newCircuit()
@@ -43,14 +44,15 @@ export class ProviderEnrichmentClient {
   }
 
   async lookupPool(poolAddress, { signal } = {}) {
+    this.metrics.lookups += 1;
     throwIfAborted(signal);
     const address = normalizeAddress(poolAddress);
     if (!address) throw new ProviderRequestError("malformed_pool_address", { retryable: false });
     const nowMs = this.now().getTime();
     const cached = this.exactLookupCache.get(address);
-    if (cached && cached.expiresAt > nowMs) return structuredClone({ ...cached.value, cacheHit: true });
+    if (cached && cached.expiresAt > nowMs) { this.metrics.cacheHits += 1; return structuredClone({ ...cached.value, cacheHit: true }); }
     const pending = this.exactLookupInFlight.get(address);
-    if (pending) return pending;
+    if (pending) { this.metrics.coalescingHits += 1; return pending; }
     const lookup = this.performExactPoolLookup(address, { signal }).then((value) => {
       throwIfAborted(signal);
       const ttl = value.lookupState === "not_found" ? EXACT_LOOKUP_NEGATIVE_TTL_MS : EXACT_LOOKUP_CACHE_MS;
@@ -122,10 +124,13 @@ export class ProviderEnrichmentClient {
     }]));
   }
 
+  usageSnapshot() { return { ...this.metrics, cacheSize: this.exactLookupCache.size, inFlight: this.exactLookupInFlight.size }; }
+
   async request(provider, url, { signal } = {}) {
     const circuit = this.circuits[provider];
     if (this.now().getTime() < circuit.openUntil) throw new ProviderRequestError("provider_circuit_open", { retryable: true, provider });
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
+      this.metrics.requests += 1;
       try {
         const payload = await withDeadline(async (attemptSignal) => {
           const release = await this.providerGates[provider].acquire(attemptSignal);
@@ -356,13 +361,8 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
     return { status: "degraded", reasonCode: "anchor_price_conflict", candidates: accepted, rejected, sourcePoolCount: accepted.length, freshness: "conflicting", deviation: relativeDeviation(prices) };
   }
   const consensus = inliers.length ? inliers : accepted;
-  const rawWeights = consensus.map((item) => Math.sqrt(item.liquidityUsd));
-  const orderedWeights = [...rawWeights].sort((left, right) => left - right);
-  const medianWeight = orderedWeights[Math.floor(orderedWeights.length / 2)] || 1;
-  const weights = rawWeights.map((weight) => Math.min(weight, medianWeight * 4));
-  const weightTotal = weights.reduce((sum, value) => sum + value, 0);
-  const value = consensus.reduce((sum, item, index) => sum + item.priceToken1PerToken0 * weights[index], 0) / weightTotal;
   const selected = [...consensus].sort((left, right) => right.liquidityUsd - left.liquidityUsd || left.poolAddress.localeCompare(right.poolAddress))[0];
+  const value = selected.priceToken1PerToken0;
   const observedAt = oldestIso(consensus.map((item) => item.observedAt));
   const sourcePoolKeys = consensus.map((item) => item.poolAddress).sort();
   return {
@@ -381,6 +381,7 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
     pricingPool: {
       poolKey: selected.poolAddress,
       poolAddress: selected.poolAddress,
+      chainId: BASE_CHAIN_ID,
       token0: selected.token0,
       token1: selected.token1,
       status: "confirmed",
@@ -393,6 +394,16 @@ export function resolveWethUsdcAnchor(candidates, now = new Date(), { maximumAge
       priceToken1PerToken0: selected.onchainState?.observedPrice0In1 ?? (selected.token0 === BASE_WETH ? value : 1 / value),
       rawPriceRatio: selected.onchainState?.rawPriceRatio ?? selected.rawPriceRatio,
       liquidityUsd: selected.liquidityUsd,
+      onchainLiquidityUsd: selected.liquidityUsd,
+      providerLiquidityUsd: selected.providerLiquidityUsd,
+      liquidityResolutionState: "usable_liquidity",
+      providerEnrichment: { status: "matched", providers: selected.providers, selectedProvider: selected.selectedProvider, observedAt: selected.receivedAt ?? selected.observedAt },
+      priceReconciliation: {
+        status: selected.providerPriceToken1PerToken0 && Math.abs(selected.providerPriceToken1PerToken0 / selected.priceToken1PerToken0 - 1) <= 0.15 ? "agreement" : "onchain_only",
+        provider: selected.providerPriceToken1PerToken0,
+        onchain: selected.priceToken1PerToken0,
+        deviation: selected.providerPriceToken1PerToken0 ? Math.abs(selected.providerPriceToken1PerToken0 / selected.priceToken1PerToken0 - 1) : undefined
+      },
       volume24hUsd: selected.volume24hUsd,
       trades24h: selected.trades24h,
       providers: [...new Set(consensus.flatMap((item) => item.providers ?? []))].sort(),

@@ -34,15 +34,17 @@ export class RpcTransportPool {
     this.nextStartAt = 0;
     this.continuity = undefined;
     this.minimumHead = 0;
-    this.metrics = { logicalRequests: 0, requests: 0, calls: 0, successes: 0, failures: 0, failovers: 0, retries: 0, circuitOpens: 0 };
+    this.metrics = { logicalRequests: 0, requests: 0, calls: 0, successes: 0, failures: 0, failovers: 0, retries: 0, circuitOpens: 0, cacheHits: 0, coalescingHits: 0, byPurpose: {} };
+    this.exactResultCache = new Map();
+    this.inFlight = new Map();
     this.endpoints = endpoints.map((item, index) => ({
       label: /^(primary|configured-\d+|base-public-(standard|fallback))$/.test(item.label) ? item.label : `configured-${index}`,
-      client: new JsonRpcClient(item.url, { fetchImpl, timeoutMs, retries: 0, circuitFailureThreshold: Infinity }),
+      client: new JsonRpcClient(item.url, { fetchImpl, timeoutMs, retries: 0, circuitFailureThreshold: Infinity }), attempts: 0,
       gate: new BoundedSemaphore(1), nextStartAt: 0, status: "unvalidated", validatedAt: 0, retryAt: 0, methods: {}, proofCache: new Map()
     }));
   }
 
-  client({ batchPaceMs = 0 } = {}) { return new PooledRpcClient(this, batchPaceMs); }
+  client({ batchPaceMs = 0, purpose = "general" } = {}) { return new PooledRpcClient(this, batchPaceMs, purpose); }
 
   setContinuity(block) {
     if (!Number.isSafeInteger(block?.number) || block.number < 1) return;
@@ -53,7 +55,7 @@ export class RpcTransportPool {
     return endpoint.methods[name] ??= { state: "closed", consecutiveFailures: 0, openUntil: 0, success: 0, failure: 0, failover: 0, errors: {}, lastSuccessAt: undefined, lastError: undefined };
   }
 
-  async wire(endpoint, calls, signal) {
+  async wire(endpoint, calls, signal, purpose = "general") {
     const releaseEndpoint = await endpoint.gate.acquire(signal);
     let releaseGlobal;
     try {
@@ -66,6 +68,8 @@ export class RpcTransportPool {
       if (start > now) await this.delay(start - now, signal);
       throwIfAborted(signal);
       this.metrics.requests += 1; this.metrics.calls += calls.length;
+      const usage = this.metrics.byPurpose[purpose] ??= { requests: 0, calls: 0, successes: 0, failures: 0 };
+      usage.requests += 1; usage.calls += calls.length;
       const outcomes = await endpoint.client.batchOutcomes(calls, { signal });
       this.assertNotQuarantined(endpoint);
       return outcomes.map((item) => ({ ...item, endpointLabel: endpoint.label }));
@@ -76,24 +80,24 @@ export class RpcTransportPool {
     if (endpoint.status === "quarantined") throw new JsonRpcRequestError(endpoint.reasonCode ?? "rpc_malformed_result", { retryable: false, endpointLabel: endpoint.label });
   }
 
-  async raw(endpoint, method, params, signal) {
-    const outcome = (await this.wire(endpoint, [{ method, params }], signal))[0];
+  async raw(endpoint, method, params, signal, purpose) {
+    const outcome = (await this.wire(endpoint, [{ method, params }], signal, purpose))[0];
     if (!outcome.ok) throw new JsonRpcRequestError(outcome.reasonCode, outcome);
     return outcome.value;
   }
 
-  async validate(endpoint, signal) {
+  async validate(endpoint, signal, purpose) {
     this.assertNotQuarantined(endpoint);
     if (endpoint.retryAt > this.now()) throw new JsonRpcRequestError("rpc_endpoint_cooldown", { endpointLabel: endpoint.label });
     if (endpoint.status === "eligible" && this.now() - endpoint.validatedAt < 30_000) return;
-    const chain = await this.raw(endpoint, "eth_chainId", [], signal);
+    const chain = await this.raw(endpoint, "eth_chainId", [], signal, purpose);
     if (!HEX.test(chain) || Number.parseInt(chain, 16) !== CHAIN_ID) throw new JsonRpcRequestError("rpc_wrong_chain", { retryable: false, method: "eth_chainId" });
-    const latest = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", ["latest", false], signal));
+    const latest = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", ["latest", false], signal, purpose));
     if (latest.timestamp > this.now() + 30_000) throw new JsonRpcRequestError("rpc_invalid_block_time", { retryable: false });
     if (this.now() - latest.timestamp > 120_000 || latest.number < Math.max(this.minimumHead - 16, this.continuity?.number ?? 0)) throw new JsonRpcRequestError("rpc_endpoint_behind");
     const continuity = this.continuity ? { ...this.continuity } : undefined;
     if (continuity) {
-      const row = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", [hex(continuity.number), false], signal), continuity.number);
+      const row = validBlock(await this.raw(endpoint, "eth_getBlockByNumber", [hex(continuity.number), false], signal, purpose), continuity.number);
       if (continuity.hash && row.hash !== continuity.hash) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false });
       // Migration from the old cursor schema has no hash. The first validated
       // endpoint establishes the checkpoint; every fallback must match it.
@@ -105,13 +109,13 @@ export class RpcTransportPool {
     endpoint.status = "eligible"; endpoint.validatedAt = this.now(); endpoint.head = latest.number; endpoint.reasonCode = undefined;
   }
 
-  async verifyProof(endpoint, proof, signal) {
+  async verifyProof(endpoint, proof, signal, purpose) {
     if (!proof) return;
     if (!Number.isSafeInteger(proof.number) || !HASH.test(proof.hash ?? "")) throw new JsonRpcRequestError("rpc_exact_block_proof_required", { retryable: false });
     const key = `${proof.number}:${proof.hash}`;
     // A short cache only coalesces the same exact confirmed state cycle.
     if ((endpoint.proofCache.get(key) ?? 0) > this.now()) return;
-    const value = await this.raw(endpoint, "eth_getBlockByNumber", [hex(proof.number), false], signal);
+    const value = await this.raw(endpoint, "eth_getBlockByNumber", [hex(proof.number), false], signal, purpose);
     if (value === null) throw new JsonRpcRequestError("rpc_endpoint_behind");
     const block = validBlock(value, proof.number);
     if (block.hash !== proof.hash.toLowerCase()) throw new JsonRpcRequestError("rpc_block_hash_conflict", { retryable: false });
@@ -120,7 +124,27 @@ export class RpcTransportPool {
     if (endpoint.proofCache.size > 64) endpoint.proofCache.delete(endpoint.proofCache.keys().next().value);
   }
 
-  async batchOutcomes(calls, { signal, blockProof } = {}) {
+  async batchOutcomes(calls, { signal, blockProof, purpose = "general" } = {}) {
+    const exactKey = blockProof && calls.every(call => call.method === "eth_call" || call.method === "eth_getCode")
+      ? `${blockProof.number}:${blockProof.hash}:${JSON.stringify(calls)}` : undefined;
+    const cached=this.exactResultCache.get(exactKey);
+    if (cached&&cached.expiresAt>this.now()) { this.metrics.cacheHits += 1; return structuredClone(cached.value); }
+    if (cached) this.exactResultCache.delete(exactKey);
+    if (exactKey && this.inFlight.has(exactKey)) { this.metrics.coalescingHits += 1; return awaitCaller(this.inFlight.get(exactKey), signal); }
+    const pending = this.performBatch(calls, { signal: exactKey ? undefined : signal, blockProof, purpose });
+    if (!exactKey) return pending;
+    const owned = pending.then(result => {
+      if (result.every(row => row.ok)) {
+        this.exactResultCache.set(exactKey, { expiresAt:this.now()+5_000,value:structuredClone(result) });
+        if (this.exactResultCache.size > 256) this.exactResultCache.delete(this.exactResultCache.keys().next().value);
+      }
+      return result;
+    }).finally(() => { if (this.inFlight.get(exactKey) === owned) this.inFlight.delete(exactKey); });
+    this.inFlight.set(exactKey, owned);
+    return awaitCaller(owned, signal);
+  }
+
+  async performBatch(calls, { signal, blockProof, purpose = "general" } = {}) {
     throwIfAborted(signal);
     if (!calls.length) return [];
     if (calls.length > 32 || calls.some((item) => !METHODS.has(item.method))) throw new JsonRpcRequestError("rpc_request_out_of_budget", { retryable: false });
@@ -139,12 +163,13 @@ export class RpcTransportPool {
         await this.delay(100 + Math.floor(this.random() * 150), signal);
       }
       attempted += 1;
+      endpoint.attempts += 1;
       for (const item of circuits) if (item.openUntil) item.state = "half_open";
       let outcomes;
       try {
-        await this.validate(endpoint, signal);
-        await this.verifyProof(endpoint, blockProof, signal);
-        outcomes = await this.wire(endpoint, calls, signal);
+        await this.validate(endpoint, signal, purpose);
+        await this.verifyProof(endpoint, blockProof, signal, purpose);
+        outcomes = await this.wire(endpoint, calls, signal, purpose);
         for (let index = 0; index < outcomes.length; index += 1) {
           const outcome = outcomes[index];
           if (outcome.ok && !validResult(calls[index], outcome.value)) outcomes[index] = { ok: false, reasonCode: "rpc_malformed_result", retryable: false, endpointLabel: endpoint.label, method: calls[index].method };
@@ -190,6 +215,8 @@ export class RpcTransportPool {
         if (attempted > 1) { this.metrics.failovers += 1; for (const name of methods) this.method(endpoint, name).failover += 1; }
         this.metrics.successes += outcomes.filter((item) => item.ok).length;
         this.metrics.failures += outcomes.filter((item) => !item.ok).length;
+        const usage = this.metrics.byPurpose[purpose] ??= { requests: 0, calls: 0, successes: 0, failures: 0 };
+        usage.successes += outcomes.filter(item => item.ok).length; usage.failures += outcomes.filter(item => !item.ok).length;
         return outcomes;
       }
     }
@@ -207,14 +234,14 @@ export class RpcTransportPool {
     return {
       ...this.metrics, endpointCount: this.endpoints.length, active: this.global.active, queued: this.global.waiters.length, peakConcurrency: this.global.peak,
       budget: { globalConcurrency: this.global.limit, endpointConcurrency: 1, maximumAttempts: 2, minimumIntervalMs: this.minimumIntervalMs },
-      endpoints: this.endpoints.map((item) => ({ label: item.label, status: item.status, reasonCode: item.reasonCode, head: item.head, validatedAt: item.validatedAt ? iso(item.validatedAt) : undefined, methods: structuredClone(item.methods) }))
+      endpoints: this.endpoints.map((item) => ({ label: item.label, status: item.status, reasonCode: item.reasonCode, head: item.head, validatedAt: item.validatedAt ? iso(item.validatedAt) : undefined, actualAttempts: item.attempts, methods: structuredClone(item.methods) }))
     };
   }
 }
 
 export class PooledRpcClient extends JsonRpcClient {
-  constructor(pool, batchPaceMs) { super("https://unused.invalid", { retries: 0, timeoutMs: 8_000, batchPaceMs }); this.pool = pool; }
-  batchOutcomes(calls, options) { return this.pool.batchOutcomes(calls, options); }
+  constructor(pool, batchPaceMs, purpose) { super("https://unused.invalid", { retries: 0, timeoutMs: 8_000, batchPaceMs }); this.pool = pool; this.purpose = purpose; }
+  batchOutcomes(calls, options) { return this.pool.batchOutcomes(calls, { ...options, purpose: this.purpose }); }
   circuitSnapshot() { return this.pool.snapshot(); }
   async confirmedBlock(options = {}) {
     const head = await this.blockNumber(options);
@@ -223,6 +250,17 @@ export class PooledRpcClient extends JsonRpcClient {
     this.pool.minimumHead = Math.max(this.pool.minimumHead, number);
     return { ...row, observedAt: iso(row.timestamp) };
   }
+}
+
+function awaitCaller(promise, signal) {
+  throwIfAborted(signal);
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const aborted = () => { cleanup(); reject(signal.reason ?? Object.assign(new Error("operation_aborted"), { reasonCode: "operation_aborted" })); };
+    const cleanup = () => signal.removeEventListener("abort", aborted);
+    signal.addEventListener("abort", aborted, { once: true });
+    promise.then(value => { cleanup(); resolve(structuredClone(value)); }, error => { cleanup(); reject(error); });
+  });
 }
 
 export function validBlock(value, expectedNumber) {
