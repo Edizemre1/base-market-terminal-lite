@@ -140,7 +140,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     const root = document.querySelector<HTMLElement>(`[data-overlay-root="${active.type}"]`);
     if (!root) return;
     const focusable = () => [...root.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]")].filter((item) => item.getAttribute("aria-hidden") !== "true");
-    window.setTimeout(() => focusable()[0]?.focus(), 0);
+    const initialFocus = root.querySelector<HTMLElement>("[data-overlay-autofocus]");
+    window.setTimeout(() => (initialFocus ?? focusable()[0])?.focus(), 0);
     const trap = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
       const items = focusable();
