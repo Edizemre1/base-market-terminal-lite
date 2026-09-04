@@ -54,6 +54,19 @@ test("bounded pool retention preserves provider-matched source evidence", () => 
   assert.ok(retained["detected-1999"]);
 });
 
+test("bounded pool retention preserves the active proof cohort before admitting newer pools", () => {
+  const pools = {
+    "cohort-oldest": { blockNumber: 1 },
+    "matched-oldest": { blockNumber: 2, providerEnrichment: { status: "matched" } },
+    "detected-newer": { blockNumber: 3 },
+    "detected-newest": { blockNumber: 4 }
+  };
+
+  const retained = retainPriorityPools(pools, 3, 1, new Set(["cohort-oldest"]));
+
+  assert.deepEqual(Object.keys(retained), ["cohort-oldest", "matched-oldest", "detected-newest"]);
+});
+
 test("discovery has an isolated lane and shares the central bounded RPC budget", () => {
   const discoveryRpcClient = { kind: "isolated-discovery-client" };
   const config = {

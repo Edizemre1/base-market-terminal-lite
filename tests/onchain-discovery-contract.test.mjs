@@ -374,6 +374,26 @@ test("durable store enforces one writer, integrity and reopen", async () => {
   }
 });
 
+test("durable commits detach caller-owned references before hashing and writing", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "base-terminal-store-detached-"));
+  const store = new DurableDiscoveryStore(directory);
+  const observation = { calls: 1, nested: { cacheHits: 0 } };
+  try {
+    await store.open();
+    await store.transact("external-observation", (draft) => { draft.health.externalObservation = observation; });
+    observation.calls = 2;
+    observation.nested.cacheHits = 9;
+    assert.equal(store.integrityCheck().ok, true);
+    assert.deepEqual(store.read().health.externalObservation, { calls: 1, nested: { cacheHits: 0 } });
+    await store.close();
+    const persisted = JSON.parse(await readFile(path.join(directory, "state.json"), "utf8"));
+    assert.deepEqual(persisted.health.externalObservation, { calls: 1, nested: { cacheHits: 0 } });
+  } finally {
+    await store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("durable store rejects a tampered snapshot", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "base-terminal-store-corrupt-"));
   const store = new DurableDiscoveryStore(directory);

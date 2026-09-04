@@ -13,6 +13,7 @@ export const MAX_POOLS = 2_000;
 export const MAX_PROTECTED_PROVIDER_POOLS = 512;
 export const MAX_MARKET_SNAPSHOTS = 96;
 export const MAX_WAL_LINES = 512;
+export const PROOF_COHORT_RETENTION_MS = 6 * 60 * 60 * 1_000;
 
 export class DurableDiscoveryStore {
   constructor(directory) {
@@ -82,14 +83,19 @@ export class DurableDiscoveryStore {
     synchronizeDerivedHealth(next);
     if (afterDerive) await afterDerive(next);
     enforceRetention(next);
-    next.integrity = createIntegrity(next);
-    const prepare = { type: "prepare", transactionId, at: next.updatedAt, reason, beforeDigest, afterDigest: next.integrity.digest };
+    // Mutators may assign observations or diagnostics owned by a live client.
+    // Detach the exact commit before the first durable await so later cache or
+    // metric updates cannot change either the in-memory state or bytes written
+    // after the integrity digest has been calculated.
+    const committed = structuredClone(next);
+    committed.integrity = createIntegrity(committed);
+    const prepare = { type: "prepare", transactionId, at: committed.updatedAt, reason, beforeDigest, afterDigest: committed.integrity.digest };
     await appendDurableLine(this.walPath, prepare);
-    await writeAtomicJson(this.statePath, next);
-    await appendDurableLine(this.walPath, { type: "commit", transactionId, at: next.updatedAt, afterDigest: next.integrity.digest });
-    this.state = next;
+    await writeAtomicJson(this.statePath, committed);
+    await appendDurableLine(this.walPath, { type: "commit", transactionId, at: committed.updatedAt, afterDigest: committed.integrity.digest });
+    this.state = committed;
     if ((await lineCount(this.walPath)) > MAX_WAL_LINES * 2) await this.compactWal();
-    return structuredClone(next);
+    return structuredClone(committed);
   }
 
   integrityCheck() {
@@ -235,7 +241,11 @@ function enforceRetention(state) {
   state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
   state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
   const previousPools = state.pools ?? {};
-  state.pools = retainPriorityPools(previousPools, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS);
+  const cohortExpiresAt = Date.parse(state.proofCoverageCohort?.expiresAt ?? "");
+  const protectedCohort = Number.isFinite(cohortExpiresAt) && Date.parse(state.updatedAt) <= cohortExpiresAt
+    ? new Set(state.proofCoverageCohort.poolKeys ?? [])
+    : new Set();
+  state.pools = retainPriorityPools(previousPools, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS, protectedCohort);
   const evicted = Object.keys(previousPools).filter((key) => !state.pools[key]);
   if (evicted.length) {
     state.counters.retentionEvicted = (state.counters.retentionEvicted ?? 0) + evicted.length;
@@ -327,17 +337,19 @@ function keepNewestRecordEntries(record, maximum, rank) {
   return Object.fromEntries(entries.sort((left, right) => rank(right[1]) - rank(left[1]) || left[0].localeCompare(right[0])).slice(0, maximum));
 }
 
-export function retainPriorityPools(record, maximum = MAX_POOLS, protectedMaximum = MAX_PROTECTED_PROVIDER_POOLS) {
+export function retainPriorityPools(record, maximum = MAX_POOLS, protectedMaximum = MAX_PROTECTED_PROVIDER_POOLS, protectedCohort = new Set()) {
   const entries = Object.entries(record);
   if (entries.length <= maximum) return record;
   const newest = (left, right) => (right[1].blockNumber ?? 0) - (left[1].blockNumber ?? 0) || left[0].localeCompare(right[0]);
+  const cohortEntries = entries.filter(([key]) => protectedCohort.has(key)).sort(newest).slice(0, maximum);
+  const cohortKeys = new Set(cohortEntries.map(([key]) => key));
   const protectedEntries = entries
-    .filter(([, pool]) => pool.providerEnrichment?.status === "matched")
+    .filter(([key, pool]) => !cohortKeys.has(key) && pool.providerEnrichment?.status === "matched")
     .sort(newest)
-    .slice(0, Math.min(maximum, protectedMaximum));
-  const protectedKeys = new Set(protectedEntries.map(([key]) => key));
-  const remaining = entries.filter(([key]) => !protectedKeys.has(key)).sort(newest).slice(0, maximum - protectedEntries.length);
-  return Object.fromEntries([...protectedEntries, ...remaining]);
+    .slice(0, Math.min(maximum - cohortEntries.length, protectedMaximum));
+  const protectedKeys = new Set([...cohortKeys, ...protectedEntries.map(([key]) => key)]);
+  const remaining = entries.filter(([key]) => !protectedKeys.has(key)).sort(newest).slice(0, maximum - protectedEntries.length - cohortEntries.length);
+  return Object.fromEntries([...cohortEntries, ...protectedEntries, ...remaining]);
 }
 
 async function writeAtomicJson(target, value) {

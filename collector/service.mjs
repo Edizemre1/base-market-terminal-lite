@@ -4,7 +4,7 @@ import { enrichTokenMetadata, inspectRegisteredPool, JsonRpcRequestError, readTo
 import { configuredRpcEndpoints, RpcTransportPool, validBlock } from "./rpc-transport.mjs";
 import { throwIfAborted, withDeadline } from "./async-control.mjs";
 import { seedBackfillQueue, recordBackfillOutcome, backfillHealth, backfillPriority, selectBackfillRpcBatch } from "./pool-backfill.mjs";
-import { DurableDiscoveryStore, pricingPoolsForState } from "./store.mjs";
+import { DurableDiscoveryStore, pricingPoolsForState, PROOF_COHORT_RETENTION_MS } from "./store.mjs";
 import { acceptOnchainStateUpdate, readPoolOnchainState, resolveOnchainAdapter, unsupportedOnchainState, validTokenDecimals } from "./onchain-state.mjs";
 import {
   ENRICHMENT_MAX_ATTEMPTS,
@@ -840,7 +840,16 @@ function ensureEnrichmentState(state) {
   state.metadataQueue ??= [];
   state.priceAnchors ??= {};
   state.priceAnchors.wethUsdc ??= { status: "unavailable", reasonCode: "not_initialized", sourcePoolCount: 0, freshness: "unavailable" };
-  state.proofCoverageCohort ??= { capturedAt: state.updatedAt ?? new Date().toISOString(), poolKeys: Object.keys(state.pools ?? {}).sort() };
+  const cohortCapturedAt = Date.parse(state.proofCoverageCohort?.capturedAt ?? "");
+  const cohortExpiresAt = Date.parse(state.proofCoverageCohort?.expiresAt ?? "");
+  if (!Number.isFinite(cohortCapturedAt) || !Number.isFinite(cohortExpiresAt) || Date.now() > cohortExpiresAt) {
+    const capturedAt = new Date().toISOString();
+    state.proofCoverageCohort = {
+      capturedAt,
+      expiresAt: new Date(Date.parse(capturedAt) + PROOF_COHORT_RETENTION_MS).toISOString(),
+      poolKeys: Object.keys(state.pools ?? {}).sort()
+    };
+  }
   state.counters ??= {};
   for (const key of ["reconnectCount", "reorgCount", "duplicateDropped", "malformedRejected", "enrichmentSuccess", "enrichmentFailure", "providerMatched", "providerUnmatched", "priceConflict", "staleAnchorRejected", "dustRejected", "exactLookupSuccess", "exactLookupPending", "exactLookupNotFound", "bandTransitions", "onchainStateSuccess", "onchainStateFailure", "onchainStateClassified", "onchainStateDuplicate", "onchainStateOutOfOrder", "tokenMetadataVerified"]) {
     if (!Number.isFinite(state.counters[key])) state.counters[key] = 0;
