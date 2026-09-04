@@ -248,6 +248,10 @@ test.describe("living Base terminal", () => {
     await expect(entering).toHaveCSS("animation-name", "none");
     await page.keyboard.press("Escape");
     await expect(desktopPopover).toHaveCount(0);
+    await desktopButton.hover();
+    await expect(desktopPopover).toBeVisible();
+    await page.mouse.move(0, 0);
+    await expect(desktopPopover).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileButton = page.getByTestId("market-card-pepe-weth").getByTestId("market-signal-group").getByRole("button");
@@ -515,6 +519,7 @@ test.describe("living Base terminal", () => {
       await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Pools|Havuzlar/ }).click();
       await detailPage.getByTestId("context-inspector").getByRole("button", { name: /execution pool|işlem havuzu/i }).click();
       await expect(detailPage.getByTestId("pool-drawer")).toBeVisible();
+      await expect(detailPage.getByTestId("market-signal-popover")).toHaveCount(0);
       await captureVisualEvidence(detailPage, testInfo.outputPath(`pool-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
