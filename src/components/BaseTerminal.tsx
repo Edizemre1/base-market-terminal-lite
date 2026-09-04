@@ -181,7 +181,7 @@ export function BaseTerminal({
 
   useEffect(() => {
     if (!initialPairParam || view === "workspace" || normalizeTerminalView(initialViewParam) === "workspace") return;
-    if (activeOverlayTypeRef.current !== "none" && activeOverlayTypeRef.current !== "market_inspector") return;
+    if (activeOverlayTypeRef.current !== "none") return;
     openOverlay("market_inspector");
   }, [initialPairParam, initialViewParam, openOverlay, view]);
 
