@@ -27,6 +27,7 @@ const READ_ONLY_DATA_UNAVAILABLE_LABEL =
   "Read-only market data is temporarily unavailable. No sample prices were substituted.";
 const SNAPSHOT_CACHE_TTL_MS = 12_000;
 const SNAPSHOT_FAIL_SOFT_MS = 3 * 60_000;
+const SNAPSHOT_REFRESH_DEADLINE_MS = 2 * 60_000;
 const SNAPSHOT_RETRY_BACKOFF_MS = 5_000;
 const RESERVOIR_TTL_MS = 30 * 60_000;
 const ACTIVE_RESERVOIR_GRACE_MS = 3 * 60_000;
@@ -37,6 +38,12 @@ type SnapshotCacheEntry = {
   inFlight?: Promise<MarketTerminalSnapshot>;
 };
 const snapshotCache = new Map<MarketDataMode, SnapshotCacheEntry>();
+export const MARKET_SNAPSHOT_RESILIENCE_POLICY = Object.freeze({
+  cacheTtlMs: SNAPSHOT_CACHE_TTL_MS,
+  failSoftMs: SNAPSHOT_FAIL_SOFT_MS,
+  refreshDeadlineMs: SNAPSHOT_REFRESH_DEADLINE_MS,
+  retryBackoffMs: SNAPSHOT_RETRY_BACKOFF_MS
+});
 const NEUTRAL_DEFAULT_PAIR_ORDER = [
   ["WETH", "USDC"],
   ["USDC", "WETH"],
@@ -98,15 +105,15 @@ export async function getMarketTerminalSnapshot(
     return entry.snapshot;
   }
   if (!options.force && entry.inFlight) {
-    return entry.snapshot
+    return entry.snapshot && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)
       ? markSnapshotDelayed(entry.snapshot, "Provider refresh is in progress; using the last healthy snapshot.")
       : entry.inFlight;
   }
-  if (!options.force && entry.snapshot && entry.retryAfter && now < entry.retryAfter) {
+  if (!options.force && entry.snapshot && entry.retryAfter && now < entry.retryAfter && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)) {
     return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
   }
 
-  const inFlight = loadLiveMarketTerminalSnapshot(mode, entry.snapshot)
+  const inFlight = withSnapshotRefreshDeadline(loadLiveMarketTerminalSnapshot(mode, entry.snapshot))
     .then((snapshot) => {
       snapshotCache.set(mode, { snapshot, cachedAt: Date.now() });
       return snapshot;
@@ -119,17 +126,35 @@ export async function getMarketTerminalSnapshot(
         inFlight: undefined,
         retryAfter: Date.now() + SNAPSHOT_RETRY_BACKOFF_MS
       });
-      if (cached && Date.now() - cachedAt <= SNAPSHOT_FAIL_SOFT_MS) {
+      if (cached && isMarketSnapshotWithinFailSoftWindow(cachedAt)) {
         return markSnapshotDelayed(cached, "Provider refresh failed; using the last healthy snapshot.");
       }
       return buildDexScreenerFallbackSnapshot();
     });
 
   snapshotCache.set(mode, { ...entry, inFlight });
-  if (!options.force && entry.snapshot) {
+  if (!options.force && entry.snapshot && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)) {
     return markSnapshotDelayed(entry.snapshot, "Provider refresh is running in the background; using the last healthy snapshot.");
   }
   return inFlight;
+}
+
+export function isMarketSnapshotWithinFailSoftWindow(cachedAt: number | undefined, now = Date.now()) {
+  return typeof cachedAt === "number" && Number.isFinite(cachedAt) && now >= cachedAt && now - cachedAt <= SNAPSHOT_FAIL_SOFT_MS;
+}
+
+async function withSnapshotRefreshDeadline(task: Promise<MarketTerminalSnapshot>) {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(() => reject(new Error("Market snapshot refresh deadline exceeded.")), SNAPSHOT_REFRESH_DEADLINE_MS);
+      })
+    ]);
+  } finally {
+    if (deadline) clearTimeout(deadline);
+  }
 }
 
 async function loadLiveMarketTerminalSnapshot(mode: MarketDataMode, previous?: MarketTerminalSnapshot) {

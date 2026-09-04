@@ -7,7 +7,9 @@ import {
 } from "../../src/data/providers/dexScreenerProvider";
 import { parseGeckoTerminalOhlcvResponse } from "../../src/data/providers/chart/geckoTerminalChartProvider";
 import {
+  MARKET_SNAPSHOT_RESILIENCE_POLICY,
   getMarketTerminalSnapshot,
+  isMarketSnapshotWithinFailSoftWindow,
   resolveUrlMarketDataMode
 } from "../../src/data/providers";
 import {
@@ -73,6 +75,17 @@ const validDexPair = {
 };
 
 test.describe("market data safety defaults", () => {
+  test("bounds an in-flight provider refresh inside the three-minute fail-soft window", () => {
+    const policy = MARKET_SNAPSHOT_RESILIENCE_POLICY;
+    const cachedAt = 1_000_000;
+
+    expect(policy.cacheTtlMs + policy.refreshDeadlineMs).toBeLessThan(policy.failSoftMs);
+    expect(isMarketSnapshotWithinFailSoftWindow(cachedAt, cachedAt + policy.failSoftMs)).toBeTruthy();
+    expect(isMarketSnapshotWithinFailSoftWindow(cachedAt, cachedAt + policy.failSoftMs + 1)).toBeFalsy();
+    expect(isMarketSnapshotWithinFailSoftWindow(undefined, cachedAt)).toBeFalsy();
+    expect(isMarketSnapshotWithinFailSoftWindow(cachedAt + 1, cachedAt)).toBeFalsy();
+  });
+
   test("defaults to read-only data and requires explicit sample selection", async () => {
     expect(resolveUrlMarketDataMode(undefined)).toBe("dexscreener");
     expect(resolveUrlMarketDataMode("mock")).toBe("mock");
