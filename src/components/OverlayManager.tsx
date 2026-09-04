@@ -58,6 +58,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   const pairScope = searchParams.get("pair") ?? "";
   const [active, setActive] = useState<OverlayEntry>(NONE);
   const [suspended, setSuspended] = useState<OverlayEntry>();
+  const suspendedRef = useRef<OverlayEntry>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const restoringModalFocusRef = useRef(false);
@@ -73,18 +74,23 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       const nestedContext = (MODALS.has(type) && DRAWERS.has(current.type)) || (type === "pool_drawer" && current.type === "market_inspector");
       if (nestedContext) {
         modalReturnFocusRef.current = trigger;
+        suspendedRef.current = current;
         setSuspended(current);
       }
-      else if (!MODALS.has(type)) setSuspended(undefined);
+      else if (!MODALS.has(type)) {
+        suspendedRef.current = undefined;
+        setSuspended(undefined);
+      }
       return next;
     });
   }, []);
 
   const close = useCallback(() => {
     setActive(() => {
-      if (suspended) {
-        const restored = suspended;
+      if (suspendedRef.current) {
+        const restored = suspendedRef.current;
         restoringModalFocusRef.current = true;
+        suspendedRef.current = undefined;
         setSuspended(undefined);
         return restored;
       }
@@ -92,10 +98,11 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       window.setTimeout(() => returnFocusRef.current?.focus(), 0);
       return NONE;
     });
-  }, [suspended]);
+  }, []);
 
   const closeAll = useCallback(() => {
     setActive(NONE);
+    suspendedRef.current = undefined;
     setSuspended(undefined);
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   }, []);

@@ -381,9 +381,10 @@ test.describe("living Base terminal", () => {
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toHaveCount(0);
   });
 
-  test("captures required terminal visual evidence", async ({ page, request }, testInfo) => {
-    test.setTimeout(180_000);
-    for (const locale of ["en", "tr"] as const) {
+  for (const visualLocale of ["en", "tr"] as const) {
+    test(`captures required terminal visual evidence (${visualLocale})`, async ({ page, request }, testInfo) => {
+      test.setTimeout(180_000);
+      const locale = visualLocale;
       await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
       for (const viewport of [{ width: 2048, height: 1152, name: "desktop-2048" }, { width: 1728, height: 1117, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 430, height: 932, name: "mobile-430" }, { width: 390, height: 844, name: "mobile-390" }]) {
         await page.setViewportSize(viewport);
@@ -516,6 +517,7 @@ test.describe("living Base terminal", () => {
       await expect(detailPage.getByTestId("pool-drawer")).toBeVisible();
       await captureVisualEvidence(detailPage, testInfo.outputPath(`pool-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
+      await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
       await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel bakış/ }).click();
       await detailPage.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
@@ -540,8 +542,8 @@ test.describe("living Base terminal", () => {
       await detailPage.goto("/calm-market-intelligence-missing");
       await captureVisualEvidence(detailPage, testInfo.outputPath(`state-404-${locale}-1440.png`), true);
       await detailPage.close();
-    }
-  });
+    });
+  }
 });
 
 async function captureVisualEvidence(page: Page, path: string, fullPage: boolean) {
