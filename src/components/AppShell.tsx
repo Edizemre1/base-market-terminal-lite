@@ -7,11 +7,12 @@ import {
   PanelsTopLeft,
   Search,
   Star,
+  X,
   WalletCards
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Suspense, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { MarketDataMode } from "@/data/providers";
 import { cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
@@ -110,6 +111,7 @@ function TerminalSearchBox() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const results = useMemo(() => getSearchResults(pairs, query, locale), [locale, pairs, query]);
   const shouldShowResults = open && query.trim().length > 0;
 
@@ -120,6 +122,8 @@ function TerminalSearchBox() {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+
     if (event.key === "Escape") {
       setOpen(false);
       return;
@@ -137,6 +141,13 @@ function TerminalSearchBox() {
     }
   }
 
+  function clearSearch() {
+    setQuery("");
+    setOpen(false);
+    setActiveResultIndex(0);
+    inputRef.current?.focus();
+  }
+
   return (
     <label className="relative">
       <Search
@@ -146,8 +157,10 @@ function TerminalSearchBox() {
       />
       <span className="sr-only">{t("header.search")}</span>
       <input
+        ref={inputRef}
         aria-label={t("header.search")}
-        type="search"
+        type="text"
+        inputMode="search"
         value={query}
         onChange={(event) => {
           setQuery(event.target.value);
@@ -164,8 +177,9 @@ function TerminalSearchBox() {
         aria-activedescendant={shouldShowResults && results[activeResultIndex] ? `terminal-search-option-${results[activeResultIndex].id}` : undefined}
         data-search-ready={pairs.length > 0 ? "true" : "false"}
         placeholder={t("header.searchPlaceholder")}
-        className="h-9 w-full border border-border-subtle bg-surface-canvas pl-8 pr-2 font-mono text-label text-content-primary outline-none placeholder:text-content-secondary focus:border-focus lg:h-8"
+        className="h-9 w-full border border-border-subtle bg-surface-canvas pl-8 pr-8 font-mono text-label text-content-primary outline-none placeholder:text-content-secondary focus:border-focus lg:h-8"
       />
+      {query ? <button type="button" data-testid="clear-terminal-search" onMouseDown={(event) => event.preventDefault()} onClick={clearSearch} className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center text-content-secondary outline-none hover:text-content-primary focus-visible:ring-2 focus-visible:ring-focus" aria-label={t("header.clearSearch")}><X size={13} aria-hidden="true" /></button> : null}
       {shouldShowResults ? (
         <div id="terminal-search-results" role="listbox" aria-label={t("header.search")} className="absolute left-0 right-0 top-control-s z-layer-popover max-h-[300px] overflow-y-auto border border-border-subtle bg-surface-panel shadow-none">
           {results.length > 0 ? (

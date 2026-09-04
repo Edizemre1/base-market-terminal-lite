@@ -272,6 +272,39 @@ test("quality labels retain exact TR and EN parity", async () => {
   }
 });
 
+test("production-candidate public inputs stay bounded and fail closed", async () => {
+  const bodyReader = await readFile(path.resolve("src/lib/http/requestBody.ts"), "utf8");
+  const quoteRoute = await readFile(path.resolve("src/app/api/quote/route.ts"), "utf8");
+  const chartRoute = await readFile(path.resolve("src/app/api/chart/route.ts"), "utf8");
+  const imageRoute = await readFile(path.resolve("src/app/api/token-image/route.ts"), "utf8");
+  const safeUrl = await readFile(path.resolve("src/lib/safeUrl.ts"), "utf8");
+  assert.match(bodyReader, /totalBytes > maximumBytes[\s\S]*?reader\.cancel\(\)/);
+  assert.match(quoteRoute, /readLimitedJsonBody\(request, MAX_QUOTE_BODY_BYTES\)/);
+  assert.match(chartRoute, /readLimitedJsonBody\(request, MAX_CHART_BODY_BYTES\)/);
+  assert.match(chartRoute, /function isChartDataSource/);
+  assert.match(imageRoute, /redirect: "manual"/);
+  assert.match(imageRoute, /sanitizeTokenLogoUrl\(new URL\(location, currentUrl\)\.toString\(\)\)/);
+  assert.match(imageRoute, /readBoundedBytes\(upstream, MAX_IMAGE_BYTES\)/);
+  assert.doesNotMatch(imageRoute, /redirect: "follow"|arrayBuffer\(\)/);
+  assert.match(safeUrl, /value\.length > 2_048/);
+});
+
+test("production-candidate local UX contracts preserve honest state", async () => {
+  const search = await readFile(path.resolve("src/components/AppShell.tsx"), "utf8");
+  const watchlist = await readFile(path.resolve("src/components/TerminalSearchContext.tsx"), "utf8");
+  const alerts = await readFile(path.resolve("src/components/base-terminal/AlertCenter.tsx"), "utf8");
+  const dictionary = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
+  assert.match(search, /event\.nativeEvent\.isComposing/);
+  assert.match(search, /data-testid="clear-terminal-search"/);
+  assert.match(watchlist, /isOptionalFiniteNumber\(candidate\.change24h\)/);
+  assert.match(alerts, /function startEditing/);
+  assert.match(alerts, /role="switch" aria-checked=\{rule\.enabled\}/);
+  assert.doesNotMatch(alerts, /aria-modal/);
+  for (const key of ["header.clearSearch", "alerts.edit", "alerts.save", "alerts.cancelEdit"]) {
+    assert.equal(dictionary.match(new RegExp('"' + key.replace(".", "\\.") + '"', "g"))?.length, 2, key);
+  }
+});
+
 function tokenOpportunity(liquidityUsd, withProof = false) {
   const pool = collectorPool({ liquidityUsd });
   if (withProof) pool.onchainState = { status: "complete", confidence: "exact_onchain_state", token0: TOKEN, token1: BASE_USDC, decimals0: 18, decimals1: 6, blockNumber: 50_000_000, blockHash: `0x${"a".repeat(64)}`, observedAt: NOW.toISOString(), observedPrice0In1: 0.00421 };

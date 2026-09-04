@@ -69,6 +69,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "provider_unavailable");
     await expect(page.getByTestId("trade-dock")).toContainText(/timed out|zaman aşımına/);
     await expect(page.getByTestId("trade-dock")).not.toContainText(/No route was found|işlem rotası bulunamadı/);
+    await page.screenshot({ path: testInfo.outputPath("trade-provider-unavailable-1440.png"), fullPage: false });
   });
 
   test("expires a short-lived valid quote without sending a transaction", async ({ page }, testInfo) => {

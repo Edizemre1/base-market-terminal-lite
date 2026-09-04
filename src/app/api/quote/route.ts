@@ -3,6 +3,7 @@ import { getQuoteService, getTradeCapabilities, QuoteProviderError } from "@/lib
 import { validateQuoteRequest } from "@/lib/trade/validation";
 import { isEvmAddress } from "@/lib/trade/validation";
 import { resolveBaseTokenDecimals } from "@/lib/trade/tokenMetadata";
+import { readLimitedJsonBody } from "@/lib/http/requestBody";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ const rateWindows = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT = 15;
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_KEYS = 500;
+const MAX_QUOTE_BODY_BYTES = 16_384;
 
 export async function POST(request: Request) {
   const capabilities = getTradeCapabilities();
@@ -18,16 +20,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Quote requests are disabled in this environment.", code: "capability-disabled" }, { status: 503 });
   }
 
-  const key = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const key = getRateLimitKey(request);
   if (!takeRateLimit(key)) return NextResponse.json({ error: "Too many quote requests. Wait a moment and retry.", code: "rate-limited" }, { status: 429 });
 
-  let input: unknown;
-  try {
-    input = await request.json();
-  } catch {
+  const body = await readLimitedJsonBody(request, MAX_QUOTE_BODY_BYTES);
+  if (!body.ok) {
+    if (body.reason === "too-large") {
+      return NextResponse.json({ error: "Quote request body is too large.", code: "request-too-large" }, { status: 413 });
+    }
     return NextResponse.json({ error: "Quote request body is invalid.", code: "invalid-request" }, { status: 400 });
   }
-  const normalized = await attachVerifiedDecimals(input);
+  const normalized = await attachVerifiedDecimals(body.value);
   if (normalized.error) return NextResponse.json({ error: "Exact Base token metadata could not be verified.", code: normalized.error }, { status: 422 });
   const quoteRequest = validateQuoteRequest(normalized.input);
   if (!quoteRequest) return NextResponse.json({ error: "Wallet, Base tokens, amount, or slippage is invalid.", code: "invalid-request" }, { status: 400 });
@@ -78,4 +81,9 @@ function takeRateLimit(key: string) {
   if (current.count >= RATE_LIMIT) return false;
   current.count += 1;
   return true;
+}
+
+function getRateLimitKey(request: Request) {
+  const candidate = request.headers.get("x-real-ip")?.trim() || request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
+  return candidate && /^[0-9a-f:.]{1,64}$/i.test(candidate) ? candidate.toLocaleLowerCase("en-US") : "local";
 }

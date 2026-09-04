@@ -3,6 +3,7 @@ import { getPairChart } from "@/data/providers/chart";
 import type { ChartPairInput, ChartTimeframe } from "@/data/providers/chart/types";
 import { resolveMarketDataMode } from "@/data/providers";
 import { parseStrictFiniteNumber } from "@/lib/marketMath";
+import { readLimitedJsonBody } from "@/lib/http/requestBody";
 
 type ChartRefreshBody = {
   id?: unknown;
@@ -15,10 +16,22 @@ type ChartRefreshBody = {
 };
 
 const chartTimeframes: ChartTimeframe[] = ["15m", "1h", "4h", "1d"];
+const MAX_CHART_BODY_BYTES = 65_536;
+const MAX_CHART_POINTS = 256;
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as ChartRefreshBody;
+    const parsed = await readLimitedJsonBody(request, MAX_CHART_BODY_BYTES);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { error: parsed.reason === "too-large" ? "Chart refresh request is too large." : "Invalid chart refresh request." },
+        { status: parsed.reason === "too-large" ? 413 : 400 }
+      );
+    }
+    if (!parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+      return NextResponse.json({ error: "Invalid chart refresh request." }, { status: 400 });
+    }
+    const body = parsed.value as ChartRefreshBody;
     const pair = normalizeChartPairInput(body);
 
     if (!pair) {
@@ -35,16 +48,17 @@ export async function POST(request: Request) {
 }
 
 function normalizeChartPairInput(body: ChartRefreshBody): ChartPairInput | undefined {
-  if (typeof body.id !== "string" || body.id.length === 0) {
-    return undefined;
-  }
+  const id = readText(body.id, 128);
+  if (!id || !isChartDataSource(body.dataSource)) return undefined;
+  const pairAddress = body.pairAddress === undefined ? undefined : readEvmAddress(body.pairAddress);
+  if (body.pairAddress !== undefined && !pairAddress) return undefined;
 
   return {
-    id: body.id,
-    dataSource: body.dataSource === "dexscreener" ? "dexscreener" : "mock",
-    pairAddress: typeof body.pairAddress === "string" ? body.pairAddress : undefined,
+    id,
+    dataSource: body.dataSource,
+    pairAddress,
     timeframe: normalizeChartTimeframe(body.timeframe),
-    chart: Array.isArray(body.chart) ? body.chart.map(toNumber).filter((value) => value > 0) : [],
+    chart: Array.isArray(body.chart) ? body.chart.slice(0, MAX_CHART_POINTS).map(toNumber).filter((value) => value > 0) : [],
     volume24h: toNumber(body.volume24h)
   };
 }
@@ -57,4 +71,18 @@ function normalizeChartTimeframe(value: unknown): ChartTimeframe {
 
 function toNumber(value: unknown) {
   return parseStrictFiniteNumber(value) ?? 0;
+}
+
+function readText(value: unknown, maximumLength: number) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return normalized && normalized.length <= maximumLength ? normalized : undefined;
+}
+
+function readEvmAddress(value: unknown) {
+  return typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value) ? value.toLocaleLowerCase("en-US") : undefined;
+}
+
+function isChartDataSource(value: unknown): value is NonNullable<ChartPairInput["dataSource"]> {
+  return value === "mock" || value === "dexscreener" || value === "geckoterminal" || value === "onchain";
 }

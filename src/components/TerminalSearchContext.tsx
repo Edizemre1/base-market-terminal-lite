@@ -236,7 +236,7 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
   const pair = readStoredText(candidate.pair, 80);
   const baseToken = readStoredText(candidate.baseToken, 32);
   const quoteToken = readStoredText(candidate.quoteToken, 32);
-  if (!key || !pair || !baseToken || !quoteToken || !isFiniteNumber(candidate.change24h) || !isFiniteNumber(candidate.volume24h) || !isFiniteNumber(candidate.liquidity)) {
+  if (!key || !pair || !baseToken || !quoteToken || !isOptionalFiniteNumber(candidate.change24h) || !isOptionalFiniteNumber(candidate.volume24h) || !isOptionalFiniteNumber(candidate.liquidity)) {
     return undefined;
   }
 
@@ -261,7 +261,7 @@ function normalizePinnedPair(value: unknown): PinnedPair | undefined {
     change24h: candidate.change24h,
     volume24h: candidate.volume24h,
     liquidity: candidate.liquidity,
-    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" || candidate.dataSource === "geckoterminal" ? candidate.dataSource : undefined,
+    dataSource: candidate.dataSource === "mock" || candidate.dataSource === "dexscreener" || candidate.dataSource === "geckoterminal" || candidate.dataSource === "onchain" ? candidate.dataSource : undefined,
     stale: true
   };
 }
@@ -344,6 +344,10 @@ function normalizePairIdentity(value: string) {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isOptionalFiniteNumber(value: unknown) {
+  return value === undefined || isFiniteNumber(value);
 }
 
 function readStoredText(value: unknown, maximumLength: number) {

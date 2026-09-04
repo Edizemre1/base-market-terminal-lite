@@ -19,13 +19,17 @@ This ledger records the PR #32 finishing pass against the canonical scanner → 
 
 GitHub Actions captures the following artifacts in both English and Turkish where applicable:
 
-- Terminal default: 1440×900, 1280×800, 1024×768, 768×1024, 390×844
+- Terminal default: 2048×1152, 1728×1117, 1440×900, 1280×800, 1024×768, 768×1024, 430×932, 390×844, 360×800
 - Context Inspector: 1440×900
 - Trade Drawer: 1440×900
 - Market detail sheet: 390×844
 - Trade sheet: 390×844
 - Pair Workspace: 1440×900
+- Real-OHLCV hover/freeze state: 1440×900
+- Watchlist empty and four-market populated states: 1440×900
+- Alerts empty and populated states: 1440×900
 - Wallet Picker: 1440×900
 - Transaction review mock: 1440×900
+- Delayed, recovered, empty-lane, expanded-lane, token-collision, provider-unavailable, wrong-network, no-route, and quote-expired states: 1440×900
 
 Acceptance requires no horizontal document overflow, no nested interactive controls, one main overlay state, no console errors, and at least ten fully visible board rows at 1440×900 in the default English mock fixture.

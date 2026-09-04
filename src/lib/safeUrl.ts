@@ -1,13 +1,15 @@
 const TOKEN_IMAGE_HOSTS = ["dexscreener.com", "coingecko.com"];
 
 export function sanitizeTokenLogoUrl(value: string | undefined) {
-  if (!value) return undefined;
+  if (!value || value.length > 2_048) return undefined;
   if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")) return value;
   try {
     const parsed = new URL(value);
     const hostname = parsed.hostname.toLocaleLowerCase("en-US");
     const allowed = TOKEN_IMAGE_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
-    return parsed.protocol === "https:" && allowed && !parsed.username && !parsed.password && (!parsed.port || parsed.port === "443") ? parsed.toString() : undefined;
+    if (parsed.protocol !== "https:" || !allowed || parsed.username || parsed.password || (parsed.port && parsed.port !== "443")) return undefined;
+    parsed.hash = "";
+    return parsed.toString();
   } catch {
     return undefined;
   }

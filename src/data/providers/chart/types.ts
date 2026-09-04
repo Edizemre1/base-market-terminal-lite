@@ -12,7 +12,7 @@ export type PairChartCandle = {
 
 export type ChartPairInput = {
   id: string;
-  dataSource?: "mock" | "dexscreener";
+  dataSource?: "mock" | "dexscreener" | "geckoterminal" | "onchain";
   pairAddress?: string;
   timeframe?: ChartTimeframe;
   chart: number[];

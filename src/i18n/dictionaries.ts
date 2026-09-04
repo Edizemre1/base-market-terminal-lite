@@ -11,6 +11,7 @@ export const en = {
   "header.product": "Base Terminal",
   "header.search": "Search token, pair, or contract",
   "header.searchPlaceholder": "Search token / pair / contract",
+  "header.clearSearch": "Clear market search",
   "header.noSearchResults": "No loaded pair matches.",
   "header.marketData": "Market data",
   "header.demoFallback": "Demo fallback",
@@ -294,6 +295,9 @@ export const en = {
   "alerts.condition": "Alert condition",
   "alerts.threshold": "Alert threshold",
   "alerts.add": "Add",
+  "alerts.edit": "Edit alert",
+  "alerts.save": "Save changes",
+  "alerts.cancelEdit": "Cancel editing",
   "alerts.target": "Target: {target} · {timeframe}",
   "alerts.anyPair": "Any qualified Base pair",
   "alerts.noRules": "No rules yet. Add several without closing this panel.",
@@ -773,6 +777,10 @@ export const en = {
 export type TranslationKey = keyof typeof en;
 
 export const tr: Record<TranslationKey, string> = {
+  "header.clearSearch": "Piyasa aramasını temizle",
+  "alerts.edit": "Alarmı düzenle",
+  "alerts.save": "Değişiklikleri kaydet",
+  "alerts.cancelEdit": "Düzenlemeyi iptal et",
   "nav.terminal": "Terminal", "nav.portfolio": "Portföy",
   "nav.pulse": "Pulse", "nav.markets": "Piyasalar", "nav.watchlist": "İzleme", "nav.alerts": "Alarmlar", "nav.wallet": "Cüzdan", "nav.mobile": "Mobil terminal menüsü", "nav.desktop": "Base terminal menüsü",
   "header.product": "Base Terminal", "header.search": "Token, piyasa çifti veya kontrat ara", "header.searchPlaceholder": "Token / piyasa çifti / kontrat ara", "header.noSearchResults": "Yüklenen piyasalarda eşleşme yok.", "header.marketData": "Piyasa verisi", "header.demoFallback": "Demo yedeği", "header.baseMainnet": "Base Mainnet", "header.alerts": "Alarm merkezini aç", "header.heartbeatChecking": "Veri akışı · kontrol ediliyor", "header.heartbeatDelayed": "Veri akışı · gecikmeli", "header.heartbeatStarting": "Veri akışı · başlıyor", "header.sourceReady": "kaynak hazır", "header.mock": "Demo", "header.live": "Canlı", "header.readOnlyData": "Salt okunur veri", "header.language": "Dil",

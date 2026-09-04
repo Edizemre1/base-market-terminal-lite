@@ -73,6 +73,12 @@ test.describe("living Base terminal", () => {
     await expect(search).toHaveAttribute("data-search-ready", "true");
     await search.fill("blob");
     await expect(page.getByTestId("search-result-blob-usdc")).toContainText("BLOB / USDC");
+    await search.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
+    await expect(search).toHaveValue("blob");
+    await page.getByTestId("clear-terminal-search").click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await search.fill("blob");
     await page.getByTestId("search-result-blob-usdc").click();
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
@@ -104,6 +110,16 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("base-terminal-lite:pinned-pairs") || "[]"));
     expect(stored).toHaveLength(4);
+    await page.evaluate(() => {
+      const key = "base-terminal-lite:pinned-pairs";
+      const pairs = JSON.parse(localStorage.getItem(key) || "[]");
+      delete pairs[0].change24h;
+      delete pairs[0].volume24h;
+      delete pairs[0].liquidity;
+      localStorage.setItem(key, JSON.stringify(pairs));
+    });
+    await page.reload();
+    await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
   });
 
   test("keeps alerts local and requests browser permission only after an explicit action", async ({ page }) => {
@@ -116,8 +132,29 @@ test.describe("living Base terminal", () => {
     await page.locator("#alert-center-panel input").fill("1");
     await page.getByRole("button", { name: /Add|Ekle/, exact: true }).click();
     await expect(page.getByTestId("alert-rule")).toHaveCount(1);
+    const rule = page.getByTestId("alert-rule");
+    await rule.getByRole("button", { name: /Edit alert|Alarmı düzenle/ }).click();
+    await page.locator("#alert-center-panel select").selectOption("price_below");
+    await page.locator("#alert-center-panel input").fill("2");
+    await page.getByRole("button", { name: /Save changes|Değişiklikleri kaydet/ }).click();
+    await expect(rule).toContainText(/Price below 2|Fiyat altında 2/);
+    await expect(rule.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    await rule.getByRole("switch").click();
+    await expect(rule.getByRole("switch")).toHaveAttribute("aria-checked", "false");
     await page.getByRole("button", { name: /Enable browser notifications|Tarayıcı bildirimlerini aç/ }).click();
     expect(await page.evaluate(() => (window as Window & { __permissionRequests?: number }).__permissionRequests)).toBe(1);
+    await rule.getByRole("button", { name: /Delete alert|Alarmı sil/ }).click();
+    await expect(page.getByTestId("alert-rule")).toHaveCount(0);
+  });
+
+  test("rejects oversized and ambiguous chart refresh bodies", async ({ request }) => {
+    const ambiguous = await request.post("/api/chart", { data: { id: "pair", dataSource: "unknown" } });
+    expect(ambiguous.status()).toBe(400);
+    const oversized = await request.post("/api/chart", {
+      headers: { "content-type": "application/json" },
+      data: JSON.stringify({ id: "pair", dataSource: "mock", padding: "x".repeat(70_000) })
+    });
+    expect(oversized.status()).toBe(413);
   });
 
   test("reports safe capabilities without secrets", async ({ request }) => {
@@ -348,7 +385,7 @@ test.describe("living Base terminal", () => {
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    for (const viewport of [{ width: 2048, height: 1152 }, { width: 1728, height: 1117 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 430, height: 932 }, { width: 390, height: 844 }]) {
+    for (const viewport of [{ width: 2048, height: 1152 }, { width: 1728, height: 1117 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 430, height: 932 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
       await page.setViewportSize(viewport);
       await page.goto("/terminal?data=mock");
       await expectTerminalShell(page);
@@ -390,7 +427,7 @@ test.describe("living Base terminal", () => {
       test.setTimeout(180_000);
       const locale = visualLocale;
       await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
-      for (const viewport of [{ width: 2048, height: 1152, name: "desktop-2048" }, { width: 1728, height: 1117, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 430, height: 932, name: "mobile-430" }, { width: 390, height: 844, name: "mobile-390" }]) {
+      for (const viewport of [{ width: 2048, height: 1152, name: "desktop-2048" }, { width: 1728, height: 1117, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 430, height: 932, name: "mobile-430" }, { width: 390, height: 844, name: "mobile-390" }, { width: 360, height: 800, name: "mobile-360" }]) {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
@@ -529,16 +566,44 @@ test.describe("living Base terminal", () => {
       await expect(detailPage.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
       await captureVisualEvidence(detailPage, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
+      await detailPage.route("**/api/chart", (route) => route.fulfill({ json: {
+        candles: Array.from({ length: 18 }, (_, index) => {
+          const open = 1 + index * 0.01;
+          return { timestamp: 1_725_000_000 + index * 3_600, open, high: open + 0.025, low: open - 0.02, close: open + (index % 2 ? -0.008 : 0.012), volume: 10_000 + index * 750 };
+        }),
+        source: "geckoterminal",
+        label: "CI read-only OHLCV fixture",
+        updatedAt: "2024-08-29T00:00:00.000Z"
+      } }));
       await detailPage.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
+      const chart = detailPage.getByRole("img", { name: /candlestick and volume chart|mum ve hacim grafiği/ });
+      await expect(chart).toBeVisible();
+      await chart.hover({ position: { x: 280, y: 150 } });
+      await expect(detailPage.getByTestId("resume-live-chart")).toBeVisible();
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`chart-hover-${locale}-1440.png`), false);
       await captureVisualEvidence(detailPage, testInfo.outputPath(`pair-workspace-${locale}-1440.png`), true);
+      await detailPage.unroute("**/api/chart");
       await detailPage.evaluate(() => localStorage.removeItem("base-terminal-lite:pinned-pairs"));
+      await detailPage.goto("/terminal?data=mock&view=watchlist");
+      await expect(detailPage.getByTestId("pinned-multichart")).toContainText("0/4");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`watchlist-empty-${locale}-1440.png`), true);
       await detailPage.goto("/terminal?data=mock");
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
         await detailPage.getByTestId(`matrix-row-${id}`).getByRole("button", { name: /Pin|izle/ }).click();
       }
       await detailPage.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
       await expect(detailPage.getByTestId("pinned-multichart")).toContainText("4/4");
-      await captureVisualEvidence(detailPage, testInfo.outputPath(`multichart-${locale}-1440.png`), true);
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`watchlist-populated-${locale}-1440.png`), true);
+      await detailPage.evaluate(() => {
+        localStorage.removeItem("mergen-pulse:alert-rules:v1");
+        localStorage.removeItem("mergen-pulse:alert-triggers:v1");
+      });
+      await detailPage.goto("/terminal?data=mock&view=alerts");
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`alerts-empty-${locale}-1440.png`), true);
+      await detailPage.locator("#alert-center-panel input").fill("1");
+      await detailPage.getByRole("button", { name: /Add|Ekle/, exact: true }).click();
+      await expect(detailPage.getByTestId("alert-rule")).toHaveCount(1);
+      await captureVisualEvidence(detailPage, testInfo.outputPath(`alerts-populated-${locale}-1440.png`), true);
       await detailPage.getByTestId("connect-wallet-button").click();
       await captureVisualEvidence(detailPage, testInfo.outputPath(`wallet-picker-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
