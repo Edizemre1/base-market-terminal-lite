@@ -5,7 +5,7 @@ import { assetIdentityForPair } from "../../src/components/base-terminal/AssetTr
 import { deriveTradeabilityAssessment, resolveAssetIdentity, type TradeabilityStatus } from "../../src/lib/base-terminal/assetTradeability";
 import { getNormalizedMarketModel } from "../../src/lib/base-terminal/marketModel";
 import { en, tr } from "../../src/i18n/dictionaries";
-import { getBaseScanAddressUrl, sanitizeTokenLogoUrl } from "../../src/lib/safeUrl";
+import { getBaseScanAddressUrl, getTokenImageProxyUrl, sanitizeTokenLogoUrl } from "../../src/lib/safeUrl";
 import { QuoteProviderError, SequentialQuoteService } from "../../src/lib/trade/quoteProviders";
 import { BASE_TRADE_CHAIN_ID, type QuoteFailureCode, type QuoteProviderAdapter, type QuoteRequest, type TradeCapabilities, type TransactionQuote } from "../../src/lib/trade/types";
 import { createQuoteFingerprint } from "../../src/lib/trade/validation";
@@ -29,7 +29,7 @@ test.describe("asset identity", () => {
   test("keeps an Apple-like unverified token generic and suppresses its upstream logo", () => {
     const address = "0x9999999999999999999999999999999999999999";
     const identity = resolveAssetIdentity({ chainId: 8453, tokenAddress: address, displayName: "Apple Token", displaySymbol: "AAPL" });
-    const presentation = getTokenAvatarPresentation({ symbol: "AAPL", name: "Apple Token", address, chainId: 8453 });
+    const presentation = getTokenAvatarPresentation({ symbol: "AAPL", name: "Apple Token", address, chainId: 8453, logoUrl: "https://assets.coingecko.com/apple.png" });
     expect(identity).toMatchObject({ status: "unverified", usesGenericAvatar: true, resemblesKnownBrand: true });
     expect(presentation.identity.status).toBe("unverified");
     expect(presentation.safeLogoUrl).toBeUndefined();
@@ -46,7 +46,17 @@ test.describe("asset identity", () => {
     expect(getBaseScanAddressUrl("javascript:alert(1)")).toBeUndefined();
     expect(getBaseScanAddressUrl("0x9999999999999999999999999999999999999999")).toBe("https://basescan.org/address/0x9999999999999999999999999999999999999999");
     expect(sanitizeTokenLogoUrl("javascript:alert(1)")).toBeUndefined();
+    expect(sanitizeTokenLogoUrl("https://user:pass@assets.coingecko.com/token.png")).toBeUndefined();
+    expect(sanitizeTokenLogoUrl("https://assets.coingecko.com:444/token.png")).toBeUndefined();
+    expect(getTokenImageProxyUrl("https://assets.coingecko.com/token.png")).toBe("/api/token-image?src=https%3A%2F%2Fassets.coingecko.com%2Ftoken.png");
     expect(resolveAssetIdentity({ chainId: 8453 }).status).toBe("unavailable");
+  });
+
+  test("treats an allowlisted provider logo as proxied decoration, not identity proof", () => {
+    const presentation = getTokenAvatarPresentation({ symbol: "NEW", name: "New token", address: "0x9999999999999999999999999999999999999999", chainId: 8453, logoUrl: "https://cdn.dexscreener.com/token.png" });
+    expect(presentation.identity.status).toBe("unverified");
+    expect(presentation.logoKind).toBe("provider-reported");
+    expect(presentation.safeLogoUrl).toContain("/api/token-image?src=");
   });
 
   test("rebinds malformed opportunity labels to the exact token side", async () => {

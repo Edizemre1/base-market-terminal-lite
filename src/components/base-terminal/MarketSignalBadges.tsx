@@ -113,7 +113,7 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
   const [transientOpen, setTransientOpen] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number; width: number }>();
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number; width: number; maxHeight: number }>();
   const rootRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -158,8 +158,12 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
       if (!rect) return;
       const width = Math.min(330, window.innerWidth - 24);
       const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-      const top = rect.bottom + 4 + 380 <= window.innerHeight ? rect.bottom + 4 : Math.max(12, rect.top - 384);
-      setPopoverPosition({ left, top, width });
+      const below = Math.max(0, window.innerHeight - rect.bottom - 16);
+      const above = Math.max(0, rect.top - 16);
+      const placeBelow = below >= Math.min(320, above);
+      const maxHeight = Math.max(180, Math.min(520, placeBelow ? below : above));
+      const top = placeBelow ? rect.bottom + 4 : Math.max(12, rect.top - maxHeight - 4);
+      setPopoverPosition({ left, top, width, maxHeight });
     };
     positionPopover();
     window.addEventListener("resize", positionPopover);
@@ -183,8 +187,8 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     id={popoverId}
     role="dialog"
     aria-label={t("marketSignal.details", { market: subject })}
-    className="fixed z-layer-popover rounded-panel border border-border-subtle bg-surface-panel p-3 text-left shadow-popover"
-    style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverPosition.width }}
+    className="fixed z-layer-popover overflow-y-auto rounded-panel border border-border-subtle bg-surface-panel p-3 text-left shadow-popover"
+    style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverPosition.width, maxHeight: popoverPosition.maxHeight }}
     onPointerEnter={showTransient}
     onPointerLeave={scheduleTransientClose}
     onFocus={showTransient}

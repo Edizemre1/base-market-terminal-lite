@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { cx } from "@/lib/format";
-import { sanitizeTokenLogoUrl } from "@/lib/safeUrl";
+import { getTokenImageProxyUrl, sanitizeTokenLogoUrl } from "@/lib/safeUrl";
 import { resolveAssetIdentity } from "@/lib/base-terminal/assetTradeability";
 
 type TokenAvatarProps = {
@@ -63,6 +63,7 @@ export function BaseNetworkIcon({ className }: { className?: string }) {
 
 export function TokenAvatar({
   symbol,
+  logoUrl,
   address,
   name,
   chainId,
@@ -72,7 +73,8 @@ export function TokenAvatar({
 }: TokenAvatarProps) {
   const [failed, setFailed] = useState(false);
   const initial = symbol.trim().slice(0, 2).toUpperCase() || "?";
-  const { identity, safeLogoUrl } = getTokenAvatarPresentation({ symbol, address, name, chainId, observedAt });
+  const { identity, safeLogoUrl, logoKind } = getTokenAvatarPresentation({ symbol, logoUrl, address, name, chainId, observedAt });
+  useEffect(() => setFailed(false), [safeLogoUrl]);
 
   return (
     <span
@@ -82,7 +84,7 @@ export function TokenAvatar({
         className
       )}
       title={symbol}
-      data-avatar-kind={safeLogoUrl && !failed ? "verified-official" : "generic"}
+      data-avatar-kind={safeLogoUrl && !failed ? logoKind : "generic"}
       data-identity-status={identity.status}
     >
       {safeLogoUrl && !failed ? (
@@ -102,12 +104,15 @@ export function TokenAvatar({
   );
 }
 
-export function getTokenAvatarPresentation(input: Pick<TokenAvatarProps, "symbol" | "address" | "name" | "chainId" | "observedAt">) {
+export function getTokenAvatarPresentation(input: Pick<TokenAvatarProps, "symbol" | "logoUrl" | "address" | "name" | "chainId" | "observedAt">) {
   const identity = resolveAssetIdentity({ chainId: input.chainId, tokenAddress: input.address, displayName: input.name, displaySymbol: input.symbol, observedAt: input.observedAt });
-  // Upstream market logos are never identity evidence. Only an exact-address
-  // registry record may supply an official logo.
-  const safeLogoUrl = identity.status === "verified" ? sanitizeTokenLogoUrl(identity.officialLogoUrl) : undefined;
-  return { identity, safeLogoUrl };
+  const officialLogo = identity.status === "verified" ? sanitizeTokenLogoUrl(identity.officialLogoUrl) : undefined;
+  // A provider image is decoration, never identity evidence. It is allowed only
+  // beside an exact Base contract and never for an unverified brand-like claim.
+  const exactBaseContract = (input.chainId === 8453 || input.chainId === "8453" || input.chainId === "base") && /^0x[0-9a-f]{40}$/i.test(input.address ?? "");
+  const providerLogo = exactBaseContract && !identity.resemblesKnownBrand ? sanitizeTokenLogoUrl(input.logoUrl) : undefined;
+  const selectedLogo = officialLogo ?? providerLogo;
+  return { identity, safeLogoUrl: getTokenImageProxyUrl(selectedLogo), logoKind: officialLogo ? "verified-official" : providerLogo ? "provider-reported" : "generic" };
 }
 
 export function PairAvatarStack({

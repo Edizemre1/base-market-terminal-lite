@@ -112,6 +112,10 @@ test.describe("live market wall contracts", () => {
     expect(new Set(ready.opportunities.filter((item) => item.focusTokenSymbol === "SAME").map((item) => item.focusTokenAddress)).size).toBe(2);
     expect(ready.opportunities.find((item) => item.focusTokenAddress === definitions[0].baseTokenAddress)?.poolCount).toBe(2);
     expect(first.lanes.filter((item) => item.eligibleCount > 0).every((item) => item.entries.length > 0)).toBeTruthy();
+    expect(first.lanes.every((item) => item.entries.length <= 4)).toBeTruthy();
+    const expanded = buildLiveMarketWall(ready, { allowCrossLaneRepeats: true, limit: 12 });
+    expect(expanded.lanes.every((item) => item.entries.length <= 12)).toBeTruthy();
+    expect(expanded.lanes.some((item) => item.entries.length > 4)).toBeTruthy();
   });
 
   test("coalesces and bounds pending updates and waits for an unlocked quiet period", () => {

@@ -37,7 +37,7 @@ test.describe("information architecture and overlay hierarchy", () => {
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await expect(page).toHaveURL(/pair=0x[0-9a-f]{40}/);
 
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Buy|Al/, exact: true }).click();
+    await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
     await expect(page.getByRole("dialog")).toHaveCount(1);
 

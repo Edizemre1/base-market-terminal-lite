@@ -171,7 +171,7 @@ export function buildLiveMarketWall(
     liquidity: liquidityCandidates,
     traded: tradedCandidates
   };
-  const allocated = allocateByStrength(candidates, Math.max(1, Math.min(4, limit)), allowCrossLaneRepeats);
+  const allocated = allocateByStrength(candidates, Math.max(1, Math.min(12, limit)), allowCrossLaneRepeats);
   const laneStatus = snapshot.freshness;
   const lanes = LANE_ORDER.map((id): LiveWallLane => ({
     id,
@@ -198,6 +198,7 @@ function allocateByStrength(candidates: Record<LiveWallLaneId, Candidate[]>, lim
     strength: all.length <= 1 ? 1 : 1 - index / (all.length - 1)
   }))])) as Record<LiveWallLaneId, LiveWallEntry[]>;
   if (repeats) return Object.fromEntries(LANE_ORDER.map((lane) => [lane, ranked[lane].slice(0, limit)])) as Record<LiveWallLaneId, LiveWallEntry[]>;
+  const summaryLimit = Math.min(4, limit);
 
   const strongest = new Map<string, { lane: LiveWallLaneId; strength: number; tie: number }>();
   for (const lane of LANE_ORDER) {
@@ -214,7 +215,7 @@ function allocateByStrength(candidates: Record<LiveWallLaneId, Candidate[]>, lim
   const used = new Set<string>();
   for (const lane of LANE_ORDER) {
     for (const entry of ranked[lane]) {
-      if (result[lane].length >= limit) break;
+      if (result[lane].length >= summaryLimit) break;
       if (strongest.get(entry.opportunity.id)?.lane !== lane || used.has(entry.opportunity.id)) continue;
       result[lane].push(entry);
       used.add(entry.opportunity.id);
@@ -222,10 +223,24 @@ function allocateByStrength(candidates: Record<LiveWallLaneId, Candidate[]>, lim
   }
   for (const lane of LANE_ORDER) {
     for (const entry of ranked[lane]) {
-      if (result[lane].length >= limit) break;
+      if (result[lane].length >= summaryLimit) break;
       if (used.has(entry.opportunity.id)) continue;
       result[lane].push(entry);
       used.add(entry.opportunity.id);
+    }
+  }
+  if (limit > summaryLimit) {
+    let added = true;
+    while (added) {
+      added = false;
+      for (const lane of LANE_ORDER) {
+        if (result[lane].length >= limit) continue;
+        const next = ranked[lane].find((entry) => !used.has(entry.opportunity.id));
+        if (!next) continue;
+        result[lane].push(next);
+        used.add(next.opportunity.id);
+        added = true;
+      }
     }
   }
   return result;

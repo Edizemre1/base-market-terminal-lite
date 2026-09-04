@@ -13,7 +13,7 @@ This ledger records the decisions that keep the terminal source-correct while it
 ## Information architecture
 
 - `/terminal` is canonical. The primary navigation is Terminal, Markets, Watchlist, Portfolio, and Alerts.
-- Terminal combines a real market tape, deterministic opportunity lanes, a dense market matrix, selected-pair inspector, pinned multichart, and the trade dock. Pair selection remains route-backed without forcing a page transition.
+- Terminal combines a real market tape, six deterministic and bounded opportunity streams, a dense market board, a closable context inspector, a route-backed pair workspace, a pinned multichart, and an intent-opened trade drawer.
 - A single refresh loop owns snapshots. Selected and pinned OHLCV remain lazy and bounded.
 - User interaction freezes disruptive reordering; a pending snapshot is applied explicitly or after the existing safe unlock period.
 
@@ -21,7 +21,7 @@ This ledger records the decisions that keep the terminal source-correct while it
 
 - DexScreener remains discovery and pair-snapshot source. Multiple legitimate pools for the same token route are retained and sorted by canonical pool key.
 - GeckoTerminal remains lazy read-only OHLCV for selected and pinned markets.
-- New, moving, volume, liquidity, gainers, and most-traded categories are deterministic and only use fields that exist for the relevant window. `Moving Now` is explicitly a Mergen heuristic, not advice or a safety score.
+- New, gainers, losers, volume inflow/leaders, liquidity movers, and most-traded streams are deterministic and only use fields that exist for the relevant window. Missing values remain missing rather than becoming zero, and no stream is advice or a safety score.
 - Virtuals, Clanker, Zora, holder, insider, smart-money, and security labels stay disabled unless a trustworthy adapter supplies verifiable data.
 
 ## Quote and execution capability

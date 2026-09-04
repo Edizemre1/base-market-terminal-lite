@@ -7,10 +7,16 @@ export function sanitizeTokenLogoUrl(value: string | undefined) {
     const parsed = new URL(value);
     const hostname = parsed.hostname.toLocaleLowerCase("en-US");
     const allowed = TOKEN_IMAGE_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
-    return parsed.protocol === "https:" && allowed ? parsed.toString() : undefined;
+    return parsed.protocol === "https:" && allowed && !parsed.username && !parsed.password && (!parsed.port || parsed.port === "443") ? parsed.toString() : undefined;
   } catch {
     return undefined;
   }
+}
+
+export function getTokenImageProxyUrl(value: string | undefined) {
+  const safe = sanitizeTokenLogoUrl(value);
+  if (!safe || safe.startsWith("/")) return safe;
+  return `/api/token-image?src=${encodeURIComponent(safe)}`;
 }
 
 export function getBaseScanAddressUrl(address: string | undefined) {

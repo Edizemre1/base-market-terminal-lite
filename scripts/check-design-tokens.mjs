@@ -6,7 +6,7 @@ const tokenFile = path.resolve("src/app/design-tokens.css");
 const findings = [];
 const sourceFiles = [];
 const dynamicStyleExceptions = new Map([
-  ["src/components/base-terminal/MarketSignalBadges.tsx", [/^style=\{\{ left: popoverPosition\.left, top: popoverPosition\.top, width: popoverPosition\.width \}\}$/]],
+  ["src/components/base-terminal/MarketSignalBadges.tsx", [/^style=\{\{ left: popoverPosition\.left, top: popoverPosition\.top, width: popoverPosition\.width, maxHeight: popoverPosition\.maxHeight \}\}$/]],
   ["src/components/base-terminal/AssetTradeabilityBadges.tsx", [/^style=\{\{ top: position\.top, left: position\.left, transform: position\.top > window\.innerHeight \/ 2 \? "translateY\(-100%\)" : undefined \}\}$/]]
 ]);
 

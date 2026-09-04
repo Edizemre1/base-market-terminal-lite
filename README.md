@@ -1,6 +1,6 @@
 # Mergen.finance Base Terminal
 
-Mergen is a source-correct, multi-market terminal for Base. The canonical `/terminal` workspace combines live discovery, four opportunity lanes, a dense market matrix, selected-pool inspection, local watchlists and alerts, a four-market OHLCV view, and a wallet-gated transaction path.
+Mergen is a source-correct, multi-market terminal for Base. The canonical `/terminal` workspace combines live discovery, six bounded opportunity streams, a dense market board, selected-pool inspection, local watchlists and alerts, a four-market OHLCV view, and a wallet-gated transaction path.
 
 Production remains read-only. Quote and transaction capabilities are disabled unless the deployment explicitly enables the staging flags. Mergen never requests a wallet, signs, approves, or broadcasts on initial load.
 
@@ -8,8 +8,8 @@ Production remains read-only. Quote and transaction capabilities are disabled un
 
 - DexScreener Base discovery with distinct pool identities and 10–15 second foreground refresh.
 - Lazy GeckoTerminal OHLCV only for the selected pool and up to four pinned pools.
-- Deterministic New on Base, Moving Now, Volume Surge, and Deep Liquidity lanes.
-- Up to 80 matrix rows with real filters, result count, column visibility, density, sorting, and local persistence.
+- Deterministic New on Base, Top Gainers, Top Losers, Volume Inflow/Leaders, Liquidity Movers, and Most Traded streams with four-row summaries and bounded expansion.
+- Up to 40 market rows per progressive batch with real filters, result count, column visibility, density, sorting, and local persistence.
 - Route-backed selection through `/terminal?pair=<pool-address>` without leaving the workspace.
 - EIP-6963 wallet picker, exact Base chain checks, safe balance reads, and no provider calls before an allowed explicit/restore path.
 - Indicative market context separated from server transaction quotes.

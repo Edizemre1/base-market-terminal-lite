@@ -58,6 +58,8 @@ Four axes never substitute for one another:
 
 `unknown` is not safe, zero, verified, tradeable or unavailable. `verified` is not a safety guarantee. `quote ready` is an operation state, not market direction or transaction success.
 
+Discovery actions follow the same truth ladder: a market-data row may offer **Inspect**; an exact ranking-eligible market may offer **Check quote**; **Buy/Sell** language belongs inside the explicit trade lifecycle and does not imply that a route exists.
+
 ## Color contract
 
 - Neutral canvas and panel hierarchy is the foundation.
@@ -152,6 +154,8 @@ Actions begin with verbs. Empty/loading/error copy follows what happened → why
 ## On-chain evidence disclosure
 
 Observed on-chain state does not add another dashboard layer. The main Wall and Board keep their existing density and hierarchy. Protocol adapter, exact source block/time, raw reserve/balance evidence, reason codes, and provider/on-chain reconciliation live behind native disclosure controls in Inspector → Pools and the Pool Drawer. Conflict and unavailable copy uses semantic trust/freshness colors already in the system; it does not introduce a new accent. Finding an on-chain price never enables Buy/Sell by itself.
+
+Provider-reported token images are decorative only. They may render beside an exact Base contract through the same-origin, allowlisted image proxy, but never change identity status; unverified brand-like names always retain the generic avatar.
 
 ## Static guard
 
