@@ -58,7 +58,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   const pairScope = searchParams.get("pair") ?? "";
   const [active, setActive] = useState<OverlayEntry>(NONE);
   const [suspended, setSuspended] = useState<OverlayEntry>();
-  const suspendedRef = useRef<OverlayEntry>();
+  const suspendedRef = useRef<OverlayEntry | undefined>(undefined);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const restoringModalFocusRef = useRef(false);
