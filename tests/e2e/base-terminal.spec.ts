@@ -518,7 +518,7 @@ test.describe("living Base terminal", () => {
       await captureVisualEvidence(detailPage, testInfo.outputPath(`pool-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
-      await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel bakış/ }).click();
+      await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel Bakış/ }).click();
       await detailPage.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
       await expect(detailPage.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
