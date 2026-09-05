@@ -89,7 +89,20 @@ export function BaseTerminal({
   const [pulseSignals, setPulseSignals] = useState<PulseSignal[]>(data.recentSignals);
   const [pendingSnapshot, setPendingSnapshot] = useState<PendingSnapshot>();
   const [interactionLocked, setInteractionLocked] = useState(false);
-  const [view, setView] = useState<TerminalView>(() => normalizeTerminalView(initialViewParam));
+  const initialLocationRef = useRef<TerminalLocation | undefined>(undefined);
+  if (!initialLocationRef.current) {
+    initialLocationRef.current = typeof window === "undefined"
+      ? {
+        view: normalizeTerminalView(initialViewParam),
+        pair: initialPairParam,
+        overlay: initialPairParam && normalizeTerminalView(initialViewParam) !== "workspace"
+          ? "market_inspector"
+          : "none"
+      }
+      : readTerminalLocation();
+  }
+  const initialLocation = initialLocationRef.current;
+  const [view, setView] = useState<TerminalView>(() => initialLocation.view);
   const snapshotRef = useRef(snapshotData);
   const selectedPairRef = useRef<BasePair | undefined>(undefined);
   const activeOverlayTypeRef = useRef(overlay.active.type);
@@ -109,7 +122,7 @@ export function BaseTerminal({
     initialSnapshot: data,
     snapshotData,
     snapshotRef,
-    initialPairParam
+    initialPairParam: initialLocation.pair ?? initialPairParam
   });
   const { chartOverrides, chartRefreshStatus, refreshPairChart } = useChartData(snapshotRef);
   const selectedPairWithLiveChart = useMemo(() => {
@@ -211,10 +224,10 @@ export function BaseTerminal({
   }, [handleSelectPairById, overlay]);
 
   useEffect(() => {
-    if (!initialPairParam || view === "workspace" || normalizeTerminalView(initialViewParam) === "workspace") return;
+    if (!initialLocation.pair || view === "workspace" || initialLocation.view === "workspace") return;
     if (activeOverlayTypeRef.current !== "none") return;
     openOverlay("market_inspector");
-  }, [initialPairParam, initialViewParam, openOverlay, view]);
+  }, [initialLocation.pair, initialLocation.view, openOverlay, view]);
 
   useEffect(() => {
     watchedPairIdsRef.current = pinnedPairs

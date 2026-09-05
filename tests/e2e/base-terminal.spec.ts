@@ -169,7 +169,7 @@ test.describe("living Base terminal", () => {
   test("keeps the last good board visible and captures a delayed-source state", async ({ page }, testInfo) => {
     await page.route("**/api/market-snapshot?data=mock", (route) => route.abort("failed"));
     await page.getByTestId("refresh-terminal").click();
-    await expect(page.getByTestId("market-feed-delayed")).toBeVisible();
+    await expect(page.getByTestId("market-source-delayed")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await captureVisualEvidence(page, testInfo.outputPath("terminal-delayed-source-1440.png"), true);
   });
@@ -248,7 +248,7 @@ test.describe("living Base terminal", () => {
       generatedAt,
       receivedAt: generatedAt,
       sourceUpdatedAt: generatedAt,
-      allPairs: initial.allPairs.map((pair) => pair.id === target.id ? { ...pair, baseToken: "AAPL", project: "Apple Token", tokenLogoUrl: "https://assets.coingecko.com/apple-official.png", sourceUpdatedAt: generatedAt } : pair),
+      allPairs: initial.allPairs.map((pair) => pair.id === target.id ? { ...pair, pair: "AAPL / USDC", baseToken: "AAPL", project: "Apple Token", tokenLogoUrl: "https://assets.coingecko.com/apple-official.png", sourceUpdatedAt: generatedAt } : pair),
       opportunities: initial.opportunities.map((opportunity) => opportunity.id === opportunityId ? { ...opportunity, focusTokenSymbol: "AAPL", focusTokenName: "Apple Token", focusTokenLogoUrl: "https://assets.coingecko.com/apple-official.png" } : opportunity)
     };
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
@@ -271,7 +271,7 @@ test.describe("living Base terminal", () => {
     const next = buildSignalSnapshot(initial, target.id, new Date(Date.parse(initial.receivedAt) + 1_000).toISOString(), 3);
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").click();
+    await expect(page.getByTestId("pending-market-updates")).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     const desktopButton = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group").getByRole("button");
@@ -344,14 +344,14 @@ test.describe("living Base terminal", () => {
 
     const selectedSignals = page.getByTestId("matrix-row-pepe-weth").getByTestId("market-signal-group");
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").click();
+    await expect(page.getByTestId("pending-market-updates")).toHaveCount(0);
     await selectedSignals.getByRole("button").click();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toBeVisible();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/confirming|doğrulanıyor/i);
     await page.keyboard.press("Escape");
 
     await page.getByTestId("refresh-terminal").click();
-    await page.getByTestId("pending-market-updates").click();
+    await expect(page.getByTestId("pending-market-updates")).toHaveCount(0);
     await selectedSignals.getByRole("button").click();
     await expect(page.locator('[data-signal-detail="gaining_fast"]')).toContainText(/cooldown|bekleme/i);
     await page.keyboard.press("Escape");
@@ -760,7 +760,7 @@ function buildVisualWallSnapshot(snapshot: MarketTerminalSnapshot): MarketTermin
         sourceUpdatedAt: generatedAt,
         pairCreatedAt: recentIds.has(opportunityId) ? recentAt : pair.pairCreatedAt,
         pairCreatedAtMs: recentIds.has(opportunityId) ? Date.parse(recentAt) : pair.pairCreatedAtMs,
-        priceChanges: loserIds.has(opportunityId) ? { ...pair.priceChanges, h1: -10 - targets.findIndex((item) => item.id === opportunityId) } : pair.priceChanges
+        priceChanges: loserIds.has(opportunityId) ? { ...pair.priceChanges, h24: -10 - targets.findIndex((item) => item.id === opportunityId) } : pair.priceChanges
       };
     }),
     opportunities: snapshot.opportunities.map((item) => {

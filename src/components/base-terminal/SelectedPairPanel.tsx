@@ -67,7 +67,7 @@ export function SelectedPairPanel({
                 className="truncate text-title-sm font-semibold leading-5 text-content-primary"
                 data-testid="selected-pair-title"
               >
-                {pair.pair}
+                {pair.focusTokenSymbol ?? pair.baseToken}
               </h2>
               <MarketSignalBadges pair={pair} />
               <AssetTradeabilityBadges pair={pair} compact={false} />
