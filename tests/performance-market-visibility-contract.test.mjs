@@ -58,3 +58,21 @@ test("live values update independently while queueing only locks placement", asy
   assert.match(client, /inFlightSnapshots\.get\(url\)/);
   assert.match(client, /withSubscriberAbort/);
 });
+
+test("fresh validated provider prices reach the UI without weakening pending semantics", async () => {
+  const [priceDisplay, surface, inspector] = await Promise.all([
+    source("src/lib/base-terminal/marketPriceDisplay.ts"),
+    source("src/components/base-terminal/TerminalMarketSurface.tsx"),
+    source("src/components/base-terminal/ContextInspector.tsx")
+  ]);
+  assert.match(priceDisplay, /LIVE_PROVIDER_IDS\.has\(provider\)/);
+  assert.match(priceDisplay, /pair\.stale !== true/);
+  assert.match(priceDisplay, /isFreshTimestamp\(pair\.sourceUpdatedAt, nowMs\)/);
+  assert.match(priceDisplay, /baseAddress === focusAddress/);
+  assert.match(priceDisplay, /opportunity\.primaryMarketId === pair\.id/);
+  assert.match(priceDisplay, /readPositive\(pair\.priceUsdValue\)/);
+  assert.match(priceDisplay, /observed\.freshness === "fresh"/);
+  assert.match(surface, /resolveOpportunityMarketPrice\(opportunity, oriented\)/);
+  assert.match(surface, /if \(!price\) return t\("terminalV3\.pricingPending"\)/);
+  assert.match(inspector, /resolveOpportunityMarketPrice\(opportunity, pair\)/);
+});

@@ -174,6 +174,49 @@ test.describe("living Base terminal", () => {
     await captureVisualEvidence(page, testInfo.outputPath("terminal-delayed-source-1440.png"), true);
   });
 
+  test("renders a fresh provider-derived cbBTC price while keeping stale provider data pending", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
+    const [freshOpportunity, staleOpportunity] = initial.opportunities.filter((opportunity) => opportunity.quality === "active").slice(0, 2);
+    const freshPair = initial.allPairs.find((pair) => pair.id === freshOpportunity.primaryMarketId)!;
+    const stalePair = initial.allPairs.find((pair) => pair.id === staleOpportunity.primaryMarketId)!;
+    const generatedAt = new Date().toISOString();
+    const staleAt = new Date(Date.parse(generatedAt) - 16 * 60_000).toISOString();
+    const providerPrice = 79_741.9008990833;
+    const cbBtcAddress = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
+    const wethAddress = "0x4200000000000000000000000000000000000006";
+    const pendingPrice = { chainId: 8453 as const, tier: "UNPRICED" as const, kind: "unpriced" as const, sourcePoolKeys: [], anchorPoolKeys: [], freshness: "unavailable" as const, eligible: false, rejectionReason: "no_trustworthy_usdc_path", reasonCode: "no_trustworthy_usdc_path" };
+    const next: MarketTerminalSnapshot = {
+      ...initial,
+      mode: "dexscreener",
+      providerName: "GeckoTerminal + DexScreener read-only Base data",
+      feedStatusLabel: "READ-ONLY DATA",
+      version: `provider-price-ui-${generatedAt}`,
+      generatedAt,
+      receivedAt: generatedAt,
+      sourceUpdatedAt: generatedAt,
+      freshness: "fresh",
+      sourceHealth: { marketProvider: "fresh", collector: "fresh", observedAt: generatedAt },
+      allPairs: initial.allPairs.map((pair) => {
+        if (pair.id === freshPair.id) return { ...pair, pair: "cbBTC / WETH", baseToken: "cbBTC", quoteToken: "WETH", baseTokenAddress: cbBtcAddress, quoteTokenAddress: wethAddress, pairAddress: "0x42d4a22cad0f5a49681a5715ce994af73a43b76b", chainId: "base", dataSource: "geckoterminal", dataProviders: ["dexscreener", "geckoterminal"], sourceUpdatedAt: generatedAt, stale: false, staleReason: undefined, priceUsdValue: providerPrice, priceUsd: "$79.741901K", priceNative: "32.1323048813", observedPriceUsd: undefined, observedPriceProvider: undefined, observedPriceAt: undefined };
+        if (pair.id === stalePair.id) return { ...pair, chainId: "base", dataSource: "geckoterminal", dataProviders: ["geckoterminal"], sourceUpdatedAt: staleAt, stale: true, staleReason: "Provider observation expired", priceUsdValue: 123.45, observedPriceUsd: undefined, observedPriceProvider: undefined, observedPriceAt: undefined };
+        return pair;
+      }),
+      opportunities: initial.opportunities.map((opportunity) => {
+        if (opportunity.id === freshOpportunity.id) return { ...opportunity, focusTokenAddress: cbBtcAddress, focusTokenSymbol: "cbBTC", focusTokenName: "Coinbase Wrapped BTC", canonicalPrice: pendingPrice, canonicalPriceUsd: undefined, observedPriceUsd: undefined, displayMode: "pending", rankingEligibility: false, tradeability: "market_data_only", freshness: { newestSourceAt: generatedAt, oldestSourceAt: generatedAt, stalePoolCount: 0 } };
+        if (opportunity.id === staleOpportunity.id) return { ...opportunity, canonicalPrice: pendingPrice, canonicalPriceUsd: undefined, observedPriceUsd: undefined, displayMode: "pending", rankingEligibility: false, tradeability: "market_data_only", freshness: { newestSourceAt: staleAt, oldestSourceAt: staleAt, stalePoolCount: 1 } };
+        return opportunity;
+      })
+    };
+    await page.route("**/api/market-snapshot?data=*", (route) => route.fulfill({ json: next }));
+    await page.getByTestId("refresh-terminal").click();
+
+    const freshRow = page.getByTestId(`matrix-row-${freshPair.id}`);
+    const staleRow = page.getByTestId(`matrix-row-${stalePair.id}`);
+    await expect(freshRow.locator("td").nth(1)).toHaveText("$79,741.900899 · Market price");
+    await expect(freshRow.getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true })).toHaveCount(0);
+    await expect(staleRow.locator("td").nth(1)).toHaveText(/Price pending|Fiyat bekleniyor/);
+  });
+
   test("ingests a new pool for an existing token on refresh without reloading or duplicating its token row", async ({ page, request }) => {
     const initial = await (await request.get("/api/market-snapshot?data=mock")).json() as MarketTerminalSnapshot;
     const target = initial.allPairs.find((pair) => pair.opportunityId && pair.poolCount === 1)!;
