@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { presentMarketSignals } from "../../src/components/base-terminal/MarketSignalBadges";
 import { shouldPresentAssetBadges } from "../../src/components/base-terminal/AssetTradeabilityBadges";
@@ -91,10 +91,10 @@ test.describe("information architecture and overlay hierarchy", () => {
       await expect(page.getByTestId("market-matrix")).toBeVisible();
       const samples: RoutePerformanceSample[] = [];
       const routeCycle = ["markets", "terminal", "watchlist", "terminal", "portfolio", "terminal", "alerts", "terminal"];
-      for (let pass = 0; pass < 10; pass += 1) {
+      for (let pass = 0; pass < 11; pass += 1) {
         for (const target of routeCycle) samples.push(await measureClientRoute(page, target));
       }
-      for (let pass = 0; pass < 10; pass += 1) {
+      for (let pass = 0; pass < 11; pass += 1) {
         samples.push(await measureInspectorRoute(page));
         samples.push(await measureWorkspaceRoute(page));
         samples.push(await measureHistoryRoute(page, "back", "market_inspector"));
@@ -107,23 +107,25 @@ test.describe("information architecture and overlay hierarchy", () => {
       const interactiveP95 = percentile(samples.map((sample) => sample.interactiveMs), 0.95);
       const byTarget = Object.fromEntries([...new Set(samples.map((sample) => sample.target))].map((target) => {
         const targetSamples = samples.filter((sample) => sample.target === target);
+        const warmTargetSamples = targetSamples.slice(1);
         return [target, {
-          commitP95: percentile(targetSamples.map((sample) => sample.commitMs), 0.95),
-          meaningfulP95: percentile(targetSamples.map((sample) => sample.contentMs), 0.95),
-          interactiveP95: percentile(targetSamples.map((sample) => sample.interactiveMs), 0.95),
-          coldMeaningful: targetSamples[0]?.contentMs ?? 0
+          commitP95: percentile(warmTargetSamples.map((sample) => sample.commitMs), 0.95),
+          meaningfulP95: percentile(warmTargetSamples.map((sample) => sample.contentMs), 0.95),
+          interactiveP95: percentile(warmTargetSamples.map((sample) => sample.interactiveMs), 0.95),
+          coldMeaningful: targetSamples[0]?.contentMs ?? 0,
+          warmSampleCount: warmTargetSamples.length
         }];
       }));
       const longTasks = await page.evaluate(() => performance.getEntriesByType("longtask").map((entry) => entry.duration));
-      await testInfo.attach(`route-performance-${viewport.name}.json`, {
-        body: Buffer.from(JSON.stringify({ viewport, samples, byTarget, commitP95, meaningfulP95, interactiveP95, terminalRequests, longTasks }, null, 2)),
-        contentType: "application/json"
-      });
+      const performancePath = testInfo.outputPath(`route-performance-${viewport.name}.json`);
+      writeFileSync(performancePath, JSON.stringify({ viewport, samples, byTarget, commitP95, meaningfulP95, interactiveP95, terminalRequests, longTasks }, null, 2));
+      await testInfo.attach(`route-performance-${viewport.name}.json`, { path: performancePath, contentType: "application/json" });
       expect(terminalRequests, "client route switches must not request a new terminal RSC payload").toEqual([]);
       expect(commitP95).toBeLessThanOrEqual(300);
       expect(meaningfulP95).toBeLessThanOrEqual(600);
       expect(interactiveP95).toBeLessThanOrEqual(600);
-      for (const timing of Object.values(byTarget)) {
+      for (const [target, timing] of Object.entries(byTarget)) {
+        expect(timing.warmSampleCount, `${target} warm sample count`).toBeGreaterThanOrEqual(10);
         expect(timing.commitP95).toBeLessThanOrEqual(300);
         expect(timing.meaningfulP95).toBeLessThanOrEqual(600);
         expect(timing.interactiveP95).toBeLessThanOrEqual(600);
