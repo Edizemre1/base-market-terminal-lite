@@ -26,6 +26,7 @@ export type ProviderHealthState = {
   status: ProviderRefreshStatus;
   lastSuccessAt?: string;
   stale: boolean;
+  sourceDelayed?: boolean;
   fallbackReason?: string;
   failureReason?: string;
 };

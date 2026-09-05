@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { BasePair } from "@/types/baseTerminal";
 
@@ -138,6 +138,10 @@ export type OnchainStoreReadResult =
   | { ok: true; state: OnchainStoreState }
   | { ok: false; reason: "store_unavailable" | "store_invalid" | "digest_mismatch" | "schema_unsupported" };
 
+type OnchainStoreCache = { file: string; size: number; mtimeMs: number; result: OnchainStoreReadResult };
+let onchainStoreCache: OnchainStoreCache | undefined;
+let onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0 };
+
 export function getOnchainStoreDirectory() {
   return process.env.ONCHAIN_STORE_PATH?.trim() || path.resolve(process.cwd(), ".data/onchain-discovery");
 }
@@ -145,14 +149,36 @@ export function getOnchainStoreDirectory() {
 export function readOnchainStoreSnapshot(): OnchainStoreReadResult {
   try {
     const file = path.join(getOnchainStoreDirectory(), "state.json");
-    const state = JSON.parse(readFileSync(file, "utf8")) as OnchainStoreState;
-    if (state.schemaVersion !== ONCHAIN_STORE_SCHEMA_VERSION) return { ok: false, reason: "schema_unsupported" };
+    const stat = statSync(file);
+    if (onchainStoreCache && onchainStoreCache.file === file && onchainStoreCache.size === stat.size && onchainStoreCache.mtimeMs === stat.mtimeMs) {
+      onchainStoreReadMetrics.cacheHits += 1;
+      return onchainStoreCache.result;
+    }
+    onchainStoreReadMetrics.fileReads += 1;
+    const serialized = readFileSync(file, "utf8");
+    onchainStoreReadMetrics.parses += 1;
+    const state = JSON.parse(serialized) as OnchainStoreState;
+    if (state.schemaVersion !== ONCHAIN_STORE_SCHEMA_VERSION) return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: false, reason: "schema_unsupported" });
     const expected = digestState(state);
-    if (state.integrity?.digest !== expected) return { ok: false, reason: "digest_mismatch" };
-    return { ok: true, state };
+    if (state.integrity?.digest !== expected) return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: false, reason: "digest_mismatch" });
+    return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: true, state });
   } catch (error) {
     return { ok: false, reason: isMissingFile(error) ? "store_unavailable" : "store_invalid" };
   }
+}
+
+function cacheOnchainStoreResult(file: string, size: number, mtimeMs: number, result: OnchainStoreReadResult) {
+  onchainStoreCache = { file, size, mtimeMs, result };
+  return result;
+}
+
+export function getOnchainStoreReadMetrics() {
+  return { ...onchainStoreReadMetrics };
+}
+
+export function resetOnchainStoreReadCacheForTests() {
+  onchainStoreCache = undefined;
+  onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0 };
 }
 
 export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = readOnchainStoreSnapshot()) {
@@ -299,8 +325,7 @@ export function collectorFreshness(state: OnchainStoreState, nowMs = Date.now())
   return { ready: Boolean(!delayedReason && state.health.ready && state.health.storeIntegrity === "ok"), lagBlocks, lagSeconds: lagBlocks * 2, snapshotAgeMs: Number.isFinite(snapshotAgeMs) ? snapshotAgeMs : null, headAgeMs: Number.isFinite(headAgeMs) ? headAgeMs : null, snapshotFreshness: delayedReason ? "delayed" : "fresh", delayedReason, snapshotReceivedAt: state.updatedAt };
 }
 
-export function getOnchainPricingStatus() {
-  const result = readOnchainStoreSnapshot();
+export function getOnchainPricingStatus(result = readOnchainStoreSnapshot()) {
   if (!result.ok) return { available: false as const, reasonCode: result.reason };
   return { available: true as const, wethUsdcAnchor: result.state.priceAnchors?.wethUsdc };
 }

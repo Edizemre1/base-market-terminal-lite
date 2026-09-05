@@ -11,8 +11,32 @@ import {
   mergePulseSignals
 } from "../../src/lib/base-terminal/pulse";
 import type { BasePair } from "../../src/types/baseTerminal";
+import { fetchTerminalSnapshot, resetTerminalSnapshotClientForTests } from "../../src/lib/base-terminal/terminalSnapshotClient";
 
 test.describe("verified snapshot signal engine", () => {
+  test("deduplicates concurrent snapshot bytes and lets one stale subscriber abort safely", async () => {
+    const originalFetch = globalThis.fetch;
+    const snapshot = await getMarketTerminalSnapshot("mock");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      await gate;
+      return new Response(JSON.stringify(snapshot), { status: 200, headers: { ETag: 'W/"mock-static-v3"', "Content-Type": "application/json" } });
+    };
+    resetTerminalSnapshotClientForTests();
+    const stale = new AbortController();
+    const first = fetchTerminalSnapshot("/api/market-snapshot?data=mock", stale.signal);
+    const second = fetchTerminalSnapshot("/api/market-snapshot?data=mock");
+    stale.abort();
+    release();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await expect(second).resolves.toMatchObject({ version: snapshot.version });
+    expect(calls).toBe(1);
+    globalThis.fetch = originalFetch;
+    resetTerminalSnapshotClientForTests();
+  });
   test("derives price, real 5m volume and liquidity events from consecutive snapshots", async () => {
     const before = await getMarketTerminalSnapshot("mock");
     const pair = withVerifiedWindows(before.allPairs[0], { m5Volume: 10_000, liquidity: 100_000, price: 1 });
@@ -66,8 +90,9 @@ test.describe("verified snapshot signal engine", () => {
     const pair = withVerifiedWindows(base.allPairs[0], { m5Volume: 10_000, liquidity: 100_000, price: 1 });
     const current = withPairs(base, [withVerifiedWindows(pair, { m5Volume: 10_000, liquidity: 100_000, price: 1.02 })]);
     expect(getChangedPairIds(withPairs(base, [pair]), current)).toEqual([pair.id]);
-    expect(shouldQueueMarketUpdate(1, false)).toBeTruthy();
-    expect(shouldQueueMarketUpdate(0, true)).toBeTruthy();
+    expect(shouldQueueMarketUpdate(1, false)).toBeFalsy();
+    expect(shouldQueueMarketUpdate(1, true)).toBeTruthy();
+    expect(shouldQueueMarketUpdate(0, true)).toBeFalsy();
     expect(shouldQueueMarketUpdate(0, false)).toBeFalsy();
     expect(getSnapshotRefreshCadence("visible")).toBe(12_000);
     expect(getSnapshotRefreshCadence("hidden")).toBe(60_000);

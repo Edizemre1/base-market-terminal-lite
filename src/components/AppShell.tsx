@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { MarketDataMode } from "@/data/providers";
 import { cx } from "@/lib/format";
 import { TerminalSearchProvider, useTerminalSearch } from "@/components/TerminalSearchContext";
@@ -24,6 +24,15 @@ import { APP_VERSION } from "@/lib/appInfo";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import { OverlayProvider } from "@/components/OverlayManager";
+import {
+  commitTerminalNavigation,
+  normalizeTerminalView,
+  readTerminalLocation,
+  shouldHandleTerminalAnchor,
+  TERMINAL_NAVIGATION_EVENT,
+  type TerminalLocation,
+  type TerminalView
+} from "@/lib/base-terminal/terminalNavigation";
 
 const navItems = [
   { href: "/terminal", labelKey: "nav.terminal", view: "terminal", icon: PanelsTopLeft },
@@ -46,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-testid="terminal-topbar"
         >
           <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto_auto] lg:px-4">
-            <Link href="/terminal" className="flex min-w-0 items-center gap-3">
+            <Link href="/terminal" prefetch={false} onClick={(event) => handleTerminalAnchor(event, "terminal")} className="flex min-w-0 items-center gap-3">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
                 <span
@@ -389,10 +398,12 @@ function HeaderHeartbeat() {
     ? t("header.heartbeatChecking")
     : providerHealth?.stale
       ? t("header.heartbeatDelayed")
+      : providerHealth?.sourceDelayed
+        ? t("terminalV3.sourceDelayed")
       : providerHealth?.lastSuccessAt
         ? `${locale === "tr" ? "Veri akışı" : "Heartbeat"} · ${formatHeartbeat(providerHealth.lastSuccessAt, locale, t("header.sourceReady"))}`
         : t("header.heartbeatStarting");
-  return <TopChip label={label} tone={providerHealth?.stale ? "delayed" : "live"} />;
+  return <TopChip label={label} tone={providerHealth?.stale || providerHealth?.sourceDelayed ? "delayed" : "live"} />;
 }
 
 function SettingsLabel() {
@@ -422,7 +433,7 @@ function HeaderProductLabel() {
 function HeaderAlertLink() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
-  return <Link href={withTerminalContext("/terminal?view=alerts", searchParams)} className="cmi-icon-button" aria-label={t("header.alerts")} title={t("header.alerts")}><Bell size={16} /></Link>;
+  return <Link href={withTerminalContext("/terminal?view=alerts", searchParams)} prefetch={false} onClick={(event) => handleTerminalAnchor(event, "alerts")} className="cmi-icon-button" aria-label={t("header.alerts")} title={t("header.alerts")}><Bell size={16} /></Link>;
 }
 
 function LocaleSwitcher() {
@@ -434,12 +445,34 @@ function TerminalNavigation({ mobile = false }: { mobile?: boolean }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const requestedView = searchParams.get("view");
-  const activeView = requestedView === "markets" || requestedView === "watchlist" || requestedView === "alerts" || requestedView === "portfolio" ? requestedView : "terminal";
+  const activeView = useTerminalRouteView(searchParams.get("view"));
   const isTerminalRoute = pathname === "/terminal" || pathname === "/" || pathname === "/dashboard" || pathname === "/swap";
   const items = navItems.filter((item) => mobile ? !("desktopOnly" in item && item.desktopOnly) && !("mobileHidden" in item && item.mobileHidden) : !("mobileOnly" in item && item.mobileOnly));
-  if (mobile) return <nav className="cmi-mobile-nav-safe fixed bottom-0 left-0 right-0 z-layer-shell grid min-h-14 grid-cols-4 border-t border-border-subtle/60 bg-surface-panel/95 px-1 backdrop-blur-xl md:hidden" aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.labelKey}`} href={withTerminalContext(item.href, searchParams)} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 border-t-2 text-meta font-semibold", active ? "border-brand-accent bg-surface-selected text-content-primary" : "border-transparent text-content-secondary")}><Icon size={16} className={active ? "text-brand-accent" : undefined} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
-  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={withTerminalContext(item.href, searchParams)} aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-card border-l-2 text-meta font-semibold", active ? "border-brand-accent bg-surface-selected text-content-primary" : "border-transparent text-content-secondary hover:bg-surface-interactive hover:text-content-primary")}><span className={cx("grid h-5 w-5 shrink-0 place-items-center", active && "text-brand-accent")}><Icon size={16} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
+  if (mobile) return <nav className="cmi-mobile-nav-safe fixed bottom-0 left-0 right-0 z-layer-shell grid min-h-14 grid-cols-4 border-t border-border-subtle/60 bg-surface-panel/95 px-1 backdrop-blur-xl md:hidden" aria-label={t("nav.mobile")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={`mobile-${item.labelKey}`} href={withTerminalContext(item.href, searchParams)} prefetch={false} onClick={(event) => handleTerminalAnchor(event, item.view)} data-client-route="terminal" aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-14 flex-col items-center justify-center gap-1 border-t-2 text-meta font-semibold", active ? "border-brand-accent bg-surface-selected text-content-primary" : "border-transparent text-content-secondary")}><Icon size={16} className={active ? "text-brand-accent" : undefined} aria-hidden="true" /><span>{label}</span></Link>; })}</nav>;
+  return <nav className="space-y-1 p-2" aria-label={t("nav.desktop")}>{items.map((item) => { const Icon = item.icon; const active = isTerminalRoute && activeView === item.view; const label = t(item.labelKey as TranslationKey); return <Link key={item.view} href={withTerminalContext(item.href, searchParams)} prefetch={false} onClick={(event) => handleTerminalAnchor(event, item.view)} data-client-route="terminal" aria-current={active ? "page" : undefined} title={label} className={cx("flex min-h-12 flex-col items-center justify-center gap-1 rounded-card border-l-2 text-meta font-semibold", active ? "border-brand-accent bg-surface-selected text-content-primary" : "border-transparent text-content-secondary hover:bg-surface-interactive hover:text-content-primary")}><span className={cx("grid h-5 w-5 shrink-0 place-items-center", active && "text-brand-accent")}><Icon size={16} aria-hidden="true" /></span><span className="max-w-full truncate">{label}</span></Link>; })}</nav>;
+}
+
+function useTerminalRouteView(initialView: string | null) {
+  const [view, setView] = useState<TerminalView>(() => normalizeTerminalView(initialView));
+  useEffect(() => {
+    const sync = (event?: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as TerminalLocation : undefined;
+      setView(detail?.view ?? readTerminalLocation().view);
+    };
+    window.addEventListener(TERMINAL_NAVIGATION_EVENT, sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener(TERMINAL_NAVIGATION_EVENT, sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+  return view;
+}
+
+function handleTerminalAnchor(event: MouseEvent<HTMLAnchorElement>, view: TerminalView) {
+  if (!shouldHandleTerminalAnchor(event)) return;
+  event.preventDefault();
+  commitTerminalNavigation({ view, overlay: "none" });
 }
 
 function withTerminalContext(href: string, current: { get: (name: string) => string | null }) {

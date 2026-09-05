@@ -75,6 +75,9 @@ jobs:
       - name: Market quality and targeted enrichment contracts
         run: npm run test:quality
 
+      - name: Performance and market visibility recovery contracts
+        run: npm run test:recovery
+
       - name: Lint
         run: npm run lint
 
@@ -116,7 +119,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pulse-terminal-visual-evidence-${{ env.SOURCE_SHA }}
-          path: test-results/**/*.png
+          path: |
+            test-results/**/*.png
+            test-results/**/*.json
           if-no-files-found: error
           retention-days: 7
 

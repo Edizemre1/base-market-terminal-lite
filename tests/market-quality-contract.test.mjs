@@ -216,17 +216,22 @@ test("band transition emits one semantic event and no repeat", async () => {
   assert.equal(relay.eventRing.filter((event) => event.type === "opportunity_band_changed").length, 1);
 });
 
-test("Quality is the default and explicitly excludes DETECTED flood", async () => {
+test("All live markets is the default while the optional Quality view remains strict", async () => {
   const source = await readFile(path.resolve("src/components/base-terminal/TerminalMarketSurface.tsx"), "utf8");
+  const filters = await readFile(path.resolve("src/lib/base-terminal/terminalMarket.ts"), "utf8");
+  assert.match(filters, /qualityView: "all"/);
   assert.match(source, /qualityView === "quality"[^\n]+RANKED[^\n]+highQualityEmerging/);
   assert.match(source, /qualityView === "detected"[^\n]+DETECTED/);
 });
 
-test("live wall compares canonical snapshot prices and excludes observed-only prices", async () => {
+test("live wall uses exact fresh provider 24h changes without canonical execution proof", async () => {
   const source = await readFile(path.resolve("src/lib/base-terminal/liveMarketWall.ts"), "utf8");
-  assert.match(source, /previousMetrics\[opportunity\.id\]\?\.canonicalPriceUsd/);
-  assert.match(source, /opportunity\.qualityBand === "RANKED"/);
-  assert.doesNotMatch(source, /observedPriceUsd.*gainer/i);
+  assert.match(source, /isFreshExactProviderMarket\(opportunity, pair\)/);
+  assert.match(source, /isFreshDiscoveryMarket\(opportunity, pair\)/);
+  assert.match(source, /pair\.priceChanges\?\.h24/);
+  assert.match(source, /change !== undefined && change > 0/);
+  assert.match(source, /change !== undefined && change < 0/);
+  assert.doesNotMatch(source, /function isFreshExactProviderMarket[\s\S]*?canonicalPrice/);
 });
 
 test("live wall event times are hydration-stable across server and browser time zones", async () => {
@@ -254,20 +259,21 @@ test("compact market numbers normalize optional ICU trailing zeroes during hydra
 
 test("explicit mock mode cannot merge the persisted on-chain reservoir", async () => {
   const source = await readFile(path.resolve("src/data/providers/index.ts"), "utf8");
-  assert.match(source, /provider\.mode === "dexscreener"[\s\S]*?mergeOnchainPoolsIntoPairs\(hydratedPairs\)[\s\S]*?: hydratedPairs/);
+  assert.match(source, /provider\.mode === "dexscreener"[\s\S]*?mergeOnchainPoolsIntoPairs\(hydratedPairs, storeResult\)[\s\S]*?: hydratedPairs/);
 });
 
-test("stale live snapshots stay bounded while provider refresh continues", async () => {
+test("last-good snapshots stay bounded without globally invalidating healthy sources", async () => {
   const source = await readFile(path.resolve("src/data/providers/index.ts"), "utf8");
   assert.match(source, /SNAPSHOT_REFRESH_DEADLINE_MS = 2 \* 60_000/);
-  assert.match(source, /entry\.inFlight[\s\S]*?entry\.snapshot && isMarketSnapshotWithinFailSoftWindow\(entry\.cachedAt, now\)[\s\S]*?markSnapshotDelayed/);
+  assert.match(source, /entry\.inFlight[\s\S]*?entry\.snapshot && isMarketSnapshotWithinFailSoftWindow\(entry\.cachedAt, now\)[\s\S]*?markMarketSourceState/);
   assert.match(source, /withSnapshotRefreshDeadline\(loadLiveMarketTerminalSnapshot/);
-  assert.match(source, /snapshotCache\.set\(mode, \{ \.\.\.entry, inFlight \}\);[\s\S]*?entry\.snapshot && isMarketSnapshotWithinFailSoftWindow\(entry\.cachedAt, now\)[\s\S]*?return markSnapshotDelayed/);
+  assert.match(source, /snapshotCache\.set\(mode, \{ \.\.\.entry, inFlight \}\);[\s\S]*?entry\.snapshot && isMarketSnapshotWithinFailSoftWindow\(entry\.cachedAt, now\)[\s\S]*?return markMarketSourceState/);
+  assert.doesNotMatch(source, /function markMarketSourceState[\s\S]*?allPairs: snapshot\.allPairs\.map/);
 });
 
 test("quality labels retain exact TR and EN parity", async () => {
   const source = await readFile(path.resolve("src/i18n/dictionaries.ts"), "utf8");
-  for (const key of ["qualityView", "thinMarket", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected"]) {
+  for (const key of ["qualityView", "thinMarket", "marketPrice", "sourceDelayed", "qualityBand", "observedPrice", "liquidityState", "rankingEligibility", "providerDiscoveryState", "exactProvenance", "lane.detected", "lane.liquidityLeaders"]) {
     assert.equal(source.match(new RegExp(`"terminalV3\\.${key.replace(".", "\\.")}"`, "g"))?.length, 2, key);
   }
 });

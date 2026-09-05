@@ -19,7 +19,7 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 export default async function TerminalPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const mode = resolveUrlMarketDataMode(params?.data);
-  return <BaseTerminal data={await getMarketTerminalSnapshot(mode)} initialPairParam={getFirst(params?.pair)} initialViewParam={getFirst(params?.view)} />;
+  return <BaseTerminal data={await getMarketTerminalSnapshot(mode, { preferLastGood: true })} initialPairParam={getFirst(params?.pair)} initialViewParam={getFirst(params?.view)} />;
 }
 
 function getFirst(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }

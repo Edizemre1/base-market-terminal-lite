@@ -8,7 +8,7 @@ export function getSnapshotRefreshCadence(visibility: "visible" | "hidden") {
 }
 
 export function shouldQueueMarketUpdate(changedPairCount: number, interactionLocked: boolean) {
-  return changedPairCount > 0 || interactionLocked;
+  return changedPairCount > 0 && interactionLocked;
 }
 
 export function coalescePendingOpportunityIds(existing: string[], incoming: string[], maximum = MAX_PENDING_OPPORTUNITY_UPDATES) {

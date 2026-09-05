@@ -17,6 +17,7 @@ import {
   Sparkles,
   TrendingUp,
   TriangleAlert,
+  X,
   type LucideIcon
 } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
@@ -58,6 +59,7 @@ export const MARKET_SIGNAL_ICONS: Readonly<Record<MarketSignalIconKey, LucideIco
 });
 
 export const MARKET_SIGNAL_OPEN_POOLS_EVENT = "market-signal:open-pools";
+export const MARKET_SIGNAL_OPEN_INSPECTOR_EVENT = "market-signal:open-inspector";
 
 type SignalContextValue = {
   snapshot: MarketTerminalSnapshot;
@@ -156,12 +158,17 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     const positionPopover = () => {
       const rect = rootRef.current?.getBoundingClientRect();
       if (!rect) return;
+      if (window.innerWidth <= 640) {
+        const maxHeight = Math.min(320, Math.max(220, Math.round(window.innerHeight * 0.55)));
+        setPopoverPosition({ left: 0, top: window.innerHeight - maxHeight, width: window.innerWidth, maxHeight });
+        return;
+      }
       const width = Math.min(330, window.innerWidth - 24);
       const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
       const below = Math.max(0, window.innerHeight - rect.bottom - 16);
       const above = Math.max(0, rect.top - 16);
       const placeBelow = below >= Math.min(320, above);
-      const maxHeight = Math.max(180, Math.min(520, placeBelow ? below : above));
+      const maxHeight = Math.max(180, Math.min(300, placeBelow ? below : above));
       const top = placeBelow ? rect.bottom + 4 : Math.max(12, rect.top - maxHeight - 4);
       setPopoverPosition({ left, top, width, maxHeight });
     };
@@ -182,12 +189,17 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     setTransientOpen(false);
     window.dispatchEvent(new CustomEvent(MARKET_SIGNAL_OPEN_POOLS_EVENT, { detail: { opportunityId } }));
   } : undefined;
+  const openInspectorEvidence = opportunityId ? () => {
+    setOpen(false);
+    setTransientOpen(false);
+    window.dispatchEvent(new CustomEvent(MARKET_SIGNAL_OPEN_INSPECTOR_EVENT, { detail: { opportunityId } }));
+  } : undefined;
   const popover = visible && popoverPosition ? <div
     ref={popoverRef}
     id={popoverId}
     role="dialog"
     aria-label={t("marketSignal.details", { market: subject })}
-    className="fixed z-layer-popover overflow-y-auto rounded-panel border border-border-subtle bg-surface-panel p-3 text-left shadow-popover"
+    className="fixed z-layer-popover overflow-y-auto rounded-t-overlay border border-border-subtle bg-surface-panel p-3 text-left shadow-popover sm:rounded-panel"
     style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverPosition.width, maxHeight: popoverPosition.maxHeight }}
     onPointerEnter={showTransient}
     onPointerLeave={scheduleTransientClose}
@@ -196,10 +208,11 @@ export function MarketSignalBadges({ opportunity, pair, scope = "opportunity", m
     onClick={(event) => event.stopPropagation()}
     data-testid="market-signal-popover"
   >
-    <span className="flex items-center justify-between gap-2"><strong className="text-meta text-content-primary">{t("marketSignal.title")}</strong><span className="font-mono text-meta uppercase text-content-secondary">{scope === "pool" ? t("marketSignal.poolScope") : t("marketSignal.opportunityScope")}</span></span>
-    <span className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
-      {selection.all.map((badge) => <SignalDetail key={badge.id} badge={badge} locale={locale} onOpenPoolDetails={openPoolDetails} />)}
+    <span className="flex items-center justify-between gap-2"><strong className="text-meta text-content-primary">{t("marketSignal.title")}</strong><span className="flex items-center gap-2"><span className="font-mono text-meta uppercase text-content-secondary">{scope === "pool" ? t("marketSignal.poolScope") : t("marketSignal.opportunityScope")}</span><button type="button" onClick={() => { setOpen(false); setTransientOpen(false); rootRef.current?.querySelector("button")?.focus(); }} className="grid h-8 w-8 place-items-center rounded-pill bg-surface-interactive text-content-secondary" aria-label={t("trade.closeDock")}><X size={13} /></button></span></span>
+    <span className="mt-2 grid gap-2">
+      {selection.all.slice(0, 1).map((badge) => <SignalDetail key={badge.id} badge={badge} locale={locale} onOpenPoolDetails={openPoolDetails} />)}
     </span>
+    {openInspectorEvidence ? <button type="button" onClick={openInspectorEvidence} className="mt-2 min-h-9 w-full rounded-control bg-brand-accent/10 px-2 text-meta font-semibold text-brand-accent">{t("marketSignal.viewEvidence", { count: badges.length })}</button> : null}
     <span className="mt-2 block border-t border-border-subtle pt-2 text-meta leading-4 text-content-secondary">{t("marketSignal.disclaimer")}</span>
   </div> : null;
   return <span

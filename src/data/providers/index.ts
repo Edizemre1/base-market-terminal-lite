@@ -1,6 +1,6 @@
 import type { BasePair } from "@/types/baseTerminal";
 import { buildDiscoveryUniverse, mergePoolPairs } from "@/lib/base-terminal/opportunityModel";
-import { getOnchainPricingStatus, mergeOnchainPoolsIntoPairs } from "@/lib/base-terminal/onchainDiscovery";
+import { collectorFreshness, getOnchainPricingStatus, mergeOnchainPoolsIntoPairs, readOnchainStoreSnapshot, type OnchainStoreReadResult } from "@/lib/base-terminal/onchainDiscovery";
 import { recordDiscoveryHistory } from "@/lib/base-terminal/discoveryHistory";
 import { createDexScreenerProvider } from "./dexScreenerProvider";
 import { mockMarketDataProvider } from "./mockProvider";
@@ -36,6 +36,7 @@ type SnapshotCacheEntry = {
   cachedAt?: number;
   retryAfter?: number;
   inFlight?: Promise<MarketTerminalSnapshot>;
+  bootstrap?: boolean;
 };
 const snapshotCache = new Map<MarketDataMode, SnapshotCacheEntry>();
 export const MARKET_SNAPSHOT_RESILIENCE_POLICY = Object.freeze({
@@ -93,24 +94,31 @@ export async function getMarketDataProvider(
 
 export async function getMarketTerminalSnapshot(
   mode: MarketDataMode = resolveMarketDataMode(),
-  options: { force?: boolean } = {}
+  options: { force?: boolean; preferLastGood?: boolean } = {}
 ): Promise<MarketTerminalSnapshot> {
   if (mode === "mock") {
     return buildMarketTerminalSnapshot(mockMarketDataProvider);
   }
 
   const now = Date.now();
-  const entry = snapshotCache.get(mode) ?? {};
-  if (!options.force && entry.snapshot && entry.cachedAt && now - entry.cachedAt < SNAPSHOT_CACHE_TTL_MS) {
+  let entry = snapshotCache.get(mode) ?? {};
+  if (!options.force && options.preferLastGood && !entry.snapshot) {
+    const bootstrap = buildOnchainLastGoodSnapshot();
+    if (bootstrap) {
+      entry = { snapshot: bootstrap, cachedAt: now, bootstrap: true };
+      snapshotCache.set(mode, entry);
+    }
+  }
+  if (!options.force && !entry.bootstrap && entry.snapshot && entry.cachedAt && now - entry.cachedAt < SNAPSHOT_CACHE_TTL_MS) {
     return entry.snapshot;
   }
   if (!options.force && entry.inFlight) {
     return entry.snapshot && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)
-      ? markSnapshotDelayed(entry.snapshot, "Provider refresh is in progress; using the last healthy snapshot.")
+      ? markMarketSourceState(entry.snapshot, "refreshing", "Provider refresh is in progress; using the last healthy snapshot.")
       : entry.inFlight;
   }
   if (!options.force && entry.snapshot && entry.retryAfter && now < entry.retryAfter && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)) {
-    return markSnapshotDelayed(entry.snapshot, "Provider retry is temporarily backed off; using the last healthy snapshot.");
+    return markMarketSourceState(entry.snapshot, "delayed", "Provider retry is temporarily backed off; using the last healthy snapshot.");
   }
 
   const inFlight = withSnapshotRefreshDeadline(loadLiveMarketTerminalSnapshot(mode, entry.snapshot))
@@ -124,17 +132,18 @@ export async function getMarketTerminalSnapshot(
       snapshotCache.set(mode, {
         ...entry,
         inFlight: undefined,
+        bootstrap: false,
         retryAfter: Date.now() + SNAPSHOT_RETRY_BACKOFF_MS
       });
       if (cached && isMarketSnapshotWithinFailSoftWindow(cachedAt)) {
-        return markSnapshotDelayed(cached, "Provider refresh failed; using the last healthy snapshot.");
+        return markMarketSourceState(cached, "delayed", "Provider refresh failed; using the last healthy snapshot.");
       }
       return buildDexScreenerFallbackSnapshot();
     });
 
   snapshotCache.set(mode, { ...entry, inFlight });
   if (!options.force && entry.snapshot && isMarketSnapshotWithinFailSoftWindow(entry.cachedAt, now)) {
-    return markSnapshotDelayed(entry.snapshot, "Provider refresh is running in the background; using the last healthy snapshot.");
+    return markMarketSourceState(entry.snapshot, "refreshing", "Provider refresh is running in the background; using the last healthy snapshot.");
   }
   return inFlight;
 }
@@ -184,8 +193,9 @@ async function buildMarketTerminalSnapshot(
   );
   // Explicit sample mode stays isolated from the staging collector store. The
   // live provider alone may merge the persisted on-chain discovery reservoir.
+  const storeResult = provider.mode === "dexscreener" ? readOnchainStoreSnapshot() : undefined;
   const providerPairs = provider.mode === "dexscreener"
-    ? mergeOnchainPoolsIntoPairs(hydratedPairs)
+    ? mergeOnchainPoolsIntoPairs(hydratedPairs, storeResult)
     : hydratedPairs;
   const discoveryInput = mergeWithPreviousReservoir(providerPairs, previous, receivedAt);
   const discovery = buildDiscoveryUniverse(
@@ -217,6 +227,7 @@ async function buildMarketTerminalSnapshot(
     generatedAt,
     sourceUpdatedAt: generatedAt,
     freshness: provider.mode === "mock" ? "static" : "fresh",
+    sourceHealth: provider.mode === "mock" ? { marketProvider: "static", collector: "static" } : buildSourceHealth(storeResult, "fresh"),
     defaultPairId,
     allPairs,
     poolMarkets: discovery.poolMarkets,
@@ -226,14 +237,14 @@ async function buildMarketTerminalSnapshot(
     historyStatus: provider.mode === "mock" ? "static" : "warming",
     comparison: buildOpportunityComparison(provider.mode, previous),
     providerCoverage: provider.coverage,
-    onchainPricing: getOnchainPricingStatus(),
+    onchainPricing: getOnchainPricingStatus(storeResult),
     newPairs,
     volumeInflows,
     momentumPairs,
     fallbackReason
   };
   const history = recordDiscoveryHistory(snapshot);
-  return { ...snapshot, recentSignals: history.signals, historyStatus: history.status };
+  return compactMarketTerminalSnapshot({ ...snapshot, recentSignals: history.signals, historyStatus: history.status });
 }
 
 async function hydratePairs(provider: MarketDataProvider, pairs: BasePair[]) {
@@ -288,7 +299,7 @@ async function fillDexScreenerSnapshot(
 ): Promise<MarketTerminalSnapshot> {
   return {
     ...snapshot,
-    defaultPairId: getDefaultPairId(snapshot)
+    defaultPairId: getDefaultPairId(snapshot) || snapshot.defaultPairId
   };
 }
 
@@ -309,6 +320,7 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
     generatedAt,
     sourceUpdatedAt: generatedAt,
     freshness: "delayed",
+    sourceHealth: { marketProvider: "delayed", collector: "unavailable", reason: READ_ONLY_DATA_UNAVAILABLE_LABEL },
     defaultPairId: "",
     allPairs: [],
     poolMarkets: [],
@@ -336,16 +348,98 @@ function buildDexScreenerFallbackSnapshot(): MarketTerminalSnapshot {
   };
 }
 
-function markSnapshotDelayed(snapshot: MarketTerminalSnapshot, reason: string): MarketTerminalSnapshot {
+function markMarketSourceState(snapshot: MarketTerminalSnapshot, status: "refreshing" | "delayed", reason: string): MarketTerminalSnapshot {
   return {
     ...snapshot,
     receivedAt: new Date().toISOString(),
-    freshness: "delayed",
-    fallbackReason: reason,
-    allPairs: snapshot.allPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
-    newPairs: snapshot.newPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
-    volumeInflows: snapshot.volumeInflows.map((pair) => ({ ...pair, stale: true, staleReason: reason })),
-    momentumPairs: snapshot.momentumPairs.map((pair) => ({ ...pair, stale: true, staleReason: reason }))
+    sourceHealth: {
+      ...(snapshot.sourceHealth ?? { collector: "unavailable" as const }),
+      marketProvider: status,
+      reason,
+      observedAt: snapshot.sourceUpdatedAt
+    }
+  };
+}
+
+function buildOnchainLastGoodSnapshot(): MarketTerminalSnapshot | undefined {
+  const storeResult = readOnchainStoreSnapshot();
+  if (!storeResult.ok) return undefined;
+  const receivedAt = new Date().toISOString();
+  const sourceUpdatedAt = storeResult.state.updatedAt;
+  const providerPairs = mergeOnchainPoolsIntoPairs([], storeResult);
+  if (!providerPairs.length) return undefined;
+  const discovery = buildDiscoveryUniverse(providerPairs.map((pair) => ({
+    ...pair,
+    sourceUpdatedAt: pair.sourceUpdatedAt ?? sourceUpdatedAt,
+    firstSeenAt: pair.firstSeenAt ?? sourceUpdatedAt
+  })), undefined, new Date(receivedAt));
+  const health = collectorFreshness(storeResult.state);
+  const fallbackReason = health.delayedReason ? `Collector snapshot delayed: ${health.delayedReason}.` : undefined;
+  return compactMarketTerminalSnapshot({
+    mode: "dexscreener",
+    providerName: "Collector snapshot + read-only market data",
+    feedStatusLabel: "READ-ONLY DATA",
+    version: `collector-${sourceUpdatedAt}`,
+    receivedAt,
+    generatedAt: sourceUpdatedAt,
+    sourceUpdatedAt,
+    freshness: health.ready ? "fresh" : "delayed",
+    sourceHealth: buildSourceHealth(storeResult, "refreshing", fallbackReason),
+    defaultPairId: discovery.primaryPairs[0]?.id ?? discovery.pairs[0]?.id ?? "",
+    allPairs: discovery.pairs,
+    poolMarkets: discovery.poolMarkets,
+    opportunities: discovery.opportunities,
+    universe: discovery.universe,
+    recentSignals: [],
+    historyStatus: "warming",
+    comparison: { status: "warming", opportunityVolume1h: {} },
+    onchainPricing: getOnchainPricingStatus(storeResult),
+    newPairs: [],
+    volumeInflows: [],
+    momentumPairs: [],
+    fallbackReason
+  });
+}
+
+function buildSourceHealth(result: OnchainStoreReadResult | undefined, marketProvider: "fresh" | "refreshing" | "delayed", reason?: string): NonNullable<MarketTerminalSnapshot["sourceHealth"]> {
+  if (!result?.ok) return { marketProvider, collector: "unavailable", reason };
+  const health = collectorFreshness(result.state);
+  return {
+    marketProvider,
+    collector: health.ready ? "fresh" : "delayed",
+    reason: reason ?? (health.delayedReason ? `Collector snapshot delayed: ${health.delayedReason}.` : undefined),
+    observedAt: result.state.updatedAt
+  };
+}
+
+function compactMarketTerminalSnapshot(snapshot: MarketTerminalSnapshot): MarketTerminalSnapshot {
+  if (snapshot.mode === "mock" || snapshot.opportunities.length === 0) return snapshot;
+  const excludedReasons: Record<string, number> = {};
+  const opportunities = snapshot.opportunities.filter((opportunity) => {
+    const reason = opportunity.qualityBand === "REJECTED" ? "quality_rejected" : opportunity.quality === "expired" ? "quality_expired" : undefined;
+    if (!reason) return true;
+    excludedReasons[reason] = (excludedReasons[reason] ?? 0) + 1;
+    return false;
+  });
+  const marketIds = new Set(opportunities.flatMap((opportunity) => opportunity.poolMarketIds));
+  const allPairs = snapshot.allPairs.filter((pair) => marketIds.has(pair.id));
+  const pairIds = new Set(allPairs.map((pair) => pair.id));
+  const defaultPairId = pairIds.has(snapshot.defaultPairId) ? snapshot.defaultPairId : opportunities[0]?.primaryMarketId ?? allPairs[0]?.id ?? "";
+  return {
+    ...snapshot,
+    defaultPairId,
+    allPairs,
+    poolMarkets: snapshot.poolMarkets.filter((market) => marketIds.has(market.id)),
+    opportunities,
+    recentSignals: snapshot.recentSignals.filter((signal) => !signal.pairId || pairIds.has(signal.pairId)),
+    newPairs: snapshot.newPairs.filter((pair) => pairIds.has(pair.id)),
+    volumeInflows: snapshot.volumeInflows.filter((pair) => pairIds.has(pair.id)),
+    momentumPairs: snapshot.momentumPairs.filter((pair) => pairIds.has(pair.id)),
+    visibilityFunnel: {
+      totalOpportunityCount: snapshot.opportunities.length,
+      clientOpportunityCount: opportunities.length,
+      excludedReasons
+    }
   };
 }
 

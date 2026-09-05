@@ -36,15 +36,16 @@ export function LivePulseRail({ signals, onSelect, onInteractionChange }: { sign
   </section>;
 }
 
-export function LiveMarketWall({ snapshot, selectedPair, onSelect, onTrade, onInteractionChange }: {
+export function LiveMarketWall({ snapshot, placementSnapshot = snapshot, selectedPair, onSelect, onTrade, onInteractionChange }: {
   snapshot: MarketTerminalSnapshot;
+  placementSnapshot?: MarketTerminalSnapshot;
   selectedPair: BasePair;
   onSelect: (pairId: string) => void;
   onTrade: (pair: BasePair, side: "buy" | "sell") => void;
   onInteractionChange: (locked: boolean) => void;
 }) {
   const { t, locale, formatCompactCurrency, formatPercent } = useI18n();
-  const [timeframe, setTimeframe] = useState<LiveWallTimeframe>("h1");
+  const [timeframe, setTimeframe] = useState<LiveWallTimeframe>("h24");
   const [allowCrossLaneRepeats, setAllowCrossLaneRepeats] = useState(false);
   const [liquidityDirection, setLiquidityDirection] = useState<LiquidityDirection>("all");
   const [expandedLane, setExpandedLane] = useState<LiveWallLaneId>();
@@ -65,7 +66,32 @@ export function LiveMarketWall({ snapshot, selectedPair, onSelect, onTrade, onIn
     if (loaded) safeSetStorageItem(WALL_STORAGE_KEY, JSON.stringify({ timeframe, allowCrossLaneRepeats }));
   }, [allowCrossLaneRepeats, loaded, timeframe]);
 
-  const wall = useMemo(() => buildLiveMarketWall(snapshot, { timeframe, allowCrossLaneRepeats, liquidityDirection, limit: 12 }), [allowCrossLaneRepeats, liquidityDirection, snapshot, timeframe]);
+  const wall = useMemo(() => {
+    const placement = buildLiveMarketWall(placementSnapshot, { timeframe, allowCrossLaneRepeats, liquidityDirection, limit: 12 });
+    if (placementSnapshot === snapshot) return placement;
+    const live = buildLiveMarketWall(snapshot, { timeframe, allowCrossLaneRepeats, liquidityDirection, limit: 12 });
+    const livePairs = new Map(snapshot.allPairs.map((pair) => [pair.id, pair]));
+    const liveOpportunities = new Map(snapshot.opportunities.map((opportunity) => [opportunity.id, opportunity]));
+    const liveByLane = new Map(live.lanes.flatMap((lane) => lane.entries.map((entry) => [`${lane.id}:${entry.opportunity.id}`, entry] as const)));
+    const liveByOpportunity = new Map(live.lanes.flatMap((lane) => lane.entries.map((entry) => [entry.opportunity.id, entry] as const)));
+    return {
+      ...live,
+      lanes: placement.lanes.map((lane) => {
+        const liveLane = live.lanes.find((candidate) => candidate.id === lane.id) ?? lane;
+        return {
+          ...liveLane,
+          entries: lane.entries.map((entry) => {
+            const liveEntry = liveByLane.get(`${lane.id}:${entry.opportunity.id}`) ?? liveByOpportunity.get(entry.opportunity.id);
+            return liveEntry ?? {
+              ...entry,
+              opportunity: liveOpportunities.get(entry.opportunity.id) ?? entry.opportunity,
+              pair: livePairs.get(entry.pair.id) ?? entry.pair
+            };
+          })
+        };
+      })
+    };
+  }, [allowCrossLaneRepeats, liquidityDirection, placementSnapshot, snapshot, timeframe]);
   const renderedLanes = useMemo(() => wall.lanes.map((lane) => ({ ...lane, entries: lane.entries.slice(0, expandedLane === lane.id ? 12 : 4) })), [expandedLane, wall.lanes]);
   const renderedIds = renderedLanes.flatMap((lane) => lane.entries.map((entry) => entry.opportunity.id));
   const visibleOpportunityCount = new Set(renderedIds).size;
@@ -119,12 +145,12 @@ function LiveWallLaneCard({ lane, availableEntryCount, expanded, onExpandedChang
 }) {
   const { t } = useI18n();
   const title = laneTitle(lane, t);
-  return <article className={cx("live-wall-lane pulse-surface overflow-hidden rounded-card", laneAccent(lane.id))} data-testid={`live-wall-lane-${lane.id}`} data-lane-count={lane.entries.length} data-lane-eligible={lane.eligibleCount} data-lane-fallback={lane.fallback || undefined} data-lane-freshness={lane.freshness}>
+  return <article className={cx("live-wall-lane pulse-surface overflow-hidden rounded-card", laneAccent(lane.id))} data-testid={`live-wall-lane-${lane.id}`} data-lane-count={lane.entries.length} data-lane-eligible={lane.eligibleCount} data-lane-rejected={lane.rejectedCount} data-lane-rejection-reasons={JSON.stringify(lane.rejectionReasons)} data-lane-fallback={lane.fallback || undefined} data-lane-freshness={lane.freshness}>
     <header className="flex min-h-12 items-start justify-between gap-2 px-3 pb-1 pt-2"><div className="min-w-0"><p className="truncate text-label font-semibold text-content-primary">{title}</p><p className="mt-1 flex items-center gap-2 font-mono text-meta text-content-secondary"><span className={cx("h-2 w-2 rounded-pill", lane.freshness === "fresh" ? "bg-freshness-live" : lane.freshness === "delayed" ? "bg-freshness-delayed" : "bg-content-secondary")} />{lane.baselinePending ? t("terminalV3.baselinePending") : `${lane.eligibleCount} · ${lane.timeframe === "age" ? "7d" : lane.timeframe === "snapshot" ? `${snapshot.comparison.previousGeneratedAt ? "Δ" : "—"}` : displayWindow(lane.timeframe)}`}</p></div>{availableEntryCount > 4 ? <button type="button" onClick={() => onExpandedChange(!expanded)} aria-expanded={expanded} className="inline-flex min-h-8 shrink-0 items-center gap-1 px-2 text-meta font-semibold text-content-secondary hover:text-content-primary" data-testid={`lane-expand-${lane.id}`}>{t(expanded ? "terminalV3.collapseLane" : "terminalV3.expandLane", { count: availableEntryCount })}{expanded ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}</button> : null}</header>
     {lane.id === "liquidity" ? <div className="mx-2 mb-1 grid grid-cols-3 gap-1">{(["all", "added", "removed"] as const).map((value) => <button key={value} type="button" onClick={() => onLiquidityDirection(value)} aria-pressed={liquidityDirection === value} className={cx("min-h-8 rounded-control px-1 text-meta", liquidityDirection === value ? "bg-surface-selected text-content-primary" : "bg-surface-interactive text-content-secondary")}>{t(value === "all" ? "terminalV3.liquidityAll" : value === "added" ? "terminalV3.liquidityAdded" : "terminalV3.liquidityRemoved")}</button>)}</div> : null}
     <div className="divide-y divide-border-subtle/40">
       {lane.entries.map((entry) => <LiveWallRow key={entry.opportunity.id} entry={entry} selected={entry.opportunity.poolMarketIds.includes(selectedPair.id)} highlighted={highlighted.has(`${lane.id}:${entry.opportunity.id}`)} onSelect={onSelect} onTrade={onTrade} formatCompactCurrency={formatCompactCurrency} formatPercent={formatPercent} locale={locale} />)}
-      {lane.entries.length === 0 ? <p className="flex min-h-36 items-center px-3 text-meta leading-4 text-content-secondary">{t("terminalV3.noVerifiedMarkets")}</p> : null}
+      {lane.entries.length === 0 ? <p className="flex min-h-16 items-center px-3 py-2 text-meta leading-4 text-content-secondary">{t("terminalV3.noVerifiedMarkets")}</p> : null}
     </div>
     <footer className="px-3 py-1 text-right font-mono text-meta text-content-secondary">{t("terminalV3.updated", { time: formatObservedTime(snapshot.receivedAt, locale) })}</footer>
   </article>;
@@ -136,7 +162,7 @@ function LiveWallRow({ entry, selected, highlighted, onSelect, onTrade, formatCo
   const primary = formatWallMetric(metric, formatCompactCurrency, formatPercent, locale, t);
   const secondary = secondaryWallMetric(metric, entry, formatCompactCurrency, formatPercent, t);
   return <div className={cx("group grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 px-2 py-1 transition-colors motion-reduce:transition-none", selected && "bg-surface-selected")} data-testid={`wall-row-${opportunity.id}`} data-opportunity-id={opportunity.id} data-quality-band={opportunity.qualityBand} data-liquidity-state={opportunity.liquidityState} data-freshness={pair.stale ? "delayed" : "fresh"}>
-    <button type="button" onClick={() => onSelect(pair.id)} className="flex min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus" aria-label={t("terminalV3.inspect", { pair: opportunity.focusTokenSymbol })}><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity.focusTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity.focusTokenName} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" /><span className="min-w-0"><strong className="block truncate font-mono text-data text-content-primary">{opportunity.focusTokenSymbol}</strong><small className="block truncate text-meta text-content-secondary">{pair.dexName ?? pair.dex} · {secondary}</small><small className="block truncate text-meta text-content-secondary/80">{opportunity.qualityBand} · {t(`terminalV3.liquidityState.${opportunity.liquidityState}`)} · {pair.stale ? t("common.delayed") : t("terminalV3.fresh")}</small></span></button>
+    <button type="button" onClick={() => onSelect(pair.id)} className="flex min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus" aria-label={t("terminalV3.inspect", { pair: pair.pair })}><PairAvatarStack baseSymbol={pair.baseToken} quoteSymbol={pair.quoteToken} baseLogoUrl={pair.tokenLogoUrl} quoteLogoUrl={pair.quoteTokenLogoUrl} baseAddress={opportunity.focusTokenAddress} quoteAddress={pair.quoteTokenAddress} baseName={opportunity.focusTokenName} chainId={pair.chainId} observedAt={pair.sourceUpdatedAt} size="sm" /><span className="min-w-0"><strong className="block truncate font-mono text-data text-content-primary">{pair.pair}</strong><small className="block truncate text-meta text-content-secondary">{pair.dexName ?? pair.dex} · {secondary}</small><small className="block truncate text-meta text-content-secondary/80">{opportunity.qualityBand} · {t(`terminalV3.liquidityState.${opportunity.liquidityState}`)} · {pair.stale ? t("common.delayed") : t("terminalV3.fresh")}</small></span></button>
     <span className="flex items-center gap-1"><span className="flex max-w-[82px] overflow-hidden"><MarketSignalBadges opportunity={opportunity} pair={pair} maximumMarketBadges={3} presentation="rowPrimary" /></span><span className={cx("min-w-[54px] rounded-control px-1 text-right font-mono text-data font-semibold tabular-nums", metricTone(metric), highlighted && "market-update-flash")} data-cell-updated={highlighted || undefined}>{primary}</span><button type="button" onClick={() => onSelect(pair.id)} className="grid h-8 w-8 place-items-center rounded-control bg-surface-interactive text-content-secondary opacity-70 hover:text-content-primary focus-visible:opacity-100" aria-label={t("terminalV3.inspect", { pair: opportunity.focusTokenSymbol })}><Eye size={12} /></button>{opportunity.rankingEligibility ? <button type="button" onClick={() => onTrade(pair, "buy")} className="h-8 rounded-control bg-brand-action px-2 text-meta font-bold text-content-on-accent">{t("trade.checkQuote")}</button> : null}</span>
   </div>;
 }
@@ -146,7 +172,7 @@ function laneTitle(lane: LiveWallLane, t: ReturnType<typeof useI18n>["t"]) {
   if (lane.id === "gainers") return t("terminalV3.lane.gainers");
   if (lane.id === "losers") return t("terminalV3.lane.losers");
   if (lane.id === "volume") return t(lane.fallback ? "terminalV3.lane.volumeLeaders" : "terminalV3.lane.volumeInflow");
-  if (lane.id === "liquidity") return t("terminalV3.lane.liquidityMovers");
+  if (lane.id === "liquidity") return t(lane.fallback ? "terminalV3.lane.liquidityLeaders" : "terminalV3.lane.liquidityMovers");
   return t("terminalV3.lane.traded");
 }
 
@@ -162,7 +188,7 @@ function laneAccent(id: LiveWallLaneId) {
 function metricTone(metric: LiveWallEntry["metric"]) {
   if (metric.kind === "change" || metric.kind === "liquidity_added") return metric.current >= 0 ? "text-market-positive" : "text-market-negative";
   if (metric.kind === "liquidity_removed") return "text-market-negative";
-  if (metric.kind === "volume_inflow" || metric.kind === "volume_leader") return "text-market-volume";
+  if (metric.kind === "volume_inflow" || metric.kind === "volume_leader" || metric.kind === "liquidity_leader") return "text-market-volume";
   if (metric.kind === "age") return "text-network-base";
   return "text-content-primary";
 }
@@ -173,6 +199,7 @@ function formatWallMetric(metric: LiveWallEntry["metric"], currency: (value: num
   if (metric.kind === "volume_inflow") return `+${currency(metric.delta ?? 0)}`;
   if (metric.kind === "volume_leader") return currency(metric.current);
   if (metric.kind === "liquidity_added" || metric.kind === "liquidity_removed") return `${(metric.delta ?? 0) >= 0 ? "+" : "−"}${currency(Math.abs(metric.delta ?? 0))}`;
+  if (metric.kind === "liquidity_leader") return currency(metric.current);
   return t("terminalV3.tradeCount", { count: Math.round(metric.current) });
 }
 
@@ -182,6 +209,7 @@ function secondaryWallMetric(metric: LiveWallEntry["metric"], entry: LiveWallEnt
   if (metric.kind === "volume_inflow") return `${metric.ratio?.toFixed(2)}× · ${currency(metric.current)}`;
   if (metric.kind === "volume_leader") return `${displayWindow(metric.window as LiveWallTimeframe)} · ${t("terminalV3.baselinePending")}`;
   if (metric.kind === "liquidity_added" || metric.kind === "liquidity_removed") return t("terminalV3.previousToCurrent", { previous: formatOptionalCurrency(metric.previous, currency), current: formatOptionalCurrency(metric.current, currency) });
+  if (metric.kind === "liquidity_leader") return t("terminalV3.currentLiquidity");
   return `${displayWindow(metric.window as LiveWallTimeframe)} · ${formatOptionalCurrency(entry.opportunity.aggregate.volumes?.[metric.window as LiveWallTimeframe], currency)}`;
 }
 

@@ -43,7 +43,7 @@ export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   dex: "",
   quoteTokenAddress: "",
   category: "all",
-  qualityView: "quality",
+  qualityView: "all",
   sortBy: "volume24h",
   sortDirection: "desc"
 };

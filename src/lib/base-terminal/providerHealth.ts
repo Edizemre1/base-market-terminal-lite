@@ -18,7 +18,8 @@ export function buildProviderHealth(
     feedStatusLabel: snapshot.feedStatusLabel,
     status,
     lastSuccessAt,
-    stale: status === "failed" || snapshot.freshness === "delayed" || isSnapshotStale(lastSuccessAt),
+    stale: snapshot.freshness === "delayed" || isSnapshotStale(lastSuccessAt),
+    sourceDelayed: snapshot.sourceHealth?.marketProvider === "delayed" || status === "failed",
     fallbackReason: snapshot.fallbackReason,
     failureReason
   };
@@ -80,7 +81,10 @@ export function shouldAcceptMarketSnapshot(
     currentSnapshot.generatedAt === nextSnapshot.generatedAt &&
     currentSnapshot.sourceUpdatedAt === nextSnapshot.sourceUpdatedAt &&
     currentSnapshot.freshness === nextSnapshot.freshness &&
-    currentSnapshot.fallbackReason === nextSnapshot.fallbackReason
+    currentSnapshot.fallbackReason === nextSnapshot.fallbackReason &&
+    currentSnapshot.sourceHealth?.marketProvider === nextSnapshot.sourceHealth?.marketProvider &&
+    currentSnapshot.sourceHealth?.collector === nextSnapshot.sourceHealth?.collector &&
+    currentSnapshot.sourceHealth?.reason === nextSnapshot.sourceHealth?.reason
   );
 }
 

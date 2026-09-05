@@ -78,7 +78,177 @@ test.describe("information architecture and overlay hierarchy", () => {
     await expect(page.getByTestId("pair-workspace")).toBeVisible();
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
   });
+
+  for (const viewport of [{ name: "desktop-1280", width: 1280, height: 800 }, { name: "mobile-390", width: 390, height: 844 }]) {
+    test(`keeps cached internal routes inside the performance SLO at ${viewport.name}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const terminalRequests: string[] = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === "/terminal" && request.resourceType() !== "document") terminalRequests.push(request.url());
+      });
+      await page.goto("/terminal?data=mock");
+      await expect(page.getByTestId("market-matrix")).toBeVisible();
+      const samples: RoutePerformanceSample[] = [];
+      const routeCycle = ["markets", "terminal", "watchlist", "terminal", "portfolio", "terminal", "alerts", "terminal"];
+      for (let pass = 0; pass < 10; pass += 1) {
+        for (const target of routeCycle) samples.push(await measureClientRoute(page, target));
+      }
+      for (let pass = 0; pass < 10; pass += 1) {
+        samples.push(await measureInspectorRoute(page));
+        samples.push(await measureWorkspaceRoute(page));
+        samples.push(await measureHistoryRoute(page, "back", "market_inspector"));
+        samples.push(await measureHistoryRoute(page, "forward", "workspace"));
+        await measureHistoryRoute(page, "back", "market_inspector");
+        await measureClientRoute(page, "terminal");
+      }
+      const meaningfulP95 = percentile(samples.map((sample) => sample.contentMs), 0.95);
+      const commitP95 = percentile(samples.map((sample) => sample.commitMs), 0.95);
+      const interactiveP95 = percentile(samples.map((sample) => sample.interactiveMs), 0.95);
+      const byTarget = Object.fromEntries([...new Set(samples.map((sample) => sample.target))].map((target) => {
+        const targetSamples = samples.filter((sample) => sample.target === target);
+        return [target, {
+          commitP95: percentile(targetSamples.map((sample) => sample.commitMs), 0.95),
+          meaningfulP95: percentile(targetSamples.map((sample) => sample.contentMs), 0.95),
+          interactiveP95: percentile(targetSamples.map((sample) => sample.interactiveMs), 0.95),
+          coldMeaningful: targetSamples[0]?.contentMs ?? 0
+        }];
+      }));
+      const longTasks = await page.evaluate(() => performance.getEntriesByType("longtask").map((entry) => entry.duration));
+      await testInfo.attach(`route-performance-${viewport.name}.json`, {
+        body: Buffer.from(JSON.stringify({ viewport, samples, byTarget, commitP95, meaningfulP95, interactiveP95, terminalRequests, longTasks }, null, 2)),
+        contentType: "application/json"
+      });
+      expect(terminalRequests, "client route switches must not request a new terminal RSC payload").toEqual([]);
+      expect(commitP95).toBeLessThanOrEqual(300);
+      expect(meaningfulP95).toBeLessThanOrEqual(600);
+      expect(interactiveP95).toBeLessThanOrEqual(600);
+      for (const timing of Object.values(byTarget)) {
+        expect(timing.commitP95).toBeLessThanOrEqual(300);
+        expect(timing.meaningfulP95).toBeLessThanOrEqual(600);
+        expect(timing.interactiveP95).toBeLessThanOrEqual(600);
+        expect(timing.coldMeaningful).toBeLessThanOrEqual(1_500);
+      }
+    });
+  }
 });
+
+async function measureClientRoute(page: import("@playwright/test").Page, target: string) {
+  return page.evaluate(async (nextView) => {
+    const finish = (routeTarget: string, start: number, urlMs: number, commitMs: number, contentMs: number) => {
+      const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
+      return { target: routeTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
+    };
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('a[data-client-route="terminal"]')];
+    const link = links.find((candidate) => nextView === "terminal" ? !new URL(candidate.href).searchParams.has("view") : new URL(candidate.href).searchParams.get("view") === nextView);
+    if (!link) throw new Error(`Missing terminal link for ${nextView}`);
+    const start = performance.now();
+    link.click();
+    const urlMs = performance.now() - start;
+    const waitForCommit = async () => {
+      while (document.querySelector<HTMLElement>("[data-testid='pulse-terminal']")?.dataset.terminalView !== nextView) {
+        if (performance.now() - start > 2_000) throw new Error(`Route commit exceeded 2s for ${nextView}`);
+        await new Promise(requestAnimationFrame);
+      }
+    };
+    await waitForCommit();
+    const commitMs = performance.now() - start;
+    const meaningfulSelector = nextView === "portfolio" ? "[data-testid='portfolio-workspace']" : nextView === "alerts" ? "[data-testid='alerts-workspace']" : nextView === "watchlist" ? "[data-testid='market-matrix']" : "[data-testid='market-matrix']";
+    while (!document.querySelector(meaningfulSelector)) await new Promise(requestAnimationFrame);
+    const contentMs = performance.now() - start;
+    await new Promise(requestAnimationFrame);
+    return finish(nextView, start, urlMs, commitMs, contentMs);
+  }, target);
+}
+
+async function measureInspectorRoute(page: import("@playwright/test").Page) {
+  return page.evaluate(async () => {
+    const nextFrame = async (start: number, label: string) => { if (performance.now() - start > 2_000) throw new Error(`${label} exceeded 2s`); await new Promise(requestAnimationFrame); };
+    const finish = (routeTarget: string, start: number, urlMs: number, commitMs: number, contentMs: number) => {
+      const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
+      return { target: routeTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
+    };
+    const candidates = [...document.querySelectorAll<HTMLElement>("[data-testid^='matrix-row-'], [data-testid^='market-card-']")];
+    const row = candidates.find((candidate) => candidate.offsetParent !== null);
+    const button = row?.querySelector<HTMLButtonElement>("[data-testid='open-market-inspector']");
+    if (!button) throw new Error("Missing visible market row Inspector trigger");
+    const start = performance.now();
+    button.click();
+    while (!new URL(location.href).searchParams.has("pair")) await nextFrame(start, "Inspector URL");
+    const urlMs = performance.now() - start;
+    while (document.querySelector<HTMLElement>("[data-overlay-state]")?.dataset.overlayState !== "market_inspector") await nextFrame(start, "Inspector commit");
+    const commitMs = performance.now() - start;
+    while (!document.querySelector("[data-testid='context-inspector']")) await nextFrame(start, "Inspector content");
+    const contentMs = performance.now() - start;
+    await new Promise(requestAnimationFrame);
+    return finish("inspector", start, urlMs, commitMs, contentMs);
+  });
+}
+
+async function measureWorkspaceRoute(page: import("@playwright/test").Page) {
+  return page.evaluate(async () => {
+    const nextFrame = async (start: number, label: string) => { if (performance.now() - start > 2_000) throw new Error(`${label} exceeded 2s`); await new Promise(requestAnimationFrame); };
+    const finish = (routeTarget: string, start: number, urlMs: number, commitMs: number, contentMs: number) => {
+      const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
+      return { target: routeTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
+    };
+    const button = document.querySelector<HTMLButtonElement>("[data-testid='open-pair-workspace']");
+    if (!button) throw new Error("Missing pair workspace trigger");
+    const start = performance.now();
+    button.click();
+    while (new URL(location.href).searchParams.get("view") !== "workspace") await nextFrame(start, "Workspace URL");
+    const urlMs = performance.now() - start;
+    while (document.querySelector<HTMLElement>("[data-testid='pulse-terminal']")?.dataset.terminalView !== "workspace") await nextFrame(start, "Workspace commit");
+    const commitMs = performance.now() - start;
+    while (!document.querySelector("[data-testid='pair-workspace']")) await nextFrame(start, "Workspace content");
+    const contentMs = performance.now() - start;
+    await new Promise(requestAnimationFrame);
+    return finish("workspace", start, urlMs, commitMs, contentMs);
+  });
+}
+
+async function measureHistoryRoute(page: import("@playwright/test").Page, direction: "back" | "forward", target: "market_inspector" | "workspace") {
+  return page.evaluate(async ({ historyDirection, routeTarget }) => {
+    const nextFrame = async (start: number, label: string) => { if (performance.now() - start > 2_000) throw new Error(`${label} exceeded 2s`); await new Promise(requestAnimationFrame); };
+    const finish = (sampleTarget: string, start: number, urlMs: number, commitMs: number, contentMs: number) => {
+      const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
+      return { target: sampleTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
+    };
+    const start = performance.now();
+    if (historyDirection === "back") history.back();
+    else history.forward();
+    if (routeTarget === "workspace") {
+      while (new URL(location.href).searchParams.get("view") !== "workspace") await nextFrame(start, "Forward URL");
+    } else {
+      while (new URL(location.href).searchParams.get("view") === "workspace") await nextFrame(start, "Back URL");
+    }
+    const urlMs = performance.now() - start;
+    const expectedView = routeTarget === "workspace" ? "workspace" : "terminal";
+    while (document.querySelector<HTMLElement>("[data-testid='pulse-terminal']")?.dataset.terminalView !== expectedView) await nextFrame(start, "History commit");
+    const commitMs = performance.now() - start;
+    const selector = routeTarget === "workspace" ? "[data-testid='pair-workspace']" : "[data-testid='context-inspector']";
+    while (!document.querySelector(selector)) await nextFrame(start, "History content");
+    const contentMs = performance.now() - start;
+    await new Promise(requestAnimationFrame);
+    return finish(`history-${historyDirection}`, start, urlMs, commitMs, contentMs);
+  }, { historyDirection: direction, routeTarget: target });
+}
+
+type RoutePerformanceSample = {
+  target: string;
+  urlMs: number;
+  commitMs: number;
+  contentMs: number;
+  interactiveMs: number;
+  requestCount: number;
+  transferBytes: number;
+  ttfbMs: number;
+};
+
+function percentile(values: number[], fraction: number) {
+  const ordered = [...values].sort((left, right) => left - right);
+  return ordered[Math.max(0, Math.ceil(ordered.length * fraction) - 1)] ?? 0;
+}
 
 function badge(type: MarketSignalBadge["type"]): MarketSignalBadge {
   return {

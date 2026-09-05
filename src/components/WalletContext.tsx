@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode
 } from "react";
+import dynamic from "next/dynamic";
 import {
   BASE_CHAIN_ID,
   ReadOnlyWalletController,
@@ -19,9 +20,10 @@ import {
   type WalletSimulationResult
 } from "@/lib/wallet";
 import type { TransactionDraft } from "@/lib/trade/types";
-import { WalletPicker } from "@/components/WalletPicker";
 import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
 import { useOverlayManager } from "@/components/OverlayManager";
+
+const WalletPicker = dynamic(() => import("@/components/WalletPicker").then((module) => module.WalletPicker), { ssr: false });
 
 export type WalletStatus = WalletControllerStatus;
 

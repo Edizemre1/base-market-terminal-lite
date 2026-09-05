@@ -31,11 +31,8 @@ test.describe("live market wall contracts", () => {
       market(15, { symbol: "ZERO", change: 0 }),
       market(16, { symbol: "MISS", change: undefined })
     ]);
-    expect(lane(warming, "gainers", { allowCrossLaneRepeats: true })).toHaveLength(0);
-    expect(lane(warming, "losers", { allowCrossLaneRepeats: true })).toHaveLength(0);
-    const snapshot = withComparison(warming, {});
-    const gainers = lane(snapshot, "gainers", { allowCrossLaneRepeats: true });
-    const losers = lane(snapshot, "losers", { allowCrossLaneRepeats: true });
+    const gainers = lane(warming, "gainers", { allowCrossLaneRepeats: true });
+    const losers = lane(warming, "losers", { allowCrossLaneRepeats: true });
     expect(gainers.map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["GAIN_B", "GAIN_A"]);
     expect(gainers.every((entry) => entry.metric.current > 0)).toBeTruthy();
     expect(losers.map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["LOSS_A", "LOSS_B"]);
@@ -80,15 +77,14 @@ test.describe("live market wall contracts", () => {
     expect([...added, ...removed].some((entry) => entry.opportunity.focusTokenSymbol === "TINY")).toBeFalsy();
   });
 
-  test("never infers trade count and keeps canonical snapshot direction across display timeframes", async () => {
+  test("never infers trade count and keeps exact provider 24h direction across display timeframes", async () => {
     const warming = await fixture([
       market(41, { symbol: "COUNTED", change: 4, change24h: -3, trades: 55 }),
       market(42, { symbol: "NO_COUNT", change: 8, trades: undefined })
     ]);
-    const snapshot = withComparison(warming, {});
-    expect(lane(snapshot, "traded", { allowCrossLaneRepeats: true }).map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["COUNTED"]);
-    expect(lane(snapshot, "gainers", { allowCrossLaneRepeats: true, timeframe: "h1" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
-    expect(lane(snapshot, "gainers", { allowCrossLaneRepeats: true, timeframe: "h24" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
+    expect(lane(warming, "traded", { allowCrossLaneRepeats: true }).map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["COUNTED"]);
+    expect(lane(warming, "gainers", { allowCrossLaneRepeats: true, timeframe: "h1" }).map((entry) => entry.opportunity.focusTokenSymbol)).not.toContain("COUNTED");
+    expect(lane(warming, "losers", { allowCrossLaneRepeats: true, timeframe: "h1" }).map((entry) => entry.opportunity.focusTokenSymbol)).toContain("COUNTED");
   });
 
   test("keeps canonical diversity, same-symbol contracts, multi-pool tokens, deterministic assignment, and backfill", async () => {
@@ -107,7 +103,10 @@ test.describe("live market wall contracts", () => {
     const first = buildLiveMarketWall(ready);
     const second = buildLiveMarketWall(ready);
     const ids = first.lanes.flatMap((item) => item.entries.map((entry) => entry.opportunity.id));
-    expect(first.duplicateCount).toBe(0);
+    const usage = new Map<string, number>();
+    ids.forEach((id) => usage.set(id, (usage.get(id) ?? 0) + 1));
+    expect(Math.max(...usage.values())).toBeLessThanOrEqual(2);
+    expect(first.visibleOpportunityCount).toBeGreaterThanOrEqual(18);
     expect(ids).toEqual(second.lanes.flatMap((item) => item.entries.map((entry) => entry.opportunity.id)));
     expect(new Set(ready.opportunities.filter((item) => item.focusTokenSymbol === "SAME").map((item) => item.focusTokenAddress)).size).toBe(2);
     expect(ready.opportunities.find((item) => item.focusTokenAddress === definitions[0].baseTokenAddress)?.poolCount).toBe(2);

@@ -51,6 +51,17 @@ export type MarketTerminalSnapshot = {
   generatedAt: string;
   sourceUpdatedAt: string;
   freshness: "fresh" | "delayed" | "static";
+  sourceHealth?: {
+    marketProvider: "fresh" | "refreshing" | "delayed" | "static";
+    collector: "fresh" | "delayed" | "unavailable" | "static";
+    reason?: string;
+    observedAt?: string;
+  };
+  visibilityFunnel?: {
+    totalOpportunityCount: number;
+    clientOpportunityCount: number;
+    excludedReasons: Record<string, number>;
+  };
   defaultPairId: string;
   allPairs: BasePair[];
   poolMarkets: PoolMarket[];
