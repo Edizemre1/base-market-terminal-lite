@@ -79,7 +79,7 @@ test.describe("live market wall contracts", () => {
 
   test("never infers trade count and keeps exact provider 24h direction across display timeframes", async () => {
     const warming = await fixture([
-      market(41, { symbol: "COUNTED", change: 4, change24h: -3, trades: 55 }),
+      market(41, { symbol: "COUNTED", change: 4, change24h: -3, trades: 155 }),
       market(42, { symbol: "NO_COUNT", change: 8, trades: undefined })
     ]);
     expect(lane(warming, "traded", { allowCrossLaneRepeats: true }).map((entry) => entry.opportunity.focusTokenSymbol)).toEqual(["COUNTED"]);
