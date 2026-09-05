@@ -16,6 +16,7 @@ test("terminal route state commits through shared client history without router 
   assert.match(shell, /commitTerminalNavigation/);
   assert.match(terminal, /data-terminal-view=\{view\}/);
   assert.match(terminal, /typeof window === "undefined"[\s\S]*?readTerminalLocation\(\)/);
+  assert.match(terminal, /useSyncExternalStore\(subscribeToView, readView, readServerView\)/);
   assert.match(navigation, /history\[mode === "replace" \? "replaceState" : "pushState"\]/);
   assert.doesNotMatch(terminal, /router\.(push|replace)\(/);
 });

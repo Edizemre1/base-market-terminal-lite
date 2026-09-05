@@ -498,8 +498,7 @@ test.describe("living Base terminal", () => {
       const removed = buildLiquidityRemovedSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: removed }));
       await page.getByTestId("refresh-terminal").click();
-      await expect(page.getByTestId("pending-market-updates")).toBeVisible();
-      await page.getByTestId("pending-market-updates").click();
+      await expect(page.getByTestId("pending-market-updates")).toHaveCount(0);
       await page.getByTestId("live-wall-lane-liquidity").getByRole("button", { name: /Removed|Çıktı/ }).click();
       await expect(page.getByTestId("live-wall-lane-liquidity")).toHaveAttribute("data-lane-count", "1");
       await captureVisualEvidence(page, testInfo.outputPath(`lane-liquidity-removed-${locale}-1440.png`), false);

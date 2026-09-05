@@ -1,7 +1,7 @@
 "use client";
 
 import { BriefcaseBusiness, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useChartData } from "@/components/base-terminal/hooks/useChartData";
 import { useSelectedPairState } from "@/components/base-terminal/hooks/useSelectedPairState";
@@ -102,7 +102,17 @@ export function BaseTerminal({
       : readTerminalLocation();
   }
   const initialLocation = initialLocationRef.current;
-  const [view, setView] = useState<TerminalView>(() => initialLocation.view);
+  const subscribeToView = useCallback((notify: () => void) => {
+    window.addEventListener(TERMINAL_NAVIGATION_EVENT, notify);
+    window.addEventListener("popstate", notify);
+    return () => {
+      window.removeEventListener(TERMINAL_NAVIGATION_EVENT, notify);
+      window.removeEventListener("popstate", notify);
+    };
+  }, []);
+  const readView = useCallback(() => readTerminalLocation().view, []);
+  const readServerView = useCallback(() => initialLocation.view, [initialLocation.view]);
+  const view = useSyncExternalStore(subscribeToView, readView, readServerView);
   const snapshotRef = useRef(snapshotData);
   const selectedPairRef = useRef<BasePair | undefined>(undefined);
   const activeOverlayTypeRef = useRef(overlay.active.type);
@@ -148,7 +158,6 @@ export function BaseTerminal({
   }, [viewTitle]);
 
   const navigateView = useCallback((nextView: TerminalView) => {
-    setView(nextView);
     if (typeof window === "undefined") return;
     if (pendingSnapshot) {
       setPlacementSnapshot(snapshotRef.current);
@@ -194,7 +203,6 @@ export function BaseTerminal({
 
   const openWorkspace = useCallback((pair: BasePair) => {
     handleSelectPairById(pair.id);
-    setView("workspace");
     overlay.closeAll();
     if (typeof window === "undefined") return;
     commitTerminalNavigation({ view: "workspace", pair: getShareablePairKey(pair), overlay: "none" });
@@ -208,7 +216,6 @@ export function BaseTerminal({
     const sync = (event?: Event) => {
       const detail = event instanceof CustomEvent ? event.detail as TerminalLocation : readTerminalLocation();
       const nextPair = detail.pair ? getPairFromParam(snapshotRef.current.allPairs, detail.pair) : undefined;
-      setView(detail.view);
       if (nextPair) handleSelectPairById(nextPair.id);
       setPlacementSnapshot(snapshotRef.current);
       setPendingSnapshot(undefined);
