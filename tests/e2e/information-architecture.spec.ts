@@ -44,7 +44,7 @@ test.describe("information architecture and overlay hierarchy", () => {
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
     await page.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel Bakış/ }).click();
 
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+    await page.getByTestId("inspector-trade-cta").click();
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
     await expect(page.getByRole("dialog")).toHaveCount(1);
 

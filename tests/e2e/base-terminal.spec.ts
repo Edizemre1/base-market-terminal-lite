@@ -22,9 +22,10 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("market-matrix").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).first()).toBeVisible();
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button", { name: /Inspect|incele/ }).click();
     await expect(page.getByTestId("context-inspector")).toBeVisible();
-    await expect(page.getByTestId("market-truth-layers")).toBeVisible();
+    await expect(page.getByTestId("market-decision-summary")).toBeVisible();
+    await expect(page.getByTestId("inspector-technical-details")).not.toHaveAttribute("open", "");
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+    await page.getByTestId("inspector-trade-cta").click();
     await expect(page.getByTestId("trade-dock")).toBeVisible();
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
   });
@@ -213,7 +214,7 @@ test.describe("living Base terminal", () => {
     const freshRow = page.getByTestId(`matrix-row-${freshPair.id}`);
     const staleRow = page.getByTestId(`matrix-row-${stalePair.id}`);
     await expect(freshRow.locator("td").nth(1)).toHaveText("$79,741.900899 · Market price");
-    await expect(freshRow.getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true })).toHaveCount(0);
+    await expect(freshRow.getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true })).toBeVisible();
     await expect(staleRow.locator("td").nth(1)).toHaveText(/Price pending|Fiyat bekleniyor/);
   });
 
@@ -434,7 +435,7 @@ test.describe("living Base terminal", () => {
       await expectTerminalShell(page);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
       if (viewport.width === 1024) {
-        const walletLabelFits = await page.getByTestId("connect-wallet-button").locator("span").evaluate((label) => label.scrollWidth <= label.clientWidth);
+        const walletLabelFits = await page.getByTestId("wallet-button-label").evaluate((label) => label.scrollWidth <= label.clientWidth);
         expect(walletLabelFits).toBeTruthy();
       }
       if (viewport.width === 2048) {
@@ -458,9 +459,9 @@ test.describe("living Base terminal", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/terminal?data=mock");
     await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+    await page.getByTestId("inspector-trade-cta").click();
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
-    await expect(page.getByTestId("trade-dock")).toContainText("PEPE / WETH");
+    await expect(page.getByTestId("trade-dock")).toContainText("USDC → PEPE · Base 8453");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toHaveCount(0);
   });
@@ -479,7 +480,7 @@ test.describe("living Base terminal", () => {
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await captureVisualEvidence(page, testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), false);
-          await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+          await page.getByTestId("inspector-trade-cta").click();
           await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
           await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
           await captureVisualEvidence(page, testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), false);
@@ -603,7 +604,7 @@ test.describe("living Base terminal", () => {
       await detailPage.keyboard.press("Escape");
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
       await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel Bakış/ }).click();
-      await detailPage.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+      await detailPage.getByTestId("inspector-trade-cta").click();
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
       await expect(detailPage.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
       await captureVisualEvidence(detailPage, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);

@@ -281,7 +281,7 @@ async function connectWalletOnly(page: Page) {
 
 async function openTradeDrawer(page: Page) {
   await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
-  await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
+  await page.getByTestId("inspector-trade-cta").click();
   await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
   await expect(page.getByTestId("trade-dock")).toBeVisible();
 }

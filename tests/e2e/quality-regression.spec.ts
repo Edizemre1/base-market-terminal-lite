@@ -23,8 +23,8 @@ test.describe("terminal quality regression", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("pair")).toBe(poolAddress);
     await expect(page.getByTestId("context-inspector")).toHaveAttribute("data-market-key", key!);
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
-    await page.getByTestId("context-inspector").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).click();
-    await expect(page.getByTestId("trade-dock")).toContainText("BLOB / USDC");
+    await page.getByTestId("inspector-trade-cta").click();
+    await expect(page.getByTestId("trade-dock")).toContainText("USDC → BLOB · Base 8453");
   });
 
   test("recovers from corrupt storage without a hydration or console error", async ({ page }) => {
