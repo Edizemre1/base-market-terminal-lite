@@ -89,6 +89,7 @@ test.describe("information architecture and overlay hierarchy", () => {
       });
       await page.goto("/terminal?data=mock");
       await expect(page.getByTestId("market-matrix")).toBeVisible();
+      await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-ready", "true");
       const samples: RoutePerformanceSample[] = [];
       const routeCycle = ["markets", "terminal", "watchlist", "terminal", "portfolio", "terminal", "alerts", "terminal"];
       for (let pass = 0; pass < 11; pass += 1) {
