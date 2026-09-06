@@ -44,7 +44,7 @@ test("market visibility stays separate from trade eligibility and old filters mi
   assert.match(filters, /qualityView: "all"/);
   assert.match(wall, /pair\.priceChanges\?\.h24/);
   assert.match(wall, /liquidity_leader/);
-  assert.match(surface, /tradeAllowed = opportunity\?\.rankingEligibility === true/);
+  assert.match(surface, /tradeAllowed = hasExactTradeTarget\(pair, opportunity\)/);
 });
 
 test("live values update independently while queueing only locks placement", async () => {

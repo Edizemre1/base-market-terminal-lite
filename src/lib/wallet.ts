@@ -38,19 +38,27 @@ export type WalletErrorCode = "cancelled" | "pending" | "unreachable" | "unsuppo
 export type ReadOnlyWalletSnapshot = {
   address?: string;
   chainId?: number;
-  balanceEth?: string;
 };
 
+export type WalletConnectionOrigin = "explicit_request" | "previously_authorized";
+export type WalletBalanceStatus = "idle" | "balance_loading" | "balance_ready" | "balance_unavailable";
 export type WalletControllerStatus =
-  | "checking"
-  | "unavailable"
   | "disconnected"
+  | "provider_available"
+  | "reconnect_required"
   | "connecting"
   | "connected"
-  | "error";
+  | "locked_or_no_accounts"
+  | "wrong_network"
+  | "provider_error"
+  | "disconnected_by_user";
 
 export type WalletControllerState = ReadOnlyWalletSnapshot & {
   status: WalletControllerStatus;
+  balanceStatus: WalletBalanceStatus;
+  balanceEth?: string;
+  balanceUpdatedAt?: string;
+  connectionOrigin?: WalletConnectionOrigin;
   error?: string;
   errorCode?: WalletErrorCode;
   providers: WalletProviderOption[];
@@ -66,7 +74,8 @@ type Eip6963Announcement = Event & {
 };
 
 const INITIAL_CONTROLLER_STATE: WalletControllerState = {
-  status: "checking",
+  status: "disconnected",
+  balanceStatus: "idle",
   providers: []
 };
 
@@ -89,9 +98,11 @@ export class ReadOnlyWalletController {
   private reconcilePromise?: Promise<void>;
   private reconcileQueued = false;
   private reconcileVersion = 0;
+  private balanceRequestVersion = 0;
   private lifecycleGeneration = 0;
   private started = false;
   private preferredProviderId?: string;
+  private sessionVerified = false;
 
   private readonly handleAnnouncement = (event: Event) => {
     const announcement = event as Eip6963Announcement;
@@ -115,41 +126,79 @@ export class ReadOnlyWalletController {
   };
 
   private readonly handleAccountsChanged = (...args: unknown[]) => {
+    if (this.state.status === "connecting") {
+      this.reconcileQueued = true;
+      return;
+    }
     this.reconcileVersion += 1;
+    this.balanceRequestVersion += 1;
     const address = readFirstAddress(args[0]);
-    this.patchState(
-      address
-        ? { status: "connected", address, balanceEth: undefined, error: undefined }
-        : { status: "disconnected", address: undefined, balanceEth: undefined, error: undefined }
-    );
+    if (!this.sessionVerified) {
+      this.patchState(clearSessionState(address ? "reconnect_required" : "locked_or_no_accounts"));
+      return;
+    }
+    if (!address) {
+      this.sessionVerified = false;
+      this.patchState(clearSessionState("locked_or_no_accounts"));
+      return;
+    }
+    this.patchState({
+      status: this.state.chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
+      address,
+      balanceEth: undefined,
+      balanceStatus: this.state.chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
+      balanceUpdatedAt: undefined,
+      error: undefined
+    });
     this.queueReconcile();
   };
 
   private readonly handleChainChanged = (...args: unknown[]) => {
     this.reconcileVersion += 1;
-    this.patchState({ chainId: parseChainId(args[0]), balanceEth: undefined, error: undefined });
+    this.balanceRequestVersion += 1;
+    if (!this.sessionVerified || !this.state.address) {
+      this.patchState(clearSessionState(this.selectedProvider ? "reconnect_required" : "provider_available"));
+      return;
+    }
+    const chainId = parseChainId(args[0]);
+    this.patchState({
+      status: chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
+      chainId,
+      balanceEth: undefined,
+      balanceStatus: chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
+      balanceUpdatedAt: undefined,
+      error: undefined
+    });
     this.queueReconcile();
   };
 
   private readonly handleConnect = (...args: unknown[]) => {
     this.reconcileVersion += 1;
+    if (!this.sessionVerified) {
+      this.patchState(clearSessionState("reconnect_required"));
+      return;
+    }
     const payload = args[0];
     const chainId =
       payload && typeof payload === "object" && "chainId" in payload
         ? parseChainId(payload.chainId)
         : undefined;
-    if (chainId !== undefined) this.patchState({ chainId, balanceEth: undefined, error: undefined });
+    if (chainId !== undefined) this.patchState({
+      status: chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
+      chainId,
+      balanceEth: undefined,
+      balanceStatus: chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
+      balanceUpdatedAt: undefined,
+      error: undefined
+    });
     this.queueReconcile();
   };
 
   private readonly handleDisconnect = () => {
     this.reconcileVersion += 1;
-    this.patchState({
-      status: "disconnected",
-      address: undefined,
-      balanceEth: undefined,
-      error: undefined
-    });
+    this.balanceRequestVersion += 1;
+    this.sessionVerified = false;
+    this.patchState(clearSessionState("reconnect_required"));
   };
 
   getState() {
@@ -187,15 +236,18 @@ export class ReadOnlyWalletController {
       });
     }
 
-    if (this.state.providers.length === 0) this.patchState({ status: "unavailable" });
-    else if (!this.selectedProvider) this.patchState({ status: "disconnected" });
+    if (this.state.providers.length === 0) this.patchState({ status: "disconnected" });
+    else if (!this.selectedProvider) this.patchState({ status: "provider_available" });
   }
 
   stop() {
     this.lifecycleGeneration += 1;
     this.reconcileVersion += 1;
+    this.balanceRequestVersion += 1;
+    this.sessionVerified = false;
     this.discoveryTarget?.removeEventListener("eip6963:announceProvider", this.handleAnnouncement);
     this.detachProviderListeners();
+    this.selectedProviderId = undefined;
     this.discoveryTarget = undefined;
     this.started = false;
     this.preferredProviderId = undefined;
@@ -204,16 +256,23 @@ export class ReadOnlyWalletController {
 
   selectProvider(providerId: string) {
     const option = this.state.providers.find((provider) => provider.id === providerId);
-    if (!option || option.provider === this.selectedProvider) return;
+    if (!option) return;
+    if (option.provider === this.selectedProvider) return;
 
+    this.lifecycleGeneration += 1;
     this.reconcileVersion += 1;
+    this.balanceRequestVersion += 1;
+    this.sessionVerified = false;
     this.bindProvider(option);
     this.patchState({
       selectedProviderId: option.id,
-      status: "disconnected",
+      status: "reconnect_required",
+      balanceStatus: "idle",
       address: undefined,
       chainId: undefined,
       balanceEth: undefined,
+      balanceUpdatedAt: undefined,
+      connectionOrigin: undefined,
       error: undefined,
       errorCode: undefined
     });
@@ -225,31 +284,35 @@ export class ReadOnlyWalletController {
     const provider = this.selectedProvider;
     if (!provider) {
       this.patchState({
-        status: "unavailable",
+        status: this.state.providers.length ? "provider_available" : "provider_error",
         error: "Install or select a compatible wallet to connect.",
         errorCode: "unreachable"
       });
       return Promise.resolve();
     }
 
-    this.patchState({ status: "connecting", error: undefined });
+    this.patchState({ ...clearSessionState("connecting"), error: undefined });
     const lifecycleGeneration = this.lifecycleGeneration;
-    const reconcileVersion = this.reconcileVersion;
     const operation = (async () => {
-      let connected = false;
       try {
         const next = await requestWalletConnection(provider);
-        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration && reconcileVersion === this.reconcileVersion) {
-          this.applySnapshot(next);
-          connected = true;
+        if (provider !== this.selectedProvider || lifecycleGeneration !== this.lifecycleGeneration) return;
+        if (!next.address) {
+          this.sessionVerified = false;
+          this.patchState(clearSessionState("locked_or_no_accounts"));
+          return;
         }
+        this.sessionVerified = true;
+        this.applySessionSnapshot(next, next.connectionOrigin);
+        if (next.chainId === BASE_CHAIN_ID) await this.refreshBalance();
       } catch (requestError) {
-        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration && reconcileVersion === this.reconcileVersion) {
-          this.patchState({ status: "error", error: getWalletErrorMessage(requestError), errorCode: getWalletErrorCode(requestError) });
+        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration) {
+          this.sessionVerified = false;
+          this.patchState({ ...clearSessionState("provider_error"), error: getWalletErrorMessage(requestError), errorCode: getWalletErrorCode(requestError) });
         }
       } finally {
         this.connectPromise = undefined;
-        const shouldReconcile = connected || this.reconcileQueued || reconcileVersion !== this.reconcileVersion;
+        const shouldReconcile = this.sessionVerified && this.reconcileQueued;
         this.reconcileQueued = false;
         if (shouldReconcile && provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration) this.queueReconcile();
       }
@@ -265,7 +328,7 @@ export class ReadOnlyWalletController {
     const provider = this.selectedProvider;
     if (!provider) {
       this.patchState({
-        status: "unavailable",
+        status: "provider_error",
         error: "Install or select a compatible wallet to connect.",
         errorCode: "unreachable"
       });
@@ -280,23 +343,27 @@ export class ReadOnlyWalletController {
 
     this.patchState({ error: undefined });
     const lifecycleGeneration = this.lifecycleGeneration;
-    const reconcileVersion = this.reconcileVersion;
     const operation = (async () => {
-      let switched = false;
       try {
         await switchWalletToBase(provider);
         const next = await readConnectedWallet(provider);
-        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration && reconcileVersion === this.reconcileVersion) {
-          this.applySnapshot({ ...next, chainId: BASE_CHAIN_ID });
-          switched = true;
+        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration) {
+          if (!next.address) {
+            this.sessionVerified = false;
+            this.patchState(clearSessionState("locked_or_no_accounts"));
+          } else {
+            this.sessionVerified = true;
+            this.applySessionSnapshot({ ...next, chainId: BASE_CHAIN_ID }, this.state.connectionOrigin);
+            await this.refreshBalance();
+          }
         }
       } catch (requestError) {
-        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration && reconcileVersion === this.reconcileVersion) {
+        if (provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration) {
           this.patchState({ error: getWalletErrorMessage(requestError), errorCode: getWalletErrorCode(requestError) });
         }
       } finally {
         this.switchPromise = undefined;
-        const shouldReconcile = switched || this.reconcileQueued || reconcileVersion !== this.reconcileVersion;
+        const shouldReconcile = this.sessionVerified && this.reconcileQueued;
         this.reconcileQueued = false;
         if (shouldReconcile && provider === this.selectedProvider && lifecycleGeneration === this.lifecycleGeneration) this.queueReconcile();
       }
@@ -307,14 +374,34 @@ export class ReadOnlyWalletController {
   }
 
   disconnect() {
+    this.lifecycleGeneration += 1;
     this.reconcileVersion += 1;
-    this.patchState({
-      status: this.selectedProvider ? "disconnected" : "unavailable",
-      address: undefined,
-      balanceEth: undefined,
-      error: undefined,
-      errorCode: undefined
-    });
+    this.balanceRequestVersion += 1;
+    this.sessionVerified = false;
+    this.detachProviderListeners();
+    this.patchState(clearSessionState("disconnected_by_user"));
+  }
+
+  async refreshBalance() {
+    const provider = this.selectedProvider;
+    const address = this.state.address;
+    if (!provider || !this.sessionVerified || !address || this.state.chainId !== BASE_CHAIN_ID) {
+      this.patchState({ balanceStatus: "idle", balanceEth: undefined, balanceUpdatedAt: undefined });
+      return;
+    }
+    const requestVersion = ++this.balanceRequestVersion;
+    const lifecycleGeneration = this.lifecycleGeneration;
+    this.patchState({ balanceStatus: "balance_loading", balanceEth: undefined, balanceUpdatedAt: undefined });
+    try {
+      const balanceEth = await readWalletBalance(provider, address);
+      if (provider === this.selectedProvider && address === this.state.address && requestVersion === this.balanceRequestVersion && lifecycleGeneration === this.lifecycleGeneration) {
+        this.patchState({ balanceStatus: balanceEth === undefined ? "balance_unavailable" : "balance_ready", balanceEth, balanceUpdatedAt: balanceEth === undefined ? undefined : new Date().toISOString() });
+      }
+    } catch {
+      if (provider === this.selectedProvider && address === this.state.address && requestVersion === this.balanceRequestVersion && lifecycleGeneration === this.lifecycleGeneration) {
+        this.patchState({ balanceStatus: "balance_unavailable", balanceEth: undefined, balanceUpdatedAt: undefined });
+      }
+    }
   }
 
   async readContract(to: string, data: string) {
@@ -351,7 +438,7 @@ export class ReadOnlyWalletController {
 
   private getProviderForExplicitAction() {
     const selectedOption = this.state.providers.find((option) => option.id === this.selectedProviderId);
-    if (!this.selectedProvider || this.state.status !== "connected" || !this.state.address) throw new Error("Connect a wallet before continuing");
+    if (!this.selectedProvider || !this.sessionVerified || !this.state.address) throw new Error("Connect a wallet before continuing");
     if (this.state.chainId !== BASE_CHAIN_ID) throw new Error("Switch the wallet to Base before continuing");
     if (selectedOption?.compatibility !== "verified") throw new Error("Select a verified Base wallet before continuing");
     return this.selectedProvider;
@@ -365,16 +452,21 @@ export class ReadOnlyWalletController {
     const duplicate = this.state.providers.find(
       (existing) => existing.id === option.id || existing.provider === option.provider
     );
-    if (duplicate) return;
+    if (duplicate) {
+      if (!this.selectedProvider && option.id === this.preferredProviderId && duplicate.compatibility === "verified") {
+        this.bindProvider(duplicate);
+        this.patchState({ selectedProviderId: duplicate.id, status: "reconnect_required", balanceStatus: "idle" });
+      }
+      return;
+    }
 
     this.patchState({
       providers: [...this.state.providers, option],
-      status: this.selectedProvider ? this.state.status : "disconnected"
+      status: this.selectedProvider ? this.state.status : "provider_available"
     });
-    if (!this.selectedProvider && option.id === this.preferredProviderId && option.compatibility !== "unverified") {
+    if (!this.selectedProvider && option.id === this.preferredProviderId && option.compatibility === "verified") {
       this.bindProvider(option);
-      this.patchState({ selectedProviderId: option.id, status: "checking" });
-      this.queueReconcile();
+      this.patchState({ selectedProviderId: option.id, status: "reconnect_required", balanceStatus: "idle" });
     }
   }
 
@@ -397,11 +489,10 @@ export class ReadOnlyWalletController {
     provider.removeListener?.("connect", this.handleConnect);
     provider.removeListener?.("disconnect", this.handleDisconnect);
     this.selectedProvider = undefined;
-    this.selectedProviderId = undefined;
   }
 
   private queueReconcile() {
-    if (!this.started || !this.selectedProvider) return;
+    if (!this.started || !this.selectedProvider || !this.sessionVerified) return;
     if (this.reconcileQueued || this.connectPromise || this.switchPromise) {
       this.reconcileQueued = true;
       return;
@@ -432,13 +523,24 @@ export class ReadOnlyWalletController {
           provider === this.selectedProvider &&
           reconcileVersion === this.reconcileVersion &&
           lifecycleGeneration === this.lifecycleGeneration
-        ) this.applySnapshot(next);
+        ) {
+          if (!next.address) {
+            this.sessionVerified = false;
+            this.patchState(clearSessionState("locked_or_no_accounts"));
+          } else {
+            this.applySessionSnapshot(next, this.state.connectionOrigin);
+            if (next.chainId === BASE_CHAIN_ID) await this.refreshBalance();
+          }
+        }
       } catch {
         if (
           provider === this.selectedProvider &&
           reconcileVersion === this.reconcileVersion &&
           lifecycleGeneration === this.lifecycleGeneration
-        ) this.patchState({ status: "disconnected" });
+        ) {
+          this.sessionVerified = false;
+          this.patchState({ ...clearSessionState("provider_error"), error: "The wallet provider could not refresh this session.", errorCode: "unreachable" });
+        }
       } finally {
         this.reconcilePromise = undefined;
         if (this.reconcileQueued) {
@@ -452,10 +554,14 @@ export class ReadOnlyWalletController {
     return operation;
   }
 
-  private applySnapshot(next: ReadOnlyWalletSnapshot) {
+  private applySessionSnapshot(next: ReadOnlyWalletSnapshot, connectionOrigin?: WalletConnectionOrigin) {
     this.patchState({
       ...next,
-      status: next.address ? "connected" : "disconnected",
+      status: next.address ? next.chainId === BASE_CHAIN_ID ? "connected" : "wrong_network" : "locked_or_no_accounts",
+      balanceStatus: next.address && next.chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
+      balanceEth: undefined,
+      balanceUpdatedAt: undefined,
+      connectionOrigin,
       error: undefined,
       errorCode: undefined
     });
@@ -498,15 +604,20 @@ export async function readConnectedWallet(provider: Eip1193Provider): Promise<Re
   ]);
   const address = readFirstAddress(accountsValue);
   const chainId = parseChainId(chainValue);
-  return { address, chainId, balanceEth: address && chainId === BASE_CHAIN_ID ? await readWalletBalance(provider, address) : undefined };
+  return { address, chainId };
 }
 
-export async function requestWalletConnection(provider: Eip1193Provider): Promise<ReadOnlyWalletSnapshot> {
+export async function requestWalletConnection(provider: Eip1193Provider): Promise<ReadOnlyWalletSnapshot & { connectionOrigin: WalletConnectionOrigin }> {
+  const existingAddress = readFirstAddress(await provider.request({ method: "eth_accounts" }));
   const accountsValue = await provider.request({ method: "eth_requestAccounts" });
   const address = readFirstAddress(accountsValue);
-  if (!address) throw new Error("Wallet account unavailable");
+  if (!address) return { connectionOrigin: "explicit_request" };
   const chainId = parseChainId(await provider.request({ method: "eth_chainId" }));
-  return { address, chainId, balanceEth: chainId === BASE_CHAIN_ID ? await readWalletBalance(provider, address) : undefined };
+  return {
+    address,
+    chainId,
+    connectionOrigin: existingAddress?.toLowerCase() === address.toLowerCase() ? "previously_authorized" : "explicit_request"
+  };
 }
 
 export async function readWalletBalance(provider: Eip1193Provider, address: string) {
@@ -570,8 +681,8 @@ export function getWalletDiagnostic(error: unknown) {
 function formatWei(value: bigint) {
   const weiPerEth = BigInt("1000000000000000000");
   const whole = value / weiPerEth;
-  const fraction = (value % weiPerEth).toString().padStart(18, "0").slice(0, 4);
-  return `${whole}.${fraction}`.replace(/\.0+$/, "");
+  const fraction = (value % weiPerEth).toString().padStart(18, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 function readProviderErrorCode(error: unknown) {
@@ -607,4 +718,18 @@ function readWalletMetadata(value: unknown, maximumLength: number) {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
   return text ? text.slice(0, maximumLength) : undefined;
+}
+
+function clearSessionState(status: WalletControllerStatus): Partial<WalletControllerState> {
+  return {
+    status,
+    address: undefined,
+    chainId: undefined,
+    balanceEth: undefined,
+    balanceStatus: "idle",
+    balanceUpdatedAt: undefined,
+    connectionOrigin: undefined,
+    error: undefined,
+    errorCode: undefined
+  };
 }

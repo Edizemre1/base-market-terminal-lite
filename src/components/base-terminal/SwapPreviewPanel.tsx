@@ -26,7 +26,7 @@ export function SwapTicket({
   const wallet = useWallet();
   const { t } = useI18n();
   const walletAddress = wallet.address;
-  const connected = wallet.status === "connected" && Boolean(walletAddress);
+  const connected = wallet.accountConnected && Boolean(walletAddress);
   const amountNumber = parseLocaleDecimalInput(amount);
   const amountValid = typeof amountNumber === "number" && amountNumber > 0;
   const [expanded, setExpanded] = useState(false);
@@ -110,9 +110,9 @@ export function SwapTicket({
                 className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-control border border-brand-action bg-brand-action px-3 text-label font-semibold text-content-on-accent outline-none hover:bg-brand-action/90 focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait disabled:opacity-70"
               >
                 <WalletCards size={14} aria-hidden="true" />
-                {wallet.status === "connecting" ? t("wallet.waiting") : t("wallet.connect")}
+                {wallet.status === "connecting" ? t("wallet.waiting") : t(wallet.status === "reconnect_required" || wallet.status === "disconnected_by_user" || wallet.status === "locked_or_no_accounts" ? "wallet.reconnect" : "wallet.connect")}
               </button>
-              {wallet.status === "unavailable" ? (
+              {!wallet.providerAvailable ? (
                 <p className="mt-2 text-meta text-freshness-delayed">{t("wallet.noProvider")}</p>
               ) : null}
             </div>

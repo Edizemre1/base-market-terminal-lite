@@ -7,19 +7,19 @@ This ledger records the decisions that keep the terminal source-correct while it
 - One canonical `MarketTerminalSnapshot` supplies every market surface. Pair identity is Base chain + token addresses + pool address; symbols are presentation only.
 - Missing market fields remain unavailable. They are never coerced into zero, safety, popularity, or a favorable signal.
 - Existing finite-number, reciprocal-price, OHLCV, stale snapshot, alert, wallet race, EIP-6963, Base chain, BigInt balance, locale, sanitization, accessibility, and responsive contracts stay in force.
-- One wallet controller owns provider selection and lifecycle. Initial page load makes no provider request unless an exact previously verified provider is restored under the existing contract.
+- One wallet controller owns provider selection and lifecycle. A stored verified provider is a preference only: a fresh page shows `Reconnect`, performs no wallet RPC, and cannot display an address until the user explicitly reconnects. Connection and balance states are separate, late reads are account/session-bound, and app-local disconnect removes listeners without claiming to revoke extension permission.
 - Production stays read-only. Transaction execution is a server capability enabled only by an explicit staging environment flag.
 
 ## Information architecture
 
 - `/terminal` is canonical. The primary navigation is Terminal, Markets, Watchlist, Portfolio, and Alerts.
-- Terminal combines a real market tape, six deterministic and bounded opportunity streams, a dense market board, a closable context inspector, a route-backed pair workspace, a pinned multichart, and an intent-opened trade drawer.
+- Terminal combines a real market tape, six deterministic and bounded opportunity streams, a dense market board, a decision-first context inspector, a route-backed pair workspace, a pinned multichart, and an intent-opened trade drawer. The global Trade entry remains visible even when the current snapshot has zero precomputed execution candidates and starts from exact Base USDC → WETH contracts without inventing a market price.
 - A single refresh loop owns snapshots. Selected and pinned OHLCV remain lazy and bounded.
 - User interaction freezes disruptive reordering; a pending snapshot is applied explicitly or after the existing safe unlock period.
 
 ## Market capabilities
 
-- DexScreener remains discovery and pair-snapshot source. Multiple legitimate pools for the same token route are retained and sorted by canonical pool key.
+- DexScreener remains discovery and pair-snapshot source. Multiple legitimate pools for the same token route are retained and sorted by canonical pool key, while primary market surfaces present one token opportunity with a small `direct USDC`, `via …`, or `unpriced` route label. Raw pairs remain visible in Pools and technical disclosures.
 - GeckoTerminal remains lazy read-only OHLCV for selected and pinned markets.
 - New, gainers, losers, volume inflow/leaders, liquidity movers, and most-traded streams are deterministic and only use fields that exist for the relevant window. Missing values remain missing rather than becoming zero, and no stream is advice or a safety score.
 - Virtuals, Clanker, Zora, holder, insider, smart-money, and security labels stay disabled unless a trustworthy adapter supplies verifiable data.

@@ -1,6 +1,6 @@
 "use client";
 
-import { BriefcaseBusiness, X } from "lucide-react";
+import { ArrowLeftRight, BriefcaseBusiness, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useChartData } from "@/components/base-terminal/hooks/useChartData";
@@ -46,6 +46,9 @@ import {
 } from "@/lib/base-terminal/terminalNavigation";
 import { fetchTerminalSnapshot } from "@/lib/base-terminal/terminalSnapshotClient";
 
+const BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
+
 type PendingSnapshot = {
   snapshot: MarketTerminalSnapshot;
   signals: PulseSignal[];
@@ -84,6 +87,7 @@ export function BaseTerminal({
   const [placementSnapshot, setPlacementSnapshot] = useState(data);
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [amount, setAmount] = useState("0.10");
+  const [tradePair, setTradePair] = useState<BasePair>();
   const [tradeSide, setTradeSide] = useState<"buy" | "sell">("buy");
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(() => buildProviderHealth(data, "idle"));
   const [pulseSignals, setPulseSignals] = useState<PulseSignal[]>(data.recentSignals);
@@ -143,7 +147,12 @@ export function BaseTerminal({
     const displayPrice = opportunity?.canonicalPrice.value ?? opportunity?.observedPriceUsd?.value;
     return displayPrice === undefined ? oriented : { ...oriented, priceUsdValue: displayPrice, priceUsd: formatUsd(displayPrice), price: formatUsd(displayPrice), qualityBand: opportunity?.qualityBand, liquidityState: opportunity?.liquidityState };
   }, [chartOverrides, selectedPair, snapshotData.opportunities]);
-  const selectedOpportunity = useMemo(() => snapshotData.opportunities.find((item) => item.id === selectedPairWithLiveChart?.opportunityId), [selectedPairWithLiveChart?.opportunityId, snapshotData.opportunities]);
+  const defaultTradePair = useMemo(() => {
+    const wethOpportunity = snapshotData.opportunities.find((item) => item.focusTokenAddress.toLowerCase() === BASE_WETH_ADDRESS);
+    const exactMarket = wethOpportunity ? snapshotData.allPairs.find((item) => item.id === wethOpportunity.primaryMarketId) : undefined;
+    if (exactMarket && wethOpportunity) return orientPairToOpportunity({ ...exactMarket, opportunityId: wethOpportunity.id, focusTokenAddress: wethOpportunity.focusTokenAddress, focusTokenSymbol: wethOpportunity.focusTokenSymbol, focusTokenName: wethOpportunity.focusTokenName }, wethOpportunity);
+    return buildDefaultTradeContext(selectedPairWithLiveChart);
+  }, [selectedPairWithLiveChart, snapshotData.allPairs, snapshotData.opportunities]);
   const viewTitle = useMemo(() => {
     if (view === "markets") return t("route.marketsTitle");
     if (view === "watchlist") return t("route.watchlistTitle");
@@ -176,13 +185,8 @@ export function BaseTerminal({
   }, [handleSelectPairById, overlay, view]);
 
   const openTrade = useCallback((pair: BasePair, side: "buy" | "sell") => {
-    handleSelectPairById(pair.id);
-    const opportunity = snapshotRef.current.opportunities.find((item) => item.id === pair.opportunityId);
-    // Mock mode exercises the disabled-by-default transaction UI; live non-ranked opportunities remain read-only.
-    if (!opportunity?.rankingEligibility && !(snapshotRef.current.mode === "mock" && pair.dataSource === "mock")) {
-      overlay.open("market_inspector", { pairId: pair.id, tab: "overview" });
-      return;
-    }
+    if (snapshotRef.current.allPairs.some((item) => item.id === pair.id)) handleSelectPairById(pair.id);
+    setTradePair(pair);
     setTradeSide(side);
     overlay.open("trade_drawer", { pairId: pair.id, side });
   }, [handleSelectPairById, overlay]);
@@ -425,8 +429,12 @@ export function BaseTerminal({
 
   if (!selectedPairWithLiveChart) {
     return (
-      <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] scroll-mt-16 bg-surface-canvas p-4 outline-none">
-        <StatePanel kind="unavailable" className="mx-auto max-w-3xl" title={t("terminal.unavailableTitle")} body={t("terminal.unavailableBody")} />
+      <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] scroll-mt-16 bg-surface-canvas p-4 outline-none" data-testid="pulse-terminal" data-terminal-view={view}>
+        <TradeabilityProvider><div className="mx-auto max-w-3xl space-y-3">
+          <GlobalTradeEntry pair={defaultTradePair} onOpen={openTrade} />
+          <StatePanel kind="unavailable" title={t("terminal.unavailableTitle")} body={t("terminal.unavailableBody")} />
+          {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={tradePair ?? defaultTradePair} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={(locked) => setInteractionLock("trade", locked)} /></TradeDrawer> : null}
+        </div></TradeabilityProvider>
       </main>
     );
   }
@@ -435,6 +443,7 @@ export function BaseTerminal({
   const marketBoard = <MarketMatrix snapshot={snapshotData} placementSnapshot={placementSnapshot} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} isPairPinned={isPairPinned} onTogglePin={togglePinnedPair} onInteractionChange={(locked) => setInteractionLock("market-board", locked)} watchlistOnly={view === "watchlist"} />;
   return <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-56px)] w-full scroll-mt-16 overflow-x-hidden bg-surface-canvas px-3 py-3 outline-none sm:px-4 lg:px-6" data-testid="pulse-terminal" data-terminal-view={view}><h1 className="sr-only">{viewTitle}</h1>
     <MarketSignalProvider snapshot={snapshotData}><TradeabilityProvider><div className="mx-auto max-w-[2200px] space-y-3">
+      <GlobalTradeEntry pair={defaultTradePair} onOpen={openTrade} />
       {snapshotData.fallbackReason ? <div className="rounded-card bg-freshness-delayed/10 px-3 py-2 text-meta text-freshness-delayed">{t("terminal.unavailableBody")}</div> : null}
 
       {view === "terminal" ? <><LiveMarketTape snapshot={snapshotData} placementSnapshot={placementSnapshot} onSelect={openPair} onRefresh={() => void refreshProviderSnapshot()} refreshing={providerHealth.status === "refreshing"} delayed={providerHealth.stale} sourceDelayed={providerHealth.sourceDelayed && !providerHealth.stale} pendingUpdateCount={pendingSnapshot?.changedPairIds.length} onApplyUpdates={pendingSnapshot ? () => applyPlacement(pendingSnapshot) : undefined} /><LivePulseRail signals={pulseSignals} onSelect={openPair} onInteractionChange={(locked) => setInteractionLock("pulse-rail", locked)} /><LiveMarketWall snapshot={snapshotData} placementSnapshot={placementSnapshot} selectedPair={selectedPairWithLiveChart} onSelect={openPair} onTrade={openTrade} onInteractionChange={(locked) => setInteractionLock("live-wall", locked)} /><section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")} data-testid="terminal-workspace"><div className="min-w-0">{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section></> : null}
@@ -443,14 +452,19 @@ export function BaseTerminal({
 
       {view === "watchlist" ? <section className={cx("grid min-w-0 items-start gap-3", inspectorOpen && "cmi-inspector-grid")}><div className="min-w-0 space-y-3"><PinnedMarketGrid pairs={pinnedMarketPairs} onSelect={openPair} onUnpin={togglePinnedPair} />{marketBoard}</div><ContextInspector pair={selectedPairWithLiveChart} snapshot={snapshotData} onTrade={openTrade} onOpenWorkspace={openWorkspace} /></section> : null}
 
-      {view === "workspace" ? <section className="space-y-3" data-testid="pair-workspace"><div className="flex items-center justify-between gap-2 px-1"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("workspace.selected")}</p><h1 className="text-base font-semibold">{selectedPairWithLiveChart.pair}</h1></div><button type="button" onClick={() => navigateView("terminal")} className="min-h-10 rounded-control bg-surface-interactive px-3 text-meta text-content-secondary">{t("common.backToMarkets")}</button></div><section className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]"><SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} /><MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} /></section><PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} />{selectedOpportunity?.rankingEligibility || snapshotData.mode === "mock" ? <div className="flex justify-end"><button type="button" onClick={() => openTrade(selectedPairWithLiveChart, "buy")} className="min-h-11 rounded-control bg-brand-action px-6 text-meta font-bold text-content-on-accent">{t("trade.checkQuote")}</button></div> : null}</section> : null}
+      {view === "workspace" ? <section className="space-y-3" data-testid="pair-workspace"><div className="flex items-center justify-between gap-2 px-1"><div><p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">{t("workspace.selected")}</p><h1 className="text-base font-semibold">{selectedPairWithLiveChart.focusTokenSymbol ?? selectedPairWithLiveChart.baseToken}</h1></div><button type="button" onClick={() => navigateView("terminal")} className="min-h-10 rounded-control bg-surface-interactive px-3 text-meta text-content-secondary">{t("common.backToMarkets")}</button></div><section className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]"><SelectedPairPanel pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} chartRefreshStatus={chartRefreshStatus[getChartCacheKey(selectedPairWithLiveChart)] ?? "idle"} onRefreshChart={refreshPairChart} /><MarketActivityPanel pair={selectedPairWithLiveChart} signals={pulseSignals} snapshot={snapshotData} /></section><PairDetailTabs pair={selectedPairWithLiveChart} activeTab={activeTab} onTabChange={setActiveTab} providerStale={providerHealth.stale} /><div className="flex justify-end"><button type="button" onClick={() => openTrade(selectedPairWithLiveChart, "buy")} className="min-h-11 rounded-control bg-brand-action px-6 text-meta font-bold text-content-on-accent">{t("trade.checkQuote")}</button></div></section> : null}
 
       {view === "alerts" ? <section className="mx-auto w-full max-w-3xl" data-testid="alerts-workspace"><AlertCenter snapshot={snapshotData} selectedPair={selectedPairWithLiveChart} signals={pulseSignals} embedded /></section> : null}
       {view === "portfolio" ? <section className="pulse-surface rounded-panel p-6" data-testid="portfolio-workspace"><BriefcaseBusiness size={20} className="text-content-secondary" /><h2 className="mt-3 text-lg font-semibold">{t("portfolio.title")}</h2><p className="mt-2 max-w-2xl text-meta leading-6 text-content-secondary">{t("portfolio.scope")}</p><div className="mt-4 rounded-card bg-surface-interactive p-4 text-meta text-content-secondary">{t("portfolio.empty")}</div></section> : null}
 
-      {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={(locked) => setInteractionLock("trade", locked)} /></TradeDrawer> : null}
+      {overlay.active.type === "trade_drawer" || ((overlay.active.type === "wallet_picker" || overlay.active.type === "transaction_review") && overlay.suspended?.type === "trade_drawer") ? <TradeDrawer onClose={overlay.close} suspended={overlay.active.type !== "trade_drawer"}><TradeDock pair={tradePair ?? selectedPairWithLiveChart} marketDataMode={snapshotData.mode} amount={amount} onAmountChange={setAmount} side={tradeSide} onSideChange={setTradeSide} onInteractionChange={(locked) => setInteractionLock("trade", locked)} /></TradeDrawer> : null}
     </div></TradeabilityProvider></MarketSignalProvider>
   </main>;
+}
+
+function GlobalTradeEntry({ pair, onOpen }: { pair: BasePair; onOpen: (pair: BasePair, side: "buy" | "sell") => void }) {
+  const { t } = useI18n();
+  return <section className="pulse-surface flex flex-wrap items-center justify-between gap-3 rounded-panel px-3 py-2" data-testid="global-trade-entry"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-brand-accent/10 text-brand-accent"><ArrowLeftRight size={16} /></span><span className="min-w-0"><strong className="block text-label text-content-primary">{t("trade.defaultRoute")}</strong><span className="block truncate text-meta text-content-secondary">{t("trade.globalBody")}</span></span></div><button type="button" onClick={() => onOpen(pair, "buy")} className="min-h-11 rounded-control bg-brand-action px-4 text-label font-bold text-content-on-accent" data-testid="global-trade-button">{t("trade.open")}</button></section>;
 }
 
 function TradeDrawer({ onClose, children, suspended = false }: { onClose: () => void; children: ReactNode; suspended?: boolean }) {
@@ -475,4 +489,52 @@ function TradeDrawer({ onClose, children, suspended = false }: { onClose: () => 
 
 function formatUsd(value: number) {
   return value >= 1 ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 6 })}` : `$${value.toPrecision(6)}`;
+}
+
+function buildDefaultTradeContext(template?: BasePair): BasePair {
+  return {
+    ...(template ?? {
+      holders: { top10: "—", top50: "—", top100: "—", total: "—", active24h: "—" },
+      poolAge: "—",
+      flags: [],
+      taxes: { buy: "—", sell: "—" },
+      lpLock: { status: "—", provider: "—", expires: "—" },
+      riskChecks: [],
+      liquidityDetail: { poolLiquidity: "—", lpChange: "—", depth: "—", routeSource: "—" },
+      activity: []
+    }),
+    id: "base:trade:usdc-weth",
+    pair: "WETH / USDC",
+    baseToken: "WETH",
+    quoteToken: "USDC",
+    project: "Wrapped Ether",
+    address: BASE_WETH_ADDRESS,
+    route: "USDC → WETH",
+    dex: "Route discovery",
+    age: "—",
+    price: "—",
+    priceUsd: "—",
+    chart: [],
+    baseTokenAddress: BASE_WETH_ADDRESS,
+    quoteTokenAddress: BASE_USDC_ADDRESS,
+    focusTokenAddress: BASE_WETH_ADDRESS,
+    focusTokenSymbol: "WETH",
+    focusTokenName: "Wrapped Ether",
+    opportunityId: undefined,
+    pairAddress: undefined,
+    priceUsdValue: undefined,
+    liquidityUsd: undefined,
+    liquidity: undefined,
+    volumes: undefined,
+    volume24h: undefined,
+    priceChanges: undefined,
+    change24h: undefined,
+    txns: undefined,
+    metadataStatus: "complete",
+    metadataVerificationState: "verified",
+    dataSource: undefined,
+    dataProviders: undefined,
+    sourceUpdatedAt: undefined,
+    stale: false
+  };
 }

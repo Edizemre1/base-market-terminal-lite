@@ -58,7 +58,7 @@ Four axes never substitute for one another:
 
 `unknown` is not safe, zero, verified, tradeable or unavailable. `verified` is not a safety guarantee. `quote ready` is an operation state, not market direction or transaction success.
 
-Discovery actions follow the same truth ladder: a market-data row may offer **Inspect**; an exact ranking-eligible market may offer **Check quote**; **Buy/Sell** language belongs inside the explicit trade lifecycle and does not imply that a route exists.
+Discovery actions follow the same truth ladder: a market-data row may offer **Inspect**; an exact Base token may offer **Check quote** even when no execution candidate was precomputed; **Buy/Sell** language belongs inside the explicit trade lifecycle and does not imply that a route exists. A failed live route check returns its exact no-route/provider/metadata state instead of hiding the entry point.
 
 ## Color contract
 
@@ -99,6 +99,9 @@ Compact variants serve rows and lanes. Full variants serve sections, pages and o
 - Compact Market Board rows are 40px/13px; comfortable rows are 48px/13px.
 - Mobile opportunities use one identity row, a 2×2 evidence grid, signal summary, one primary action and secondary actions through inspect/overflow.
 - Inspector is a fixed 400px desktop drawer and a bottom sheet capped at 92dvh on mobile.
+- Inspector opens with token identity, price/freshness, movement, liquidity/volume, trade status, wallet status and primary signals. Raw reason codes, pool addresses, provider internals, pricing paths and timestamps live under **Technical details** or Pools.
+- Wallet chrome distinguishes Connect, Reconnect, Locked, Wrong network and session-verified Connected. A connected summary identifies the provider, Base network and native balance; full public-address and selected-token balance truth lives in the Wallet drawer.
+- Primary market naming is token-first. Raw `/ WETH` and `/ USDC` pairs are secondary pool evidence, represented on main surfaces by `via WETH`, `via USDC`, `direct USDC` or `unpriced`.
 - Mobile navigation is Terminal / Markets / Watchlist / Wallet. Alerts remain a header action.
 
 ## Overlay contract

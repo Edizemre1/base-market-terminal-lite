@@ -255,7 +255,7 @@ test.describe("read-only wallet request boundary", () => {
     expect(message).not.toMatch(/stack|SUPER_RAW/i);
   });
 
-  test("connects, reads chain and balance without requesting a transaction", async () => {
+  test("classifies explicit connection origin without requesting a balance or transaction", async () => {
     const methods: string[] = [];
     const provider: Eip1193Provider = {
       request: async ({ method }) => {
@@ -270,9 +270,9 @@ test.describe("read-only wallet request boundary", () => {
     await expect(requestWalletConnection(provider)).resolves.toMatchObject({
       address: "0x1111111111111111111111111111111111111111",
       chainId: 8453,
-      balanceEth: "1"
+      connectionOrigin: "explicit_request"
     });
-    expect(methods).toEqual(["eth_requestAccounts", "eth_chainId", "eth_getBalance"]);
+    expect(methods).toEqual(["eth_accounts", "eth_requestAccounts", "eth_chainId"]);
     expect(methods).not.toContain("eth_sendTransaction");
   });
 

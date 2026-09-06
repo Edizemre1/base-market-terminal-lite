@@ -78,6 +78,9 @@ jobs:
       - name: Performance and market visibility recovery contracts
         run: npm run test:recovery
 
+      - name: Wallet session and visible Trade contracts
+        run: npm run test:wallet
+
       - name: Lint
         run: npm run lint
 

@@ -24,6 +24,101 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("wallet-picker")).toHaveCount(0);
   });
 
+  test("treats a stored provider and legacy session flags as reconnect-only", async ({ page }) => {
+    await installVerifiedWalletStub(page, { initialAccounts: ["0x1111111111111111111111111111111111111111"] });
+    await page.addInitScript(() => {
+      localStorage.setItem("mergen-pulse:wallet-provider:v2", JSON.stringify({ id: "legacy:injected", name: "MetaMask", compatibility: "verified" }));
+      localStorage.setItem("mergen-pulse:wallet-address", "0x9999999999999999999999999999999999999999");
+      localStorage.setItem("mergen-pulse:wallet-connected", "true");
+      sessionStorage.setItem("base-terminal-lite:wallet-connected", "true");
+    });
+    await page.goto("/terminal?data=mock");
+
+    await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-status", "reconnect_required");
+    await expect(page.getByTestId("connect-wallet-button")).toContainText(/Reconnect|Yeniden bağlan/);
+    await expect(page.getByTestId("connect-wallet-button")).not.toContainText("0x1111");
+    expect(await walletMethods(page)).toEqual([]);
+    expect(await page.evaluate(() => [localStorage.getItem("mergen-pulse:wallet-address"), localStorage.getItem("mergen-pulse:wallet-connected"), sessionStorage.getItem("base-terminal-lite:wallet-connected")])).toEqual([null, null, null]);
+
+    await openWalletPicker(page);
+    await page.getByTestId("wallet-reconnect-button").click();
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-details")).toContainText(/Previously authorized|Daha önce yetkilendirilmiş/);
+    await expect(page.getByTestId("wallet-details")).toContainText("MetaMask");
+    await expect(page.getByTestId("wallet-details")).toContainText("Base Mainnet · 8453");
+    await expect(page.getByTestId("wallet-native-balance")).toHaveText("1 ETH");
+    await expect(page.getByTestId("wallet-token-balance")).toHaveText("1 USDC");
+    expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("keeps locked and missing-balance states distinct without leaking an address", async ({ page }) => {
+    await installVerifiedWalletStub(page, { requestAccountsEmpty: true });
+    await page.goto("/terminal?data=mock");
+    await openWalletPicker(page);
+    await page.getByTestId("wallet-provider-legacy:injected").click();
+    await expect(page.getByTestId("wallet-picker")).toHaveAttribute("data-wallet-status", "locked_or_no_accounts");
+    await expect(page.getByTestId("connect-wallet-button")).not.toContainText("0x1111");
+    expect(await walletMethods(page)).not.toContain("eth_getBalance");
+    expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("renders native zero separately from an unavailable balance", async ({ page }) => {
+    await installVerifiedWalletStub(page, { balanceHex: "0x0" });
+    await page.goto("/terminal?data=mock");
+    await connectWalletOnly(page);
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-native-balance")).toHaveText("0 ETH");
+
+    await page.reload();
+    await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-status", "reconnect_required");
+    expect(await walletMethods(page)).toEqual([]);
+  });
+
+  test("clears account and balance on provider account loss and disconnect", async ({ page }) => {
+    await installVerifiedWalletStub(page, { balanceError: true });
+    await page.goto("/terminal?data=mock");
+    await connectWalletOnly(page);
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-native-balance")).toContainText(/Unavailable|Kullanılamıyor/);
+    await page.getByRole("button", { name: /Close wallet picker|Cüzdan seçiciyi kapat/ }).click();
+
+    await page.evaluate(() => (window as Window & { __walletHarness?: { setAccounts: (accounts: string[]) => void } }).__walletHarness?.setAccounts(["0x2222222222222222222222222222222222222222"]));
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x2222...2222");
+    await page.evaluate(() => (window as Window & { __walletHarness?: { setAccounts: (accounts: string[]) => void } }).__walletHarness?.setAccounts([]));
+    await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-status", "locked_or_no_accounts");
+    await expect(page.getByTestId("connect-wallet-button")).not.toContainText("0x2222");
+    expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("keeps Trade visible and opens exact default USDC to WETH without automatic wallet or quote calls", async ({ page }) => {
+    let quoteRequests = 0;
+    await page.route("**/api/quote", (route) => { quoteRequests += 1; return route.fulfill({ status: 500, json: { code: "provider-unavailable" } }); });
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock");
+    await expect(page.getByTestId("global-trade-button")).toBeVisible();
+    await page.getByTestId("global-trade-button").click();
+    await expect(page.getByTestId("trade-dock")).toBeVisible();
+    await expect(page.getByTestId("trade-spend-token")).toHaveValue("USDC");
+    await expect(page.getByTestId("trade-dock")).toContainText("USDC → WETH");
+    expect(await walletMethods(page)).toEqual([]);
+    expect(quoteRequests).toBe(0);
+  });
+
+  test("uses token-first market labels while preserving the raw pair in technical details", async ({ page }) => {
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock");
+    const row = page.getByTestId("matrix-row-pepe-weth");
+    await expect(row.locator("strong").first()).toHaveText("PEPE");
+    await expect(row.locator("strong").first()).not.toContainText("WETH");
+    await row.getByRole("button", { name: /Inspect|incele/ }).click();
+    const technical = page.getByTestId("inspector-technical-details");
+    await expect(technical).not.toHaveAttribute("open", "");
+    await technical.locator("summary").click();
+    await expect(technical).toContainText("PEPE / WETH");
+    await expect(page.getByTestId("inspector-trade-cta")).toBeVisible();
+  });
+
   test("connects only after explicit provider selection", async ({ page }) => {
     await installVerifiedWalletStub(page);
     await page.goto("/terminal?data=mock&view=portfolio");
@@ -34,6 +129,16 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
     expect(await walletMethods(page)).toContain("eth_requestAccounts");
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("preserves a verified wallet only across client-side route changes", async ({ page }) => {
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock");
+    await connectWalletOnly(page);
+    const methodsAfterConnect = await walletMethods(page);
+    await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
+    await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
+    expect((await walletMethods(page)).filter((method) => method === "eth_requestAccounts")).toHaveLength(methodsAfterConnect.filter((method) => method === "eth_requestAccounts").length);
   });
 
   test("switches to Base only after the manual action", async ({ page }, testInfo) => {
@@ -48,6 +153,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).toHaveAttribute("data-tradeability-status", "wrong_network");
     await page.screenshot({ path: testInfo.outputPath("trade-wrong-network-1440.png"), fullPage: false });
     expect(await walletMethods(page)).not.toContain("wallet_switchEthereumChain");
+    expect(await walletMethods(page)).not.toContain("eth_getBalance");
     await page.getByRole("button", { name: /Switch to Base|Base ağına geç/ }).click();
     await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
     expect(await walletMethods(page)).toContain("wallet_switchEthereumChain");
@@ -163,10 +269,14 @@ async function mockFailedTradeServer(page: Page, code: "no-route" | "timeout") {
 }
 
 async function connectWallet(page: Page) {
+  await connectWalletOnly(page);
+  await openTradeDrawer(page);
+}
+
+async function connectWalletOnly(page: Page) {
   await openWalletPicker(page);
   await page.getByTestId("wallet-provider-legacy:injected").click();
   await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
-  await openTradeDrawer(page);
 }
 
 async function openTradeDrawer(page: Page) {
