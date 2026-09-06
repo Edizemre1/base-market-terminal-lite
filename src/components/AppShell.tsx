@@ -241,6 +241,7 @@ function TerminalSearchBox() {
                 </span>
                 <button
                   type="button"
+                  data-testid={`pin-search-result-${pair.id}`}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => togglePinnedPair(pair)}
                   className={cx(

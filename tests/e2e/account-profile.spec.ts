@@ -55,7 +55,8 @@ test.describe("canonical Mergen account consumer", () => {
     await expect(drawer).toContainText("Mergen Member");
     await expect(drawer).toContainText("member@example.com");
     await expect(drawer).toContainText("Mergen Pro");
-    await expect(drawer).not.toContainText(/handle|linked wallet|active wallet/i);
+    await expect(drawer).not.toContainText(/handle|linked wallet/i);
+    await expect(drawer).toContainText(/Mergen account and active wallet are separate|Mergen hesabın ve aktif cüzdanın ayrıdır/i);
     await page.getByRole("button", { name: "Close profile" }).click();
     await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
     await page.getByTestId("mergen-account-button").click();

@@ -173,9 +173,18 @@ async function measureInspectorRoute(page: import("@playwright/test").Page) {
       const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
       return { target: routeTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
     };
-    const candidates = [...document.querySelectorAll<HTMLElement>("[data-testid^='matrix-row-'], [data-testid^='market-card-'], [data-testid^='wall-row-']")];
-    const row = candidates.find((candidate) => candidate.offsetParent !== null);
-    const button = row?.querySelector<HTMLButtonElement>("[data-testid='open-market-inspector']");
+    const findVisibleInspectorTrigger = () => [...document.querySelectorAll<HTMLButtonElement>("[data-testid='open-market-inspector']")]
+      .find((candidate) => candidate.offsetParent !== null);
+    let button = findVisibleInspectorTrigger();
+    if (!button) {
+      const boardTrigger = document.querySelector<HTMLButtonElement>("[data-testid='open-market-board']");
+      if (boardTrigger?.offsetParent !== null) {
+        const openStart = performance.now();
+        boardTrigger.click();
+        while (document.querySelector<HTMLElement>("[data-overlay-state]")?.dataset.overlayState !== "market_board") await nextFrame(openStart, "Market board open");
+        button = findVisibleInspectorTrigger();
+      }
+    }
     if (!button) throw new Error("Missing visible market row Inspector trigger");
     const start = performance.now();
     button.click();

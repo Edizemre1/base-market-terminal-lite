@@ -13,7 +13,7 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("live-market-tape")).toBeVisible();
     await expect(page.getByTestId("live-pulse-rail")).toHaveCount(0);
     await expect(page.getByTestId("live-market-wall")).toBeVisible();
-    await expect(page.locator('[data-testid^="live-wall-lane-"]')).toHaveCount(6);
+    await expect(page.getByTestId("live-wall-lanes").locator(':scope > [data-testid^="live-wall-lane-"]')).toHaveCount(6);
     await expect(page.getByTestId("market-matrix")).toBeVisible();
     await expect(page.getByTestId("market-result-count")).toContainText("24");
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
@@ -99,7 +99,7 @@ test.describe("living Base terminal", () => {
 
   test("persists no more than four pinned markets and renders the shared multichart", async ({ page }) => {
     for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
-      await page.getByTestId(`matrix-row-${id}`).getByRole("button", { name: new RegExp(/Pin|izle/) }).click();
+      await pinMarketFromSearch(page, id);
     }
     await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
@@ -210,7 +210,8 @@ test.describe("living Base terminal", () => {
     const freshRow = page.getByTestId(`matrix-row-${freshPair.id}`);
     const staleRow = page.getByTestId(`matrix-row-${stalePair.id}`);
     await expect(freshRow.locator("td").nth(1)).toHaveText("$79,741.900899 · Market price");
-    await expect(freshRow.getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true })).toBeVisible();
+    await freshRow.getByTestId("open-market-inspector").click();
+    await expect(page.getByTestId("inspector-trade-cta")).toBeVisible();
     await expect(staleRow.locator("td").nth(1)).toHaveText(/Price pending|Fiyat bekleniyor/);
   });
 
@@ -263,7 +264,8 @@ test.describe("living Base terminal", () => {
     await expect(inspectorSignals.locator('[data-signal-type="security_unknown"]')).toHaveCount(1);
     await expect(inspectorSignals.locator('[data-signal-type="delayed"]')).toHaveCount(1);
 
-    await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Pin|izle/ }).click();
+    await page.keyboard.press("Escape");
+    await pinMarketFromSearch(page, "pepe-weth");
     await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=watchlist/);
     const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
@@ -294,7 +296,10 @@ test.describe("living Base terminal", () => {
     const avatar = row.locator('[data-identity-status="unverified"]').first();
     await expect(avatar).toHaveAttribute("data-avatar-kind", "generic");
     await expect(avatar.locator("img")).toHaveCount(0);
-    const badges = row.getByTestId("asset-tradeability-group");
+    await expect(row.getByTestId("asset-tradeability-group")).toHaveCount(0);
+    await row.getByTestId("open-market-inspector").click();
+    await page.getByTestId("context-inspector").getByRole("tab", { name: /Identity|Kimlik/ }).click();
+    const badges = page.getByTestId("context-inspector").getByTestId("asset-tradeability-group");
     await expect(badges).toHaveAttribute("data-identity-status", "unverified");
     await expect(badges).toHaveAttribute("data-tradeability-status", "market_data_only");
     await badges.click();
@@ -432,7 +437,7 @@ test.describe("living Base terminal", () => {
         expect(walletLabelFits).toBeTruthy();
       }
       if (viewport.width === 2048) {
-        const laneBounds = await page.locator('[data-testid^="live-wall-lane-"]').evaluateAll((lanes) => lanes.map((lane) => lane.getBoundingClientRect()));
+        const laneBounds = await page.getByTestId("live-wall-lanes").locator(':scope > [data-testid^="live-wall-lane-"]').evaluateAll((lanes) => lanes.map((lane) => lane.getBoundingClientRect()));
         expect(laneBounds).toHaveLength(6);
         expect(laneBounds.every((bounds) => bounds.left >= 0 && bounds.right <= viewport.width)).toBeTruthy();
       }
@@ -517,13 +522,11 @@ test.describe("living Base terminal", () => {
       await captureVisualEvidence(page, testInfo.outputPath(`market-cell-update-tint-${locale}-1440.png`), true);
       await expect(page.getByTestId("live-wall-lane-new")).toHaveAttribute("data-lane-count", "4");
       await expect(page.getByTestId("live-wall-lane-losers")).toHaveAttribute("data-lane-count", "4");
-      await page.getByTestId("live-market-wall").getByRole("checkbox").check();
       const laneExpand = page.locator('[data-testid^="lane-expand-"]').first();
       await laneExpand.click();
       await expect(laneExpand).toHaveAttribute("aria-expanded", "true");
       await captureVisualEvidence(page, testInfo.outputPath(`lane-expanded-${locale}-1440.png`), false);
       await laneExpand.click();
-      await page.getByTestId("live-market-wall").getByRole("checkbox").uncheck();
       await captureVisualEvidence(page, testInfo.outputPath(`lane-gainers-${locale}-1440.png`), false);
       await captureVisualEvidence(page, testInfo.outputPath(`lane-losers-${locale}-1440.png`), false);
       await expect(page.getByTestId("live-wall-lane-volume")).toHaveAttribute("data-lane-fallback", "true");
@@ -680,6 +683,14 @@ async function expectTerminalShell(page: Page) {
   await expect(page.getByTestId("terminal-topbar")).toBeVisible();
   await expect(page.getByTestId("pulse-terminal")).toBeVisible();
   await expect(page.getByTestId("live-market-tape")).toBeVisible();
+}
+
+async function pinMarketFromSearch(page: Page, pairId: string) {
+  const search = page.getByRole("combobox", { name: /Search token|Token, piyasa çifti/ });
+  await search.fill(pairId.split("-")[0]);
+  await expect(page.getByTestId(`search-result-${pairId}`)).toBeVisible();
+  await page.getByTestId(`pin-search-result-${pairId}`).click();
+  await search.fill("");
 }
 
 function buildSignalSnapshot(snapshot: MarketTerminalSnapshot, opportunityId: string, generatedAt: string, change5m: number): MarketTerminalSnapshot {
