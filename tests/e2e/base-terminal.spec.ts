@@ -636,7 +636,7 @@ test.describe("living Base terminal", () => {
       await captureVisualEvidence(detailPage, testInfo.outputPath(`watchlist-empty-${locale}-1440.png`), true);
       await detailPage.goto("/terminal?data=mock");
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
-        await detailPage.getByTestId(`matrix-row-${id}`).getByRole("button", { name: /Pin|izle/ }).click();
+        await pinMarketFromSearch(detailPage, id);
       }
       await detailPage.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
       await expect(detailPage.getByTestId("pinned-multichart")).toContainText("4/4");
