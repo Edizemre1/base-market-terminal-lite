@@ -171,7 +171,7 @@ test.describe("ordering, alert and wallet boundaries", () => {
     const hugeWei = BigInt(10) ** BigInt(50) + BigInt("123456789000000000");
     const provider: Eip1193Provider = { request: async () => `0x${hugeWei.toString(16)}` };
     const balance = await readWalletBalance(provider, "0x1111111111111111111111111111111111111111");
-    expect(balance).toBe("100000000000000000000000000000000.1234");
+    expect(balance).toBe("100000000000000000000000000000000.123456789");
     expect(balance).not.toMatch(/[eE+]/);
   });
 
