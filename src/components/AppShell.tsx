@@ -24,6 +24,8 @@ import { APP_VERSION } from "@/lib/appInfo";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { TranslationKey } from "@/i18n/dictionaries";
 import { OverlayProvider } from "@/components/OverlayManager";
+import { AccountProvider } from "@/components/AccountContext";
+import { AccountButton, MergenProfileOverlay } from "@/components/MergenProfile";
 import {
   commitTerminalNavigation,
   normalizeTerminalView,
@@ -46,6 +48,7 @@ const navItems = [
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <OverlayProvider>
+    <AccountProvider>
     <WalletProvider>
       <TerminalSearchProvider>
       <div className="min-h-screen overflow-x-hidden bg-surface-canvas text-content-primary">
@@ -54,7 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed left-0 right-0 top-0 z-layer-shell h-14 border-b border-border-subtle/60 bg-surface-panel/95 backdrop-blur-xl"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto_auto] lg:px-4">
+          <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto_auto_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto_auto_auto] lg:px-4">
             <Link href="/terminal" prefetch={false} onClick={(event) => handleTerminalAnchor(event, "terminal")} className="flex min-w-0 items-center gap-3">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
@@ -85,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <Suspense><HeaderAlertLink /></Suspense>
             <LocaleSwitcher />
+            <AccountButton />
             <WalletButton compact />
           </div>
         </header>
@@ -109,7 +113,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Suspense><TerminalNavigation mobile /></Suspense>
       </div>
       </TerminalSearchProvider>
+      <MergenProfileOverlay />
     </WalletProvider>
+    </AccountProvider>
     </OverlayProvider>
   );
 }

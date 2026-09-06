@@ -65,6 +65,7 @@
   --component-popover-width: 360px;
   --component-modal-min: 480px;
   --component-modal-max: 560px;
+  --component-account-control-width: 132px;
   --component-sheet-max-height: 92dvh;
   --component-chart-toolbar-offset: 188px;
   --component-mobile-nav-offset: 64px;

@@ -8,10 +8,10 @@ test.describe("living Base terminal", () => {
     await expectTerminalShell(page);
   });
 
-  test("opens on the canonical terminal with tape, pulse, six-lane wall, board and explicit overlays", async ({ page }) => {
+  test("opens on the canonical terminal with tape, six-lane wall, board and explicit overlays", async ({ page }) => {
     await expect(page).toHaveURL(/\/terminal\?data=mock$/);
     await expect(page.getByTestId("live-market-tape")).toBeVisible();
-    await expect(page.getByTestId("live-pulse-rail")).toBeVisible();
+    await expect(page.getByTestId("live-pulse-rail")).toHaveCount(0);
     await expect(page.getByTestId("live-market-wall")).toBeVisible();
     await expect(page.locator('[data-testid^="live-wall-lane-"]')).toHaveCount(6);
     await expect(page.getByTestId("market-matrix")).toBeVisible();
@@ -19,7 +19,7 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("context-inspector")).toHaveCount(0);
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
     await expect(page.getByTestId("live-market-wall").locator("button").filter({ hasText: /^(Buy|Sell|Al|Sat)$/ })).toHaveCount(0);
-    await expect(page.getByTestId("market-matrix").getByRole("button", { name: /Check quote|Teklif kontrol et/, exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId("market-matrix").getByTestId("open-market-inspector").first()).toBeVisible();
     await page.getByTestId("matrix-row-blob-usdc").getByRole("button", { name: /Inspect|incele/ }).click();
     await expect(page.getByTestId("context-inspector")).toBeVisible();
     await expect(page.getByTestId("market-decision-summary")).toBeVisible();
@@ -42,10 +42,6 @@ test.describe("living Base terminal", () => {
     const tokenRows = page.getByTestId("market-matrix").locator('table tbody [data-focus-token-address]:not([data-focus-token-address=""])');
     const tokenAddresses = await tokenRows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-focus-token-address")));
     expect(new Set(tokenAddresses).size).toBe(tokenAddresses.length);
-    await page.getByTestId("open-market-columns").click();
-    await page.getByTestId("market-columns-sheet").getByText(/Pools|Havuzlar/, { exact: true }).click();
-    await page.getByTestId("market-columns-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
-    await expect(page.getByRole("columnheader", { name: /Pools|Havuzlar/ })).toBeVisible();
     await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
     await page.getByTestId("context-inspector").getByRole("tab", { name: /Pools|Havuzlar/ }).click();
     await page.getByTestId("context-inspector").getByRole("button", { name: /Exact execution pool set|Kesin işlem havuzu seti/ }).click();
@@ -242,11 +238,7 @@ test.describe("living Base terminal", () => {
     await page.evaluate(() => { (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload = "present"; });
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: next }));
     await page.getByTestId("refresh-terminal").click();
-    await expect(page.getByTestId("live-pulse-rail")).toContainText("New pool");
     await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
-    await expect(page.getByTestId("live-pulse-rail")).toContainText("Yeni havuz");
-    await expect(page.getByTestId("live-pulse-rail")).toContainText("görüntü");
-    await expect(page.getByTestId("live-pulse-rail")).toContainText("güncel");
     await expect(row).toHaveAttribute("data-pool-count", "2");
     await expect(row).toHaveCount(1);
     expect(await page.evaluate(() => (window as Window & { __ingestionNoReload?: string }).__ingestionNoReload)).toBe("present");
@@ -335,6 +327,7 @@ test.describe("living Base terminal", () => {
     await expect(desktopPopover).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("open-market-board").click();
     const mobileButton = page.getByTestId("market-card-pepe-weth").getByTestId("market-signal-group").getByRole("button");
     await mobileButton.click();
     const mobilePopover = page.getByTestId("market-signal-popover");
@@ -458,6 +451,7 @@ test.describe("living Base terminal", () => {
   test("opens the selected market trade dock as a keyboard-closeable mobile sheet", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/terminal?data=mock");
+    await page.getByTestId("open-market-board").click();
     await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
     await page.getByTestId("inspector-trade-cta").click();
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
@@ -477,6 +471,7 @@ test.describe("living Base terminal", () => {
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await captureVisualEvidence(page, testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), true);
         if (viewport.width === 390) {
+          await page.getByTestId("open-market-board").click();
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await captureVisualEvidence(page, testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), false);
@@ -492,13 +487,13 @@ test.describe("living Base terminal", () => {
       await captureVisualEvidence(page, testInfo.outputPath(`market-board-compact-${locale}-1440.png`), true);
       await page.getByTestId("open-market-columns").click();
       const columnsSheet = page.getByTestId("market-columns-sheet");
-      await columnsSheet.getByLabel(/Data status|Veri durumu/).check();
+      await columnsSheet.getByLabel(/Freshness|Güncellik/).check();
       await columnsSheet.getByLabel(/Trade status|İşlem durumu/).check();
       await captureVisualEvidence(page, testInfo.outputPath(`market-columns-${locale}-1440.png`), false);
       await columnsSheet.getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
       await captureVisualEvidence(page, testInfo.outputPath(`market-board-status-columns-${locale}-1440.png`), false);
       await page.getByTestId("open-market-columns").click();
-      await page.getByTestId("market-columns-sheet").getByLabel(/Data status|Veri durumu/).uncheck();
+      await page.getByTestId("market-columns-sheet").getByLabel(/Freshness|Güncellik/).uncheck();
       await page.getByTestId("market-columns-sheet").getByLabel(/Trade status|İşlem durumu/).uncheck();
       await page.getByTestId("market-columns-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
       await page.getByTestId("open-market-filters").click();
@@ -507,10 +502,14 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("market-filters-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
       await captureVisualEvidence(page, testInfo.outputPath(`market-search-result-${locale}-1440.png`), false);
       await page.getByTestId("active-filter-chips").getByRole("button", { name: /Clear filters|Filtreleri temizle/ }).click();
+      await page.getByTestId("open-market-columns").click();
       await page.getByTestId("market-density-comfortable").click();
       await expect(page.getByTestId("market-density-comfortable")).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("market-columns-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
       await captureVisualEvidence(page, testInfo.outputPath(`market-board-comfortable-${locale}-1440.png`), true);
+      await page.getByTestId("open-market-columns").click();
       await page.getByTestId("market-density-compact").click();
+      await page.getByTestId("market-columns-sheet").getByRole("button", { name: /Apply updates|Güncellemeleri uygula/ }).click();
       const visualWall = buildVisualWallSnapshot(visualInitial);
       await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: visualWall }));
       await page.getByTestId("refresh-terminal").click();
@@ -575,7 +574,7 @@ test.describe("living Base terminal", () => {
       await page.getByTestId("refresh-terminal").click();
       const recoveredPending = page.getByTestId("pending-market-updates");
       if (await recoveredPending.isVisible()) await recoveredPending.click();
-      await expect(page.getByTestId("live-pulse-rail").locator('[data-pulse-event="data_recovered"]')).toBeVisible();
+      await expect(page.getByTestId("live-market-wall")).toBeVisible();
       await captureVisualEvidence(page, testInfo.outputPath(`state-recovered-${locale}-1440.png`), false);
       await page.unroute("**/api/market-snapshot?data=mock");
 

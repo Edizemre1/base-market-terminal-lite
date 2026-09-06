@@ -20,6 +20,7 @@
     "test:quality": "node --test tests/market-quality-contract.test.mjs",
     "test:recovery": "node --test tests/performance-market-visibility-contract.test.mjs",
     "test:wallet": "node --test --test-concurrency=1 tests/wallet-trade-flow-contract.test.mjs",
+    "test:account": "node --experimental-strip-types --test --test-concurrency=1 tests/account-profile-contract.test.mjs",
     "test:providers": "playwright test -c playwright.provider.config.ts",
     "test:e2e": "playwright test",
     "test": "npm run test:e2e",

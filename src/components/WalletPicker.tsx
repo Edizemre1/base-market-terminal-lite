@@ -25,8 +25,7 @@ export function WalletPicker() {
   const [copied, setCopied] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<TokenBalanceState>({ status: "idle" });
   const tokenRequestRef = useRef(0);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const { pickerOpen, closePicker } = wallet;
+  const { pickerOpen } = wallet;
   const installed = useMemo(() => wallet.providers.filter((provider) => provider.compatibility === "verified"), [wallet.providers]);
   const otherInstalled = useMemo(() => wallet.providers.filter((provider) => provider.compatibility !== "verified"), [wallet.providers]);
 
@@ -59,47 +58,20 @@ export function WalletPicker() {
     return () => { tokenRequestRef.current += 1; };
   }, [loadTokenBalance, pickerOpen]);
 
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const dialog = dialogRef.current;
-    const previousFocus = document.activeElement as HTMLElement | null;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') ?? []);
-    focusable()[0]?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePicker();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [closePicker, pickerOpen]);
-
   if (!pickerOpen) return null;
   const connected = wallet.accountConnected && Boolean(wallet.address);
   const reconnectable = Boolean(wallet.selectedProviderId && ["reconnect_required", "locked_or_no_accounts", "disconnected_by_user", "provider_error"].includes(wallet.status));
 
   return (
     <div className="fixed inset-0 z-layer-modal grid place-items-center bg-surface-scrim/75 p-3 backdrop-blur-sm" data-testid="wallet-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) wallet.closePicker(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(connected ? "wallet.detailsTitle" : "wallet.pickerTitle")} data-testid="wallet-picker" data-wallet-status={wallet.status} data-balance-status={wallet.balanceStatus} data-overlay-root="wallet_picker" className="max-h-[min(760px,92vh)] w-full max-w-[540px] overflow-y-auto rounded-overlay border border-border-subtle bg-surface-panel p-4 shadow-overlay">
+      <div role="dialog" aria-modal="true" aria-label={t(connected ? "wallet.detailsTitle" : "wallet.pickerTitle")} data-testid="wallet-picker" data-wallet-status={wallet.status} data-balance-status={wallet.balanceStatus} data-overlay-root="wallet_picker" className="max-h-[min(760px,92vh)] w-full max-w-[540px] overflow-y-auto rounded-overlay border border-border-subtle bg-surface-panel p-4 shadow-overlay">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-meta font-bold uppercase tracking-eyebrow text-content-secondary">Mergen Wallet</p>
             <h2 className="mt-1 text-title-sm font-semibold text-content-primary">{t(connected ? "wallet.detailsTitle" : "wallet.pickerTitle")}</h2>
-            <p className="mt-1 max-w-[440px] text-label leading-5 text-content-secondary">{t(connected ? "wallet.publicAddressOnly" : "wallet.pickerBody")}</p>
+            <p className="mt-1 max-w-[440px] text-label leading-5 text-content-secondary">{t(connected ? "wallet.publicAddressOnly" : "wallet.pickerBodySeparated")}</p>
           </div>
-          <button type="button" onClick={wallet.closePicker} className="grid h-9 w-9 shrink-0 place-items-center rounded-pill bg-surface-interactive text-content-secondary hover:text-content-primary" aria-label={t("wallet.closePicker")}><X size={15} /></button>
+          <button type="button" onClick={wallet.closePicker} className="grid h-control-touch w-control-touch shrink-0 place-items-center rounded-pill bg-surface-interactive text-content-secondary hover:text-content-primary" aria-label={t("wallet.closePicker")} data-overlay-autofocus><X size={15} /></button>
         </div>
 
         {connected && wallet.address ? renderConnectedWalletDetails(tokenBalance, async () => { await Promise.all([wallet.refreshBalance(), loadTokenBalance()]); }, copied, async () => { try { await navigator.clipboard.writeText(wallet.address!); setCopied(true); window.setTimeout(() => setCopied(false), 1_500); } catch { setCopied(false); } }) : <>

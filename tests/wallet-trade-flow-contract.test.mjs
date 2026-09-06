@@ -31,22 +31,21 @@ test("wallet details expose origin, exact balances and app-local disconnect", ()
   assert.match(button, /selectedProvider\?\.name/u);
 });
 
-test("Trade remains globally visible and defaults to exact Base USDC to WETH", () => {
+test("Trade stays asset-scoped and preserves the exact Base USDC to WETH fallback", () => {
   const terminal = read("src/components/BaseTerminal.tsx");
   const dock = read("src/components/base-terminal/TradeDock.tsx");
   const surface = read("src/components/base-terminal/TerminalMarketSurface.tsx");
   const inspector = read("src/components/base-terminal/ContextInspector.tsx");
 
-  assert.match(terminal, /data-testid="global-trade-button"/u);
+  assert.doesNotMatch(terminal, /global-trade-button|GlobalTradeEntry/u);
   assert.match(terminal, /BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"/u);
   assert.match(terminal, /BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006"/u);
   assert.match(terminal, /return buildDefaultTradeContext\(selectedPairWithLiveChart\)/u);
-  assert.match(terminal.match(/if \(!selectedPairWithLiveChart\)[\s\S]*?const inspectorOpen/u)?.[0] ?? "", /GlobalTradeEntry pair=\{defaultTradePair\}/u);
   assert.doesNotMatch(terminal.match(/const openTrade[\s\S]*?\n  \}, \[handleSelectPairById/u)?.[0] ?? "", /rankingEligibility/u);
   assert.match(dock, /type SpendTokenKey = "USDC" \| "WETH"/u);
   assert.match(dock, /useState<SpendTokenKey>\("USDC"\)/u);
   assert.match(dock, /data-reason-code=\{quoteFailureCode\}/u);
-  assert.match(surface, /hasExactTradeTarget\(pair, opportunity\)/u);
+  assert.match(surface, /canCheckQuote = hasExactTradeTarget\(pair, opportunity\)/u);
   assert.match(inspector, /data-testid="inspector-trade-cta"/u);
   assert.match(inspector, /data-testid="inspector-technical-details"/u);
 });

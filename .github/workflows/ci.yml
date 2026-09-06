@@ -81,6 +81,9 @@ jobs:
       - name: Wallet session and visible Trade contracts
         run: npm run test:wallet
 
+      - name: Canonical Mergen account and profile contracts
+        run: npm run test:account
+
       - name: Lint
         run: npm run lint
 

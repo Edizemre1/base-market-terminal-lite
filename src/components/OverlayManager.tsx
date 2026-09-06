@@ -19,8 +19,10 @@ export type OverlayType =
   | "filters"
   | "columns"
   | "market_inspector"
+  | "market_board"
   | "pool_drawer"
   | "trade_drawer"
+  | "mergen_profile"
   | "wallet_picker"
   | "transaction_review";
 
@@ -46,9 +48,9 @@ type OverlayContextValue = {
 };
 
 const NONE: OverlayEntry = { type: "none" };
-const MODALS = new Set<OverlayType>(["wallet_picker", "transaction_review"]);
-const DRAWERS = new Set<OverlayType>(["market_inspector", "pool_drawer", "trade_drawer"]);
-const MOBILE_SHEETS = new Set<OverlayType>([...DRAWERS, "filters", "columns"]);
+const SECONDARY_OVERLAYS = new Set<OverlayType>(["filters", "columns", "transaction_review"]);
+const PRIMARY_OVERLAYS = new Set<OverlayType>(["market_inspector", "market_board", "pool_drawer", "trade_drawer", "mergen_profile", "wallet_picker"]);
+const MOBILE_SHEETS = new Set<OverlayType>([...PRIMARY_OVERLAYS, "filters", "columns"]);
 const OverlayContext = createContext<OverlayContextValue | undefined>(undefined);
 
 export function OverlayProvider({ children }: { children: ReactNode }) {
@@ -71,13 +73,14 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       if (current.type === "none") {
         returnFocusRef.current = trigger;
       }
-      const nestedContext = (MODALS.has(type) && DRAWERS.has(current.type)) || (type === "pool_drawer" && current.type === "market_inspector");
+      const nestedContext = SECONDARY_OVERLAYS.has(type) && PRIMARY_OVERLAYS.has(current.type);
       if (nestedContext) {
         modalReturnFocusRef.current = trigger;
         suspendedRef.current = current;
         setSuspended(current);
       }
-      else if (!MODALS.has(type)) {
+      else {
+        if (PRIMARY_OVERLAYS.has(type) && !trigger?.closest("[data-overlay-root]")) returnFocusRef.current = trigger;
         suspendedRef.current = undefined;
         setSuspended(undefined);
       }
@@ -158,7 +161,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (active.type === "none") return;
     const isMobileSheet = MOBILE_SHEETS.has(active.type) && window.matchMedia("(max-width: 1023px)").matches;
-    if (!MODALS.has(active.type) && !isMobileSheet) return;
+    if (!PRIMARY_OVERLAYS.has(active.type) && !SECONDARY_OVERLAYS.has(active.type) && !isMobileSheet) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previousOverflow; };

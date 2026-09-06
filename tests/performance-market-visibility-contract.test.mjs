@@ -34,17 +34,20 @@ test("last-good store reads are cached by exact file identity and shared by pric
   assert.match(provider, /compactMarketTerminalSnapshot[\s\S]*?qualityBand === "REJECTED"/);
 });
 
-test("market visibility stays separate from trade eligibility and old filters migrate", async () => {
-  const [surface, wall, filters] = await Promise.all([
+test("market visibility stays separate from asset-scoped trade eligibility and old filters migrate", async () => {
+  const [surface, wall, filters, inspector] = await Promise.all([
     source("src/components/base-terminal/TerminalMarketSurface.tsx"),
     source("src/lib/base-terminal/liveMarketWall.ts"),
-    source("src/lib/base-terminal/terminalMarket.ts")
+    source("src/lib/base-terminal/terminalMarket.ts"),
+    source("src/components/base-terminal/ContextInspector.tsx")
   ]);
   assert.match(surface, /market-board:v6/);
   assert.match(filters, /qualityView: "all"/);
   assert.match(wall, /pair\.priceChanges\?\.h24/);
   assert.match(wall, /liquidity_leader/);
-  assert.match(surface, /tradeAllowed = hasExactTradeTarget\(pair, opportunity\)/);
+  assert.doesNotMatch(surface, /tradeAllowed = hasExactTradeTarget/);
+  assert.match(inspector, /exactTradeTarget = hasExactTradeTarget\(pair, opportunity\)/);
+  assert.match(inspector, /data-testid="inspector-trade-cta"/);
 });
 
 test("live values update independently while queueing only locks placement", async () => {

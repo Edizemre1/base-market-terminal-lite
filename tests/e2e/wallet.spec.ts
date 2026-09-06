@@ -91,16 +91,17 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
 
-  test("keeps Trade visible and opens exact default USDC to WETH without automatic wallet or quote calls", async ({ page }) => {
+  test("keeps Trade asset-scoped without automatic wallet or quote calls", async ({ page }) => {
     let quoteRequests = 0;
     await page.route("**/api/quote", (route) => { quoteRequests += 1; return route.fulfill({ status: 500, json: { code: "provider-unavailable" } }); });
     await installVerifiedWalletStub(page);
     await page.goto("/terminal?data=mock");
-    await expect(page.getByTestId("global-trade-button")).toBeVisible();
-    await page.getByTestId("global-trade-button").click();
+    await expect(page.getByTestId("global-trade-button")).toHaveCount(0);
+    await page.getByTestId("matrix-row-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
+    await page.getByTestId("inspector-trade-cta").click();
     await expect(page.getByTestId("trade-dock")).toBeVisible();
     await expect(page.getByTestId("trade-spend-token")).toHaveValue("USDC");
-    await expect(page.getByTestId("trade-dock")).toContainText("USDC → WETH");
+    await expect(page.getByTestId("trade-dock")).toContainText("USDC → PEPE");
     expect(await walletMethods(page)).toEqual([]);
     expect(quoteRequests).toBe(0);
   });

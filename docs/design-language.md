@@ -10,7 +10,7 @@ This is the canonical design-language contract for Base Terminal. It applies to 
 4. Controls and overlays share one behavior contract.
 5. Every viewport and language preserves the same decision order.
 
-The terminal remains a live, information-rich workspace. Six simultaneous Live Market Wall lanes, Live Pulse, Market Board, pair selection, Inspector, Pair Workspace, wallet and deliberate trade lifecycle are product architecture and must not be collapsed into a generic dashboard.
+The terminal remains a live, information-rich workspace. Its persistent decision order is compact Live Tape → six-lane Live Market Wall → Market Board. Pair selection, Inspector, Pair Workspace, account, wallet and deliberate trade lifecycle remain available through progressive disclosure rather than competing as equal dashboard layers.
 
 ## Token layers
 
@@ -91,11 +91,10 @@ Compact variants serve rows and lanes. Full variants serve sections, pages and o
 ## Responsive decisions
 
 - Header is 56px; desktop rail is 80px.
-- At 1720px and above, six Live Wall lanes share one row.
-- At 1200–1719px, four lanes are visible before natural continuation.
-- At 900–1199px, three lanes are visible.
-- At 640–899px, two lanes are visible.
-- Mobile shows one full lane and a discoverable next-lane preview.
+- At 1536px and above, six Live Wall lanes share one row.
+- At 1024–1535px, three lanes are visible before natural continuation.
+- At 768–1023px, two lanes are visible.
+- Mobile shows one active lane and a six-option, wrapping lane switcher without horizontal scrolling.
 - Compact Market Board rows are 40px/13px; comfortable rows are 48px/13px.
 - Mobile opportunities use one identity row, a 2×2 evidence grid, signal summary, one primary action and secondary actions through inspect/overflow.
 - Inspector is a fixed 400px desktop drawer and a bottom sheet capped at 92dvh on mobile.
@@ -111,7 +110,13 @@ Compact variants serve rows and lanes. Full variants serve sections, pages and o
 - sheet: maximum 92dvh
 - modal: 480–560px for truly modal decisions
 
-All overlays share header anatomy, close placement, surface, scrim, footer order, focus trap, focus return, Escape and outside-click rules. Only one primary overlay is active; wallet and review modals suspend and restore the drawer through `OverlayManager`.
+All overlays share header anatomy, close placement, surface, scrim, footer order, focus trap, focus return, Escape and outside-click rules. Only one primary overlay is active: Market Inspector, Market Board sheet, Pool Drawer, Trade Drawer, Mergen Profile or Wallet Picker. Opening any primary overlay replaces the previous primary overlay. Only contextual secondary decisions—Board filters/columns and transaction review—may suspend and restore their owning primary overlay through `OverlayManager`; their DOM is portalled outside the suspended surface.
+
+## Canonical account contract
+
+Mergen Account Service/Profile Contract is the sole account truth. `mergen.finance` presents it and Base Terminal consumes its versioned projection. Wallet state is a separate transaction capability and can never create, name or authenticate a Mergen profile. Base Terminal stores no session token or profile in Web Storage and shows no fallback identity when the canonical contract is unavailable.
+
+The profile surface uses the canonical Mergen initials fallback, effective display name, email, member-since timestamp, last-sign-in timestamp and Free/Mergen Pro membership only. Username/handle, image avatar, locale, role and linked-wallet UI stay absent until those fields exist in the canonical contract.
 
 Semantic layers are: base, sticky, shell, popover, drawer, modal, toast and accessibility. Raw z-index is prohibited.
 

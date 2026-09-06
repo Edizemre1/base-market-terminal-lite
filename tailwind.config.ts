@@ -92,6 +92,9 @@ const config: Config = {
         "sheet-max": "var(--component-sheet-max-height)",
         "chart-toolbar": "var(--component-chart-toolbar-offset)"
       },
+      maxWidth: {
+        account: "var(--component-account-control-width)"
+      },
       zIndex: {
         "layer-base": "0",
         "layer-sticky": "10",

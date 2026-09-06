@@ -8,7 +8,7 @@ import type { MarketSignalBadge } from "../../src/lib/base-terminal/marketSignal
 test.describe("information architecture and overlay hierarchy", () => {
   test("keeps the canonical overlay enum explicit", () => {
     const source = readFileSync(path.resolve(process.cwd(), "src/components/OverlayManager.tsx"), "utf8");
-    for (const state of ["none", "signal_details", "filters", "columns", "market_inspector", "pool_drawer", "trade_drawer", "wallet_picker", "transaction_review"]) {
+    for (const state of ["none", "signal_details", "filters", "columns", "market_inspector", "market_board", "pool_drawer", "trade_drawer", "mergen_profile", "wallet_picker", "transaction_review"]) {
       expect(source).toContain(`\"${state}\"`);
     }
   });
@@ -25,7 +25,7 @@ test.describe("information architecture and overlay hierarchy", () => {
     expect(presentMarketSignals([neutral, primary], "inspectorDetails")).toHaveLength(2);
   });
 
-  test("opens one explicit main layer, restores suspended trade, and preserves route history", async ({ page }) => {
+  test("replaces primary overlays while restoring only nested decision sheets", async ({ page }) => {
     await page.goto("/terminal?data=mock");
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "none");
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
@@ -40,7 +40,10 @@ test.describe("information architecture and overlay hierarchy", () => {
     await page.getByTestId("context-inspector").getByRole("tab", { name: /Pools|Havuzlar/ }).click();
     await page.getByTestId("context-inspector").getByRole("button", { name: /execution pool|işlem havuzu/i }).click();
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "pool_drawer");
+    await expect(page.getByTestId("context-inspector")).toHaveCount(0);
     await page.keyboard.press("Escape");
+    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "none");
+    await inspect.click();
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
     await page.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel Bakış/ }).click();
 
@@ -53,11 +56,9 @@ test.describe("information architecture and overlay hierarchy", () => {
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "wallet_picker");
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await page.keyboard.press("Escape");
-    await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
-    await expect(walletTrigger).toBeFocused();
-    await page.keyboard.press("Escape");
     await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "none");
     await expect(page.getByTestId("trade-dock")).toHaveCount(0);
+    await expect(inspect).toBeFocused();
   });
 
   test("keeps the pair workspace route-backed across browser back and forward", async ({ page }) => {
@@ -88,7 +89,7 @@ test.describe("information architecture and overlay hierarchy", () => {
         if (url.pathname === "/terminal" && request.resourceType() !== "document") terminalRequests.push(request.url());
       });
       await page.goto("/terminal?data=mock");
-      await expect(page.getByTestId("market-matrix")).toBeVisible();
+      await expect(page.getByTestId(viewport.width < 768 ? "open-market-board" : "market-matrix")).toBeVisible();
       await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-ready", "true");
       const samples: RoutePerformanceSample[] = [];
       const routeCycle = ["markets", "terminal", "watchlist", "terminal", "portfolio", "terminal", "alerts", "terminal"];
@@ -156,7 +157,8 @@ async function measureClientRoute(page: import("@playwright/test").Page, target:
     };
     await waitForCommit();
     const commitMs = performance.now() - start;
-    const meaningfulSelector = nextView === "portfolio" ? "[data-testid='portfolio-workspace']" : nextView === "alerts" ? "[data-testid='alerts-workspace']" : nextView === "watchlist" ? "[data-testid='market-matrix']" : "[data-testid='market-matrix']";
+    const mobile = innerWidth < 768;
+    const meaningfulSelector = nextView === "portfolio" ? "[data-testid='portfolio-workspace']" : nextView === "alerts" ? "[data-testid='alerts-workspace']" : mobile ? "[data-testid='open-market-board']" : "[data-testid='market-matrix']";
     while (!document.querySelector(meaningfulSelector)) await new Promise(requestAnimationFrame);
     const contentMs = performance.now() - start;
     await new Promise(requestAnimationFrame);
@@ -171,7 +173,7 @@ async function measureInspectorRoute(page: import("@playwright/test").Page) {
       const resources = performance.getEntriesByType("resource").filter((entry) => entry.startTime >= start) as PerformanceResourceTiming[];
       return { target: routeTarget, urlMs, commitMs, contentMs, interactiveMs: performance.now() - start, requestCount: resources.length, transferBytes: resources.reduce((total, resource) => total + resource.transferSize, 0), ttfbMs: resources.reduce((highest, resource) => Math.max(highest, resource.responseStart - resource.requestStart), 0) };
     };
-    const candidates = [...document.querySelectorAll<HTMLElement>("[data-testid^='matrix-row-'], [data-testid^='market-card-']")];
+    const candidates = [...document.querySelectorAll<HTMLElement>("[data-testid^='matrix-row-'], [data-testid^='market-card-'], [data-testid^='wall-row-']")];
     const row = candidates.find((candidate) => candidate.offsetParent !== null);
     const button = row?.querySelector<HTMLButtonElement>("[data-testid='open-market-inspector']");
     if (!button) throw new Error("Missing visible market row Inspector trigger");
