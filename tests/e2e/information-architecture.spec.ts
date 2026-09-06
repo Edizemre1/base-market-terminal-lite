@@ -178,9 +178,10 @@ async function measureInspectorRoute(page: import("@playwright/test").Page) {
     let button = findVisibleInspectorTrigger();
     if (!button) {
       const boardTrigger = document.querySelector<HTMLButtonElement>("[data-testid='open-market-board']");
-      if (boardTrigger?.offsetParent !== null) {
+      const visibleBoardTrigger = boardTrigger?.offsetParent !== null ? boardTrigger : undefined;
+      if (visibleBoardTrigger) {
         const openStart = performance.now();
-        boardTrigger.click();
+        visibleBoardTrigger.click();
         while (document.querySelector<HTMLElement>("[data-overlay-state]")?.dataset.overlayState !== "market_board") await nextFrame(openStart, "Market board open");
         button = findVisibleInspectorTrigger();
       }
