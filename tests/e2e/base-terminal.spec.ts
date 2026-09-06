@@ -604,6 +604,8 @@ test.describe("living Base terminal", () => {
       await expect(detailPage.getByTestId("market-signal-popover")).toHaveCount(0);
       await captureVisualEvidence(detailPage, testInfo.outputPath(`pool-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
+      await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "none");
+      await detailPage.getByTestId("matrix-row-blob-usdc").getByTestId("open-market-inspector").click();
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "market_inspector");
       await detailPage.getByTestId("context-inspector").getByRole("tab", { name: /Overview|Genel Bakış/ }).click();
       await detailPage.getByTestId("inspector-trade-cta").click();
