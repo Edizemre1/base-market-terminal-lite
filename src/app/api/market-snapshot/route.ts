@@ -13,10 +13,20 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const mode = resolveUrlMarketDataMode(searchParams.get("data"));
-    const snapshot = await getMarketTerminalSnapshot(mode);
+    const snapshot = await getMarketTerminalSnapshot(mode, { force: searchParams.get("onchain") === "1" });
+    const etag = `W/${JSON.stringify([
+      snapshot.version,
+      snapshot.freshness,
+      snapshot.sourceHealth?.marketProvider,
+      snapshot.sourceHealth?.collector,
+      snapshot.sourceHealth?.reason
+    ].join("|"))}`;
+    if (request.headers.get("if-none-match") === etag) {
+      return new Response(null, { status: 304, headers: { ...MARKET_SNAPSHOT_HEADERS, ETag: etag } });
+    }
 
     return NextResponse.json(snapshot, {
-      headers: MARKET_SNAPSHOT_HEADERS
+      headers: { ...MARKET_SNAPSHOT_HEADERS, ETag: etag }
     });
   } catch {
     return NextResponse.json(

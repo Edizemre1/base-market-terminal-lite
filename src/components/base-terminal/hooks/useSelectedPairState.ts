@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { MarketTerminalSnapshot } from "@/data/providers";
-import { getPairFromParam, getShareablePairKey } from "@/lib/base-terminal/pairs";
+import { getPairFromParam } from "@/lib/base-terminal/pairs";
 
 export function useSelectedPairState({
   initialSnapshot,
@@ -29,23 +29,6 @@ export function useSelectedPairState({
     }
   }, [snapshotData.allPairs, snapshotData.defaultPairId, initialPairParam, selectedPairId]);
 
-  const updatePairQuery = useCallback((pairId: string) => {
-    const nextPair = snapshotRef.current.allPairs.find((pair) => pair.id === pairId);
-
-    if (!nextPair || typeof window === "undefined") {
-      return;
-    }
-
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.set("pair", getShareablePairKey(nextPair));
-
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
-    );
-  }, [snapshotRef]);
-
   const handleSelectPairById = useCallback(
     (pairId: string) => {
       const nextPair = snapshotRef.current.allPairs.find((pair) => pair.id === pairId);
@@ -55,9 +38,8 @@ export function useSelectedPairState({
       }
 
       setSelectedPairId(nextPair.id);
-      updatePairQuery(nextPair.id);
     },
-    [snapshotRef, updatePairQuery]
+    [snapshotRef]
   );
 
   const selectedPair =

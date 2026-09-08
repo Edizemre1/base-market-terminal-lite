@@ -1,0 +1,26 @@
+export type QualityBand = "RANKED" | "EMERGING" | "DETECTED" | "REJECTED";
+export type LiquidityState = "usable_liquidity" | "thin_liquidity" | "liquidity_unknown" | "zero_liquidity" | "conflicting_liquidity" | "stale_liquidity";
+export type ObservedPriceUsd = {
+  value: number;
+  rawValue: string;
+  provider: string;
+  poolKey: string;
+  poolAddress: string;
+  observedAt: string;
+  receivedAt?: string;
+  freshness: "fresh" | "delayed";
+  liquidityUsd?: number;
+  reasonCode: "exact_provider_observed_price" | "exact_onchain_observed_price";
+  blockNumber?: number;
+  blockHash?: string;
+  sourceMethod?: string;
+  executable: false;
+};
+export const MARKET_QUALITY_THRESHOLDS: Readonly<Record<string, number>>;
+export const QUALITY_BANDS: readonly QualityBand[];
+export const LIQUIDITY_STATES: readonly LiquidityState[];
+export function classifyLiquidityState(values: Array<number | undefined>, minimumLiquidityUsd?: number): LiquidityState;
+export function buildObservedPriceUsd(tokenAddress: string, pools: unknown[], now?: Date, options?: { freshMaximumAgeMs?: number; maximumAgeMs?: number }): ObservedPriceUsd | undefined;
+export function evaluateOpportunityQuality(input: Record<string, unknown>): { band: QualityBand; highQualityEmerging: boolean; rankingEligible: boolean; exclusionReason?: string; displayMode: "canonical" | "observed_thin" | "pending" };
+export function categoryEligibility(input: Record<string, unknown>): { new: boolean; detected: boolean; gainersLosers: boolean; volume: boolean; liquidity: boolean; mostTraded: boolean };
+export function bestKnownLiquidityUsd(pools: unknown[]): number | undefined;

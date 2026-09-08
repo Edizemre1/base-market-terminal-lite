@@ -2,14 +2,20 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { StatusPill, TerminalPanel } from "@/components/TerminalWidgets";
 import { getMarketTerminalSnapshot, resolveUrlMarketDataMode } from "@/data/providers";
-import { APP_DESCRIPTION, APP_NAME, APP_VERSION } from "@/lib/appInfo";
+import { APP_NAME, APP_VERSION } from "@/lib/appInfo";
+import { translate } from "@/i18n/dictionaries";
+import { getInitialLocale } from "@/i18n/server";
+import { getTradeCapabilities } from "@/lib/trade/quoteProviders";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Status",
-  description: `Public read-only demo status for ${APP_NAME}.`
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getInitialLocale();
+  return {
+    title: { absolute: `${translate(locale, "status.h1")} | ${APP_NAME}` },
+    description: `Market data and transaction capability status for ${APP_NAME}.`
+  };
+}
 
 type StatusPageProps = {
   searchParams?: Promise<{
@@ -21,63 +27,59 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   const params = await searchParams;
   const mode = resolveUrlMarketDataMode(params?.data);
   const snapshot = await getMarketTerminalSnapshot(mode);
+  const trade = getTradeCapabilities();
+  const locale = await getInitialLocale();
+  const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
   const lastUpdate =
-    snapshot.generatedAt === "mock-static" ? "Static mock snapshot" : snapshot.generatedAt;
+    snapshot.generatedAt === "mock-static" ? t("status.staticSnapshot") : snapshot.generatedAt;
 
   return (
-    <main className="min-h-[calc(100vh-40px)] bg-base-black p-2">
+    <main id="terminal-main" tabIndex={-1} className="min-h-[calc(100vh-40px)] scroll-mt-16 bg-surface-canvas p-2 outline-none">
+      <h1 className="sr-only">{t("status.h1")}</h1>
       <section className="grid gap-2 xl:grid-cols-[320px_minmax(0,1fr)]">
         <TerminalPanel
-          label="STATUS"
-          title="Public demo status"
-          meta={<StatusPill label="Read-only" />}
+          label={t("status.label")}
+          title={t("status.title")}
+          meta={<StatusPill label={trade.transactionExecutionEnabled ? t("status.stagingExecution") : t("status.readOnly")} tone={trade.transactionExecutionEnabled ? "amber" : "muted"} />}
         >
           <div className="space-y-2">
-            <StatusRow label="App" value={APP_NAME} />
-            <StatusRow label="Version" value={`v${APP_VERSION}`} />
-            <StatusRow label="State" value="Operational demo" tone="mint" />
-            <StatusRow label="Boundary" value="No transaction execution" tone="amber" />
+            <StatusRow label={t("status.app")} value={APP_NAME} />
+            <StatusRow label={t("status.version")} value={`v${APP_VERSION}`} />
+            <StatusRow label={t("status.state")} value={t("status.operational")} tone="mint" />
+            <StatusRow label={t("status.boundary")} value={trade.transactionExecutionEnabled ? t("status.explicitTransactions") : t("status.noTransactions")} tone="amber" />
           </div>
-          <p className="mt-3 text-[11px] leading-4 text-base-muted">{APP_DESCRIPTION}</p>
           <Link
-            href="/"
-            className="mt-3 inline-flex border border-base-line bg-base-panel px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-base-mint hover:border-base-mint hover:text-base-text"
+            href="/terminal"
+            className="mt-3 inline-flex border border-border-subtle bg-surface-panel px-2 py-1 text-meta uppercase tracking-eyebrow text-brand-accent hover:border-border-strong hover:text-content-primary"
           >
-            Open terminal
+            {t("status.openTerminal")}
           </Link>
         </TerminalPanel>
 
         <div className="space-y-2">
           <TerminalPanel
-            label="DATA"
-            title="Read-only data surface"
+            label={t("status.data")}
+            title={t("status.dataTitle")}
             meta={<StatusPill label={snapshot.feedStatusLabel} tone="mint" />}
           >
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <StatusRow label="Data mode" value={snapshot.mode} />
-              <StatusRow label="Provider mode" value={snapshot.providerName} />
-              <StatusRow label="Last successful data update" value={lastUpdate} />
+              <StatusRow label={t("status.dataMode")} value={snapshot.mode} />
+              <StatusRow label={t("status.provider")} value={snapshot.providerName} />
+              <StatusRow label={t("status.lastUpdate")} value={lastUpdate} />
               <StatusRow
-                label="Fallback"
-                value={snapshot.fallbackReason ?? "None active"}
+                label={t("status.fallback")}
+                value={snapshot.fallbackReason ? translate(locale, "common.delayed") : t("status.noneActive")}
                 tone={snapshot.fallbackReason ? "amber" : "mint"}
               />
             </div>
           </TerminalPanel>
 
-          <TerminalPanel label="BOUNDARY" title="Public demo boundary">
+          <TerminalPanel label={t("status.boundary")} title={t("status.boundaryTitle")}>
             <div className="grid gap-1 md:grid-cols-2">
-              {[
-                "Swap UI is disabled",
-                "No wallet connection is required",
-                "No signing or approvals are enabled",
-                "No transaction construction exists",
-                "No API keys or secrets are exposed",
-                "Public/provider data only"
-              ].map((item) => (
+              {t(trade.transactionExecutionEnabled ? "status.executionItems" : "status.boundaryItems").split("|").map((item) => (
                 <div
                   key={item}
-                  className="border border-base-line bg-base-elevated px-2 py-1.5 text-[11px] text-base-text"
+                  className="border border-border-subtle bg-surface-interactive px-2 py-2 text-meta text-content-primary"
                 >
                   {item}
                 </div>
@@ -86,14 +88,13 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
           </TerminalPanel>
 
           <TerminalPanel
-            label="QUALITY"
-            title="Regression coverage"
-            meta={<StatusPill label="CI smoke tests" tone="blue" />}
+            label={t("status.quality")}
+            title={t("status.qualityTitle")}
+            meta={<StatusPill label={t("status.qualityBadge")} tone="blue" />}
           >
-            <p className="text-[11px] leading-4 text-base-muted">
-              Pull requests run typecheck, lint, build, and Playwright smoke tests for the
-              read-only terminal flows. The health endpoint returns safe metadata at{" "}
-              <Link href="/api/health" className="font-mono text-base-mint hover:text-base-text">
+            <p className="text-meta leading-4 text-content-secondary">
+              {t("status.qualityBody")}{" "}
+              <Link href="/api/health" className="font-mono text-brand-accent hover:text-content-primary">
                 /api/health
               </Link>
               .
@@ -115,15 +116,15 @@ function StatusRow({
   tone?: "default" | "mint" | "amber";
 }) {
   return (
-    <div className="border border-base-line bg-base-elevated p-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-base-muted">{label}</p>
+    <div className="border border-border-subtle bg-surface-interactive p-2">
+      <p className="text-meta uppercase tracking-eyebrow text-content-secondary">{label}</p>
       <p
         className={
           tone === "mint"
-            ? "mt-1 break-words font-mono text-[12px] font-semibold text-base-mint"
+            ? "mt-1 break-words font-mono text-label font-semibold text-brand-accent"
             : tone === "amber"
-              ? "mt-1 break-words font-mono text-[12px] font-semibold text-base-amber"
-              : "mt-1 break-words font-mono text-[12px] font-semibold text-base-text"
+              ? "mt-1 break-words font-mono text-label font-semibold text-freshness-delayed"
+              : "mt-1 break-words font-mono text-label font-semibold text-content-primary"
         }
       >
         {value}

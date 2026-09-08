@@ -1,6 +1,6 @@
 import type { BasePair } from "@/types/baseTerminal";
 
-export const mockBasePairs: BasePair[] = [
+const seedMockPairs: BasePair[] = [
   {
     id: "pepe-weth",
     pair: "PEPE / WETH",
@@ -339,20 +339,101 @@ export const mockBasePairs: BasePair[] = [
   }
 ];
 
+// The explicit Mock mode includes enough deterministic rows to exercise the
+// dense terminal and responsive layouts without presenting any row as live.
+export const mockBasePairs: BasePair[] = [
+  ...seedMockPairs.map((pair, index) => ({
+    ...pair,
+    dataSource: "mock" as const,
+    chainId: "base",
+    pairAddress: mockAddress(index + 1),
+    baseTokenAddress: mockAddress(index + 101),
+    quoteTokenAddress: mockAddress(index + 201),
+    priceUsdValue: readMockUsdPrice(pair.priceUsd),
+    liquidityUsd: pair.liquidity,
+    ...buildMockWindows(pair.volume24h ?? 0, pair.change24h ?? 0, index)
+  })),
+  ...Array.from({ length: 18 }, (_, index) => {
+    const source = seedMockPairs[index % seedMockPairs.length];
+    const number = index + 1;
+    const factor = 1 + number / 20;
+    const symbol = `LAB${number}`;
+    const volume24h = Math.round((source.volume24h ?? 0) * factor);
+    return {
+      ...source,
+      dataSource: "mock" as const,
+      priceUsdValue: readMockUsdPrice(source.priceUsd),
+      id: `mock-lab-${number}`,
+      chainId: "base",
+      pairAddress: mockAddress(number + 301),
+      baseTokenAddress: mockAddress(number + 401),
+      quoteTokenAddress: mockAddress(number + 501),
+      pair: `${symbol} / ${source.quoteToken}`,
+      baseToken: symbol,
+      project: `Explicit mock market ${number}`,
+      address: `mock-${number}`,
+      route: `${source.quoteToken} / ${symbol}`,
+      age: `${number + 1}h`,
+      ageMinutes: (number + 1) * 60,
+      poolAge: `${number + 1}h`,
+      volume24h,
+      liquidity: Math.round((source.liquidity ?? 0) * (0.8 + number / 40)),
+      liquidityUsd: Math.round((source.liquidity ?? 0) * (0.8 + number / 40)),
+      inflow24h: Math.round((source.inflow24h ?? 0) * (0.7 + number / 35)),
+      momentumScore: Math.max(1, Math.min(100, (source.momentumScore ?? 0) - number)),
+      chart: source.chart.map((value, chartIndex) => Number((value * (1 + ((number + chartIndex) % 5) / 100)).toFixed(6))),
+      ...buildMockWindows(volume24h, source.change24h ?? 0, number)
+    };
+  })
+];
+
+function readMockUsdPrice(value: string) {
+  const parsed = Number(value.replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function mockAddress(value: number) {
+  return `0x${value.toString(16).padStart(40, "0")}`;
+}
+
+function buildMockWindows(volume24h: number, change24h: number, seed: number) {
+  const transactions24h = 240 + seed * 17;
+  return {
+    priceChanges: {
+      m5: Number((change24h / 18).toFixed(2)),
+      h1: Number((change24h / 5).toFixed(2)),
+      h6: Number((change24h / 2).toFixed(2)),
+      h24: change24h
+    },
+    volumes: {
+      m5: Math.round(volume24h / 180),
+      h1: Math.round(volume24h / 19),
+      h6: Math.round(volume24h / 4),
+      h24: volume24h
+    },
+    txns: {
+      m5: { buys: 3 + seed % 4, sells: 2 + seed % 3 },
+      h1: { buys: 14 + seed, sells: 9 + seed },
+      h6: { buys: 58 + seed * 2, sells: 42 + seed },
+      h24: { buys: Math.ceil(transactions24h * 0.56), sells: Math.floor(transactions24h * 0.44) }
+    }
+  };
+}
+
 export function getDefaultPair() {
   return mockBasePairs[0];
 }
 
 export function getNewPairs() {
-  return [...mockBasePairs].sort((left, right) => left.ageMinutes - right.ageMinutes);
+  return [...mockBasePairs].sort((left, right) => (left.ageMinutes ?? Number.POSITIVE_INFINITY) - (right.ageMinutes ?? Number.POSITIVE_INFINITY));
 }
 
 export function getVolumeInflowPairs() {
-  return [...mockBasePairs].sort((left, right) => right.inflow24h - left.inflow24h);
+  return [...mockBasePairs].sort((left, right) => (right.inflow24h ?? 0) - (left.inflow24h ?? 0));
 }
 
 export function getMomentumPairs() {
   return [...mockBasePairs].sort(
-    (left, right) => right.momentumScore - left.momentumScore
+    (left, right) => (right.momentumScore ?? 0) - (left.momentumScore ?? 0)
   );
 }

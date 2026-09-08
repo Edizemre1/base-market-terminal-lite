@@ -10,6 +10,7 @@ import {
   readArray,
   readRecord
 } from "../responseValidation";
+import { normalizeOhlcvCandles, parseStrictFiniteNumber } from "@/lib/marketMath";
 
 const GECKOTERMINAL_API_BASE = "https://api.geckoterminal.com/api/v2";
 const BASE_NETWORK = "base";
@@ -73,7 +74,6 @@ function getTimeframeConfig(timeframe: ChartTimeframe | undefined) {
       return { path: "hour", aggregate: 1 };
   }
 }
-
 export function parseGeckoTerminalOhlcvResponse(payload: unknown): PairChartCandle[] {
   const response = readRecord(payload);
   const data = readRecord(response?.data);
@@ -91,10 +91,9 @@ async function fallback(pair: ChartPairInput, unavailableReason: string) {
 }
 
 function normalizeOhlcvList(ohlcvList: unknown[]): PairChartCandle[] {
-  return ohlcvList
+  return normalizeOhlcvCandles(ohlcvList
     .map(normalizeOhlcvRow)
-    .filter((candle): candle is PairChartCandle => Boolean(candle))
-    .sort((left, right) => left.timestamp - right.timestamp);
+    .filter((candle): candle is PairChartCandle => Boolean(candle)));
 }
 
 function normalizeOhlcvRow(row: unknown): PairChartCandle | undefined {
@@ -102,7 +101,9 @@ function normalizeOhlcvRow(row: unknown): PairChartCandle | undefined {
     return undefined;
   }
 
-  const [timestamp, open, high, low, close, volume] = row.map(toNumber);
+  const values = row.slice(0, 6).map(parseStrictFiniteNumber);
+  if (values.some((value) => value === undefined)) return undefined;
+  const [timestamp, open, high, low, close, volume] = values as number[];
 
   if (
     timestamp <= 0 ||
@@ -110,7 +111,9 @@ function normalizeOhlcvRow(row: unknown): PairChartCandle | undefined {
     high <= 0 ||
     low <= 0 ||
     close <= 0 ||
-    high < low
+    high < Math.max(open, close) ||
+    low > Math.min(open, close) ||
+    volume < 0
   ) {
     return undefined;
   }
@@ -121,7 +124,7 @@ function normalizeOhlcvRow(row: unknown): PairChartCandle | undefined {
     high,
     low,
     close,
-    volume: Math.max(0, volume)
+    volume
   };
 }
 
@@ -133,17 +136,4 @@ function getValidPairAddress(pair: ChartPairInput) {
   }
 
   return address.toLowerCase();
-}
-
-function toNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  return 0;
 }
