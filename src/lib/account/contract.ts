@@ -1,4 +1,5 @@
 export const MERGEN_PROFILE_CONTRACT_VERSION = 1 as const;
+export const MERGEN_PROFILE_MAX_UTF8_BYTES = 2_048 as const;
 
 export const MERGEN_ACCOUNT_STATES = [
   "anonymous",
@@ -36,13 +37,15 @@ export type CanonicalProfileClaimV1 = Readonly<{
 }>;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UNSAFE_PROFILE_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
+const UTF8_ENCODER = new TextEncoder();
 
 export function readCanonicalProfileClaim(subject: unknown, value: unknown): CanonicalMergenProfile | undefined {
   if (typeof subject !== "string" || !UUID_PATTERN.test(subject) || !isRecord(value)) return undefined;
   if (!hasExactKeys(value, ["version", "email", "display_name", "member_since", "last_sign_in_at", "membership"])) return undefined;
   if (value.version !== MERGEN_PROFILE_CONTRACT_VERSION) return undefined;
-  const email = readNullableText(value.email, 320);
-  const displayName = readNullableText(value.display_name, 60);
+  const email = readNullableText(value.email, 320, 1_280);
+  const displayName = readNullableText(value.display_name, 60, 240);
   const memberSince = readTimestamp(value.member_since);
   const lastSignInAt = readNullableTimestamp(value.last_sign_in_at);
   if (
@@ -56,6 +59,15 @@ export function readCanonicalProfileClaim(subject: unknown, value: unknown): Can
     lastSignInAt !== value.last_sign_in_at
   ) return undefined;
   if (value.membership !== "free" && value.membership !== "pro") return undefined;
+  const claim: CanonicalProfileClaimV1 = Object.freeze({
+    version: MERGEN_PROFILE_CONTRACT_VERSION,
+    email,
+    display_name: displayName,
+    member_since: memberSince,
+    last_sign_in_at: lastSignInAt,
+    membership: value.membership
+  });
+  if (utf8Bytes(JSON.stringify(claim)) > MERGEN_PROFILE_MAX_UTF8_BYTES) return undefined;
   return Object.freeze({
     version: MERGEN_PROFILE_CONTRACT_VERSION,
     subject,
@@ -80,11 +92,25 @@ export function profileInitials(name: string, email: string): string {
   return (letters.join("") || source[0]).toUpperCase();
 }
 
-function readNullableText(value: unknown, maximumLength: number): string | null | undefined {
+function readNullableText(
+  value: unknown,
+  maximumCodePoints: number,
+  maximumUtf8Bytes: number
+): string | null | undefined {
   if (value === null) return null;
-  if (typeof value !== "string" || value.length > maximumLength) return undefined;
-  const normalized = value.trim();
-  return normalized || null;
+  if (
+    typeof value !== "string" ||
+    value.length > maximumUtf8Bytes ||
+    [...value].length > maximumCodePoints ||
+    utf8Bytes(value) > maximumUtf8Bytes ||
+    value.normalize("NFC") !== value ||
+    UNSAFE_PROFILE_TEXT.test(value)
+  ) return undefined;
+  return value.trim() || null;
+}
+
+function utf8Bytes(value: string): number {
+  return UTF8_ENCODER.encode(value).byteLength;
 }
 
 function readTimestamp(value: unknown): string | undefined {
