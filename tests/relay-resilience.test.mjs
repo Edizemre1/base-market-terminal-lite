@@ -6,6 +6,7 @@ import { getEventListeners } from "node:events";
 import vm from "node:vm";
 import ts from "typescript";
 import { calculateCanonicalUsdcPrice } from "../collector/model.mjs";
+import * as journal from "../collector/journal.mjs";
 
 const require = createRequire(import.meta.url);
 function load(relativePath, mocks = {}) {
@@ -15,7 +16,7 @@ function load(relativePath, mocks = {}) {
   vm.runInNewContext(compiled.outputText, { exports, require: (name) => mocks[name] ?? require(name), process, globalThis: {}, URL, TextEncoder, Response, ReadableStream, setTimeout, clearTimeout, setInterval, clearInterval, console });
   return exports;
 }
-const discovery = load("../src/lib/base-terminal/onchainDiscovery.ts");
+const discovery = load("../src/lib/base-terminal/onchainDiscovery.ts", { "../../../collector/journal.mjs": journal });
 function state() {
   const now = new Date().toISOString();
   return { updatedAt: now, confirmedHead: 100, currentHead: 102, cursors: { one: { blockNumber: 100, updatedAt: now } }, health: { ready: true, storeIntegrity: "ok", lastHeadObservedAt: now }, eventRing: [{ id: "9", type: "pool_enriched", at: now, data: {} }, { id: "10", type: "pool_enriched", at: now, data: {} }] };

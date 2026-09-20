@@ -120,7 +120,7 @@ export class OnchainDiscoveryCollector {
         const outcome = await withDeadline(operation, timeoutMs, { signal, reasonCode: `${name}_cycle_deadline_exceeded` });
         const successAt = new Date().toISOString();
         this.loopHealth[name] = outcome?.loopSkipped
-          ? { ...previous, phase: "idle", consecutiveFailures: 0, circuitState: "closed", retryAt: undefined, stopReason: undefined }
+          ? { ...previous, phase: previous.lastError && !previous.lastError.recoveredAt ? (previous.circuitState === "open" ? "paused" : "retrying") : "idle" }
           : { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, consecutiveFailures: 0, circuitState: "closed", retryAt: undefined, stopReason: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
       } catch (error) {
         if (signal?.aborted) break;
@@ -136,13 +136,22 @@ export class OnchainDiscoveryCollector {
       }
       // Heartbeats are runtime-only and piggyback on the next real durable
       // delta. They must never clone/hash/checkpoint the canonical state.
-      await this.store.updateRuntimeStatus(`loop-${name}-status`, {
+      const runtimeStatus = {
         loops: structuredClone(this.loopHealth),
         rpc: this.transport?.snapshot(),
         lastAnchorLoopFailure: this.loopHealth.anchor?.lastError?.reasonCode,
         lastOnchainStateFailure: this.loopHealth.pool_state?.lastError?.reasonCode,
         runtimeObservedAt: new Date().toISOString()
-      }).catch(() => {});
+      };
+      if (typeof this.store.updateRuntimeStatus === "function") {
+        await this.store.updateRuntimeStatus(`loop-${name}-status`, runtimeStatus).catch(() => {});
+      } else {
+        // Narrow compatibility path for injected/test stores. The production
+        // DurableDiscoveryStore always uses the zero-write runtime API above.
+        await this.store.transact(`loop-${name}-status`, (draft) => {
+          draft.health = { ...draft.health, ...runtimeStatus };
+        }, undefined, { derive: false }).catch(() => {});
+      }
       if (!this.running || signal?.aborted) break;
       const elapsed = Date.now() - startedAt;
       await delay(failureBackoff === undefined ? Math.max(1_000, intervalMs - elapsed) : Math.max(1_000, failureBackoff - elapsed), signal);
