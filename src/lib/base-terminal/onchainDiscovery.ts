@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import path from "node:path";
+import { createJournalCursor, replayJournalChunk, type JournalCursor } from "../../../collector/journal.mjs";
 import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
@@ -132,15 +133,26 @@ export type OnchainStoreState = {
   counters: { reconnectCount: number; reorgCount: number; duplicateDropped: number; malformedRejected: number };
   health: Record<string, unknown> & { ready?: boolean; mode?: string; storeIntegrity?: string };
   integrity: { algorithm: "sha256"; digest: string };
+  persistence?: { journalVersion?: number; appliedSequence?: number; journalDigest?: string; checkpointAt?: string };
 };
 
 export type OnchainStoreReadResult =
   | { ok: true; state: OnchainStoreState }
   | { ok: false; reason: "store_unavailable" | "store_invalid" | "digest_mismatch" | "schema_unsupported" };
 
-type OnchainStoreCache = { file: string; size: number; mtimeMs: number; result: OnchainStoreReadResult };
+type OnchainStoreCache = {
+  file: string;
+  size: number;
+  mtimeMs: number;
+  walFile: string;
+  walSize: number;
+  walMtimeMs: number;
+  walOffset: number;
+  cursor: JournalCursor<OnchainStoreState>;
+  result: OnchainStoreReadResult;
+};
 let onchainStoreCache: OnchainStoreCache | undefined;
-let onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0 };
+let onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0, journalReads: 0, journalBytes: 0, journalTransactions: 0, fullJournalReplays: 0 };
 
 export function getOnchainStoreDirectory() {
   return process.env.ONCHAIN_STORE_PATH?.trim() || path.resolve(process.cwd(), ".data/onchain-discovery");
@@ -149,27 +161,47 @@ export function getOnchainStoreDirectory() {
 export function readOnchainStoreSnapshot(): OnchainStoreReadResult {
   try {
     const file = path.join(getOnchainStoreDirectory(), "state.json");
+    const walFile = path.join(getOnchainStoreDirectory(), "wal.ndjson");
     const stat = statSync(file);
-    if (onchainStoreCache && onchainStoreCache.file === file && onchainStoreCache.size === stat.size && onchainStoreCache.mtimeMs === stat.mtimeMs) {
-      onchainStoreReadMetrics.cacheHits += 1;
-      return onchainStoreCache.result;
+    const walStat = safeStat(walFile);
+    if (onchainStoreCache && onchainStoreCache.file === file && onchainStoreCache.size === stat.size && onchainStoreCache.mtimeMs === stat.mtimeMs && onchainStoreCache.walFile === walFile) {
+      if (walStat.size === onchainStoreCache.walSize && walStat.mtimeMs === onchainStoreCache.walMtimeMs) {
+        onchainStoreReadMetrics.cacheHits += 1;
+        return onchainStoreCache.result;
+      }
+      if (walStat.size >= onchainStoreCache.walOffset) {
+        const appended = readFileRangeSync(walFile, onchainStoreCache.walOffset, walStat.size - onchainStoreCache.walOffset);
+        onchainStoreReadMetrics.journalReads += 1;
+        onchainStoreReadMetrics.journalBytes += appended.length;
+        const replay = replayJournalChunk(onchainStoreCache.cursor, appended);
+        onchainStoreReadMetrics.journalTransactions += replay.applied;
+        onchainStoreCache.walOffset += replay.consumedBytes;
+        onchainStoreCache.walSize = walStat.size;
+        onchainStoreCache.walMtimeMs = walStat.mtimeMs;
+        onchainStoreCache.result = { ok: true, state: onchainStoreCache.cursor.state };
+        return onchainStoreCache.result;
+      }
     }
     onchainStoreReadMetrics.fileReads += 1;
     const serialized = readFileSync(file, "utf8");
     onchainStoreReadMetrics.parses += 1;
     const state = JSON.parse(serialized) as OnchainStoreState;
-    if (state.schemaVersion !== ONCHAIN_STORE_SCHEMA_VERSION) return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: false, reason: "schema_unsupported" });
+    if (state.schemaVersion !== ONCHAIN_STORE_SCHEMA_VERSION) return { ok: false, reason: "schema_unsupported" };
     const expected = digestState(state);
-    if (state.integrity?.digest !== expected) return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: false, reason: "digest_mismatch" });
-    return cacheOnchainStoreResult(file, stat.size, stat.mtimeMs, { ok: true, state });
+    if (state.integrity?.digest !== expected) return { ok: false, reason: "digest_mismatch" };
+    const cursor = createJournalCursor(state);
+    const journal = walStat.size ? readFileRangeSync(walFile, 0, walStat.size) : Buffer.alloc(0);
+    onchainStoreReadMetrics.journalReads += Number(journal.length > 0);
+    onchainStoreReadMetrics.journalBytes += journal.length;
+    onchainStoreReadMetrics.fullJournalReplays += Number(journal.length > 0);
+    const replay = replayJournalChunk(cursor, journal);
+    onchainStoreReadMetrics.journalTransactions += replay.applied;
+    const result = { ok: true as const, state: cursor.state };
+    onchainStoreCache = { file, size: stat.size, mtimeMs: stat.mtimeMs, walFile, walSize: walStat.size, walMtimeMs: walStat.mtimeMs, walOffset: replay.consumedBytes, cursor, result };
+    return result;
   } catch (error) {
     return { ok: false, reason: isMissingFile(error) ? "store_unavailable" : "store_invalid" };
   }
-}
-
-function cacheOnchainStoreResult(file: string, size: number, mtimeMs: number, result: OnchainStoreReadResult) {
-  onchainStoreCache = { file, size, mtimeMs, result };
-  return result;
 }
 
 export function getOnchainStoreReadMetrics() {
@@ -178,7 +210,7 @@ export function getOnchainStoreReadMetrics() {
 
 export function resetOnchainStoreReadCacheForTests() {
   onchainStoreCache = undefined;
-  onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0 };
+  onchainStoreReadMetrics = { fileReads: 0, parses: 0, cacheHits: 0, journalReads: 0, journalBytes: 0, journalTransactions: 0, fullJournalReplays: 0 };
 }
 
 export function mergeOnchainPoolsIntoPairs(providerPairs: BasePair[], result = readOnchainStoreSnapshot()) {
@@ -482,6 +514,31 @@ function shortAddress(value: string) { return `${value.slice(0, 6)}…${value.sl
 function safeLabel(value: string | undefined, address: string) { return value?.trim().slice(0, 24) || shortAddress(address); }
 function formatAge(minutes: number) { return minutes < 60 ? `${minutes}m` : minutes < 1_440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1_440)}d`; }
 function earliestIso(left: string | undefined, right: string) { return left && Date.parse(left) <= Date.parse(right) ? left : right; }
+function safeStat(file: string) {
+  try {
+    const value = statSync(file);
+    return { size: value.size, mtimeMs: value.mtimeMs };
+  } catch (error) {
+    if (isMissingFile(error)) return { size: 0, mtimeMs: 0 };
+    throw error;
+  }
+}
+function readFileRangeSync(file: string, offset: number, length: number) {
+  if (length <= 0) return Buffer.alloc(0);
+  const descriptor = openSync(file, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    let read = 0;
+    while (read < length) {
+      const count = readSync(descriptor, buffer, read, length - read, offset + read);
+      if (count === 0) break;
+      read += count;
+    }
+    return buffer.subarray(0, read);
+  } finally {
+    closeSync(descriptor);
+  }
+}
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException { return Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"); }
 function readPricingTier(value: unknown): "A" | "B" | "C" | "UNPRICED" { if (!value || typeof value !== "object" || !("tier" in value)) return "UNPRICED"; const tier = (value as { tier?: unknown }).tier; return tier === "A" || tier === "B" || tier === "C" ? tier : "UNPRICED"; }
 function positive(value: number | undefined) { return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined; }

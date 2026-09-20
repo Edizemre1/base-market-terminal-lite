@@ -87,8 +87,8 @@ export function decodeFactoryLog(log, registry = FACTORY_REGISTRY) {
   };
 }
 
-export function applyCanonicalEvents(state, events, { now = new Date(), replay = false } = {}) {
-  const next = structuredClone(state);
+export function applyCanonicalEvents(state, events, { now = new Date(), replay = false, mutate = false } = {}) {
+  const next = mutate ? state : structuredClone(state);
   const timestamp = now.toISOString();
   next.events ??= {};
   next.pools ??= {};
@@ -144,15 +144,15 @@ export function applyCanonicalEvents(state, events, { now = new Date(), replay =
   return next;
 }
 
-export function reconcileCanonicalWindow(state, canonicalEvents, fromBlock, toBlock, now = new Date()) {
-  let next = structuredClone(state);
+export function reconcileCanonicalWindow(state, canonicalEvents, fromBlock, toBlock, now = new Date(), { mutate = false } = {}) {
+  let next = mutate ? state : structuredClone(state);
   const timestamp = now.toISOString();
   const canonicalIds = new Set(canonicalEvents.map((event) => event.idempotencyKey));
   for (const event of Object.values(next.events ?? {})) {
     if (event.status !== "confirmed" || event.replay || event.blockNumber < fromBlock || event.blockNumber > toBlock) continue;
     if (!canonicalIds.has(event.idempotencyKey)) orphanPool(next, event.poolKey, event, timestamp);
   }
-  next = applyCanonicalEvents(next, canonicalEvents, { now });
+  next = applyCanonicalEvents(next, canonicalEvents, { now, mutate: true });
   next.reconciliation.push({ kind: "overlap", fromBlock, toBlock, at: timestamp, canonicalCount: canonicalEvents.length });
   next.reconciliation = next.reconciliation.slice(-MAX_RECONCILIATION_RING);
   return next;

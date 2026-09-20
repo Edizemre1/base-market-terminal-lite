@@ -24,6 +24,8 @@ const PUBLIC_RPC_BLOCK_BATCH_CALL_LIMIT = 8;
 const MINIMUM_DISCOVERY_IDLE_MS = 3_000;
 const NORMAL_POLL_INTERVAL_MS = 10_000;
 const NORMAL_DERIVED_INTERVAL_MS = 30_000;
+export const COLLECTOR_FAILURE_OPEN_THRESHOLD = 8;
+export const COLLECTOR_FAILURE_BACKOFF_MAX_MS = 5 * 60_000;
 
 export function nextScanDelayMs(pollIntervalMs, elapsedMs) {
   return Math.max(MINIMUM_DISCOVERY_IDLE_MS, pollIntervalMs - Math.max(0, elapsedMs));
@@ -50,7 +52,9 @@ export function resolveCollectorConfig(environment = process.env) {
     providerTimeoutMs: boundedInteger(environment.ONCHAIN_PROVIDER_TIMEOUT_MS, 8_000, 1_000, 20_000),
     discoveryBatchPaceMs: boundedInteger(environment.ONCHAIN_DISCOVERY_BATCH_PACE_MS, 3_000, 250, 5_000),
     anchorCycleTimeoutMs: boundedInteger(environment.ONCHAIN_ANCHOR_CYCLE_TIMEOUT_MS, 45_000, 10_000, 90_000),
-    anchorLoopIntervalMs: 5_000
+    anchorLoopIntervalMs: 5_000,
+    failureOpenThreshold: boundedInteger(environment.ONCHAIN_FAILURE_OPEN_THRESHOLD, COLLECTOR_FAILURE_OPEN_THRESHOLD, 2, 64),
+    failureBackoffMaxMs: boundedInteger(environment.ONCHAIN_FAILURE_BACKOFF_MAX_MS, COLLECTOR_FAILURE_BACKOFF_MAX_MS, 30_000, COLLECTOR_FAILURE_BACKOFF_MAX_MS)
   };
 }
 
@@ -111,30 +115,37 @@ export class OnchainDiscoveryCollector {
       const startedAt = Date.now();
       const previous = this.loopHealth[name] ?? {};
       this.loopHealth[name] = { ...previous, phase: "running", startedAt: new Date(startedAt).toISOString() };
+      let failureBackoff;
       try {
         const outcome = await withDeadline(operation, timeoutMs, { signal, reasonCode: `${name}_cycle_deadline_exceeded` });
         const successAt = new Date().toISOString();
         this.loopHealth[name] = outcome?.loopSkipped
-          ? { ...previous, phase: previous.lastError && !previous.lastError.recoveredAt ? "retrying" : "idle" }
-          : { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, retryAt: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
+          ? { ...previous, phase: "idle", consecutiveFailures: 0, circuitState: "closed", retryAt: undefined, stopReason: undefined }
+          : { ...this.loopHealth[name], phase: "idle", lastSuccessAt: successAt, consecutiveFailures: 0, circuitState: "closed", retryAt: undefined, stopReason: undefined, lastError: previous.lastError ? { ...previous.lastError, recoveredAt: previous.lastError.recoveredAt ?? successAt } : undefined };
       } catch (error) {
         if (signal?.aborted) break;
-        const failure = { reasonCode: safeError(error), method: error?.method, endpointLabel: error?.endpointLabel, observedAt: new Date().toISOString(), retryAt: new Date(Date.now() + intervalMs).toISOString() };
-        this.loopHealth[name] = { ...this.loopHealth[name], phase: "retrying", lastError: failure, retryAt: failure.retryAt };
+        const reasonCode = safeError(error);
+        const consecutiveFailures = (previous.consecutiveFailures ?? 0) + 1;
+        failureBackoff = failureBackoffMs(consecutiveFailures, this.config.failureBackoffMaxMs);
+        const open = consecutiveFailures >= (this.config.failureOpenThreshold ?? COLLECTOR_FAILURE_OPEN_THRESHOLD);
+        const failure = { reasonCode, class: classifyCollectorFailure(reasonCode), method: error?.method, endpointLabel: error?.endpointLabel, observedAt: new Date().toISOString(), retryAt: new Date(Date.now() + failureBackoff).toISOString() };
+        this.loopHealth[name] = { ...this.loopHealth[name], phase: open ? "paused" : "retrying", consecutiveFailures, circuitState: open ? "open" : "closed", backoffMs: failureBackoff, stopReason: open ? "consecutive_failure_threshold_exceeded" : undefined, lastError: failure, retryAt: failure.retryAt };
         // Structured journal output contains no raw provider message or URL.
-        console.warn(JSON.stringify({ event: "collector_loop_failure", loop: name, ...failure }));
+        console.warn(JSON.stringify({ event: "collector_loop_failure", loop: name, consecutiveFailures, circuitState: open ? "open" : "closed", ...failure }));
         if (name === "ingestion") await this.recordFailure(error).catch(() => {});
       }
-      // Heartbeat is bounded and separate from all remote I/O. The store's
-      // transaction tail serializes publication and preserves the last commit.
-      await this.store.transact(`loop-${name}-status`, (draft) => {
-        draft.health.loops = { ...draft.health.loops, ...structuredClone(this.loopHealth) };
-        draft.health.rpc = this.transport?.snapshot();
-        draft.health.lastAnchorLoopFailure = this.loopHealth.anchor?.lastError?.reasonCode;
-        draft.health.lastOnchainStateFailure = this.loopHealth.pool_state?.lastError?.reasonCode;
-      }, undefined, { derive: false }).catch(() => {});
+      // Heartbeats are runtime-only and piggyback on the next real durable
+      // delta. They must never clone/hash/checkpoint the canonical state.
+      await this.store.updateRuntimeStatus(`loop-${name}-status`, {
+        loops: structuredClone(this.loopHealth),
+        rpc: this.transport?.snapshot(),
+        lastAnchorLoopFailure: this.loopHealth.anchor?.lastError?.reasonCode,
+        lastOnchainStateFailure: this.loopHealth.pool_state?.lastError?.reasonCode,
+        runtimeObservedAt: new Date().toISOString()
+      }).catch(() => {});
       if (!this.running || signal?.aborted) break;
-      await delay(Math.max(1_000, intervalMs - (Date.now() - startedAt)), signal);
+      const elapsed = Date.now() - startedAt;
+      await delay(failureBackoff === undefined ? Math.max(1_000, intervalMs - elapsed) : Math.max(1_000, failureBackoff - elapsed), signal);
     }
   }
 
@@ -208,7 +219,7 @@ export class OnchainDiscoveryCollector {
       chunks += 1;
       state = await this.store.transact("confirmed-log-reconciliation", (draft) => {
         throwIfAborted(signal);
-        const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock);
+        const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock, new Date(), { mutate: true });
         const committedAt = new Date();
         for (const token of confirmed.flatMap((event) => [event.token0, event.token1])) {
           if (!next.tokenMetadata[token]) next.metadataQueue = coalesceBoundedQueue(next.metadataQueue, [{ poolKey: token, tokenAddress: token, blockNumber: cursor }], 256);
@@ -649,7 +660,7 @@ export class OnchainDiscoveryCollector {
         draft.health.lastAnchorLoopFailure = safeError(error);
         draft.counters.enrichmentFailure += 1;
         refreshEnrichmentHealth(draft, this.provider.circuitSnapshot());
-      });
+      }, undefined, { derive: false });
       throw error;
     }
   }
@@ -694,7 +705,7 @@ export class OnchainDiscoveryCollector {
       return;
     }
     await this.store.transact("provisional-websocket-event", (draft) => {
-      const next = applyCanonicalEvents(draft, [{ ...event, provisional: true }]);
+      const next = applyCanonicalEvents(draft, [{ ...event, provisional: true }], { mutate: true });
       next.provisional[event.idempotencyKey] = { ...event, receivedAt: new Date().toISOString() };
       next.provisional = Object.fromEntries(Object.entries(next.provisional).slice(-256));
       next.health.lastEventTime = new Date().toISOString();
@@ -733,8 +744,25 @@ export class OnchainDiscoveryCollector {
       draft.health.lagBlocks = lagBlocks;
       draft.health.lagSeconds = lagBlocks * 2;
       if (this.config.websocketUrl && this.websocket?.readyState !== WebSocket.OPEN) draft.health.mode = "reconnecting";
-    });
+    }, undefined, { derive: false });
   }
+}
+
+export function failureBackoffMs(consecutiveFailures, maximum = COLLECTOR_FAILURE_BACKOFF_MAX_MS, random = Math.random) {
+  const failures = Math.max(1, Math.min(32, Number.isSafeInteger(consecutiveFailures) ? consecutiveFailures : 1));
+  const boundedMaximum = Math.max(1_000, Math.min(COLLECTOR_FAILURE_BACKOFF_MAX_MS, maximum));
+  const base = Math.min(boundedMaximum, 1_000 * 2 ** Math.min(18, failures - 1));
+  const jitter = Math.floor(Math.max(0, Math.min(1, random())) * Math.min(1_000, Math.floor(base * 0.2)));
+  return Math.min(boundedMaximum, base + jitter);
+}
+
+export function classifyCollectorFailure(reasonCode) {
+  const value = String(reasonCode ?? "unknown").toLowerCase();
+  if (value.includes("cursor") && value.includes("validation")) return "cursor_validation";
+  if (value.includes("deadline") || value.includes("timeout")) return "cycle_deadline";
+  if (value === "enospc" || value.includes("disk_full") || value.includes("journal_limit") || value.includes("checkpoint_limit")) return "resource_storage";
+  if (value.includes("rpc") || value.includes("http_") || value.includes("endpoint") || value.includes("cooling")) return "rpc_provider";
+  return "collector_operation";
 }
 
 function semanticSnapshot(state, poolKeys) {

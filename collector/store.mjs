@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { BASE_CHAIN_ID, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
+import { JOURNAL_VERSION, createJournalCursor, journalDigest, journalPayload, replayJournalChunk, stableStringify, validatePatch } from "./journal.mjs";
 import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_PRICE_AGE_MS, MAX_RECONCILIATION_RING } from "./model.mjs";
 import { calculateProofFunnel } from "./proof-coverage.mjs";
 import { resolveOnchainPoolEvidence } from "./onchain-state.mjs";
@@ -14,17 +15,59 @@ export const MAX_PROTECTED_PROVIDER_POOLS = 512;
 export const MAX_MARKET_SNAPSHOTS = 96;
 export const MAX_WAL_LINES = 512;
 export const PROOF_COHORT_RETENTION_MS = 6 * 60 * 60 * 1_000;
+export const MAX_OPPORTUNITIES = 2_000;
+export const MAX_RECORD_BYTES = 512 * 1_024;
+export const MAX_OPPORTUNITIES_BYTES = 16 * 1_024 * 1_024;
+export const MAX_DELTA_BYTES = 24 * 1_024 * 1_024;
+export const MAX_WAL_BYTES = 64 * 1_024 * 1_024;
+export const MAX_CHECKPOINT_BYTES = 64 * 1_024 * 1_024;
+export const DEFAULT_CHECKPOINT_INTERVAL_MS = 15 * 60_000;
+export const DEFAULT_CHECKPOINT_TRANSACTION_LIMIT = 256;
+export const DEFAULT_MAX_PENDING_TRANSACTIONS = 24;
+export const STORE_LIMITS = Object.freeze({
+  pools: MAX_POOLS,
+  canonicalEvents: MAX_CANONICAL_EVENTS,
+  opportunities: MAX_OPPORTUNITIES,
+  metadataQueue: 256,
+  onchainQueue: 512,
+  enrichmentQueue: 512,
+  history: MAX_HISTORY_RING,
+  reconciliation: MAX_RECONCILIATION_RING,
+  relayEvents: MAX_EVENT_RING,
+  marketSnapshots: MAX_MARKET_SNAPSHOTS,
+  recordBytes: MAX_RECORD_BYTES,
+  opportunitiesBytes: MAX_OPPORTUNITIES_BYTES,
+  deltaBytes: MAX_DELTA_BYTES,
+  walBytes: MAX_WAL_BYTES,
+  checkpointBytes: MAX_CHECKPOINT_BYTES
+});
 
 export class DurableDiscoveryStore {
-  constructor(directory) {
+  constructor(directory, options = {}) {
     this.directory = path.resolve(directory);
     this.statePath = path.join(this.directory, "state.json");
     this.walPath = path.join(this.directory, "wal.ndjson");
     this.lockPath = path.join(this.directory, "collector.lock");
+    this.now = options.now ?? (() => new Date());
+    this.checkpointIntervalMs = boundedOption(options.checkpointIntervalMs, DEFAULT_CHECKPOINT_INTERVAL_MS, 1_000, 24 * 60 * 60_000);
+    this.checkpointTransactionLimit = boundedOption(options.checkpointTransactionLimit, DEFAULT_CHECKPOINT_TRANSACTION_LIMIT, 1, 4_096);
+    this.maxPendingTransactions = boundedOption(options.maxPendingTransactions, DEFAULT_MAX_PENDING_TRANSACTIONS, 1, 256);
+    this.metricsLogger = options.metricsLogger === undefined ? console.info : options.metricsLogger;
+    this.metricsLogIntervalMs = boundedOption(options.metricsLogIntervalMs, 60_000, 10_000, 60 * 60_000);
+    this.faultInjector = options.faultInjector;
     this.state = undefined;
     this.lockHandle = undefined;
     this.closed = false;
     this.transactionTail = Promise.resolve();
+    this.pendingTransactions = 0;
+    this.transactionSlotWaiters = [];
+    this.runtimeHealth = {};
+    this.sequence = 0;
+    this.journalChainDigest = undefined;
+    this.lastCheckpointAtMs = 0;
+    this.transactionsSinceCheckpoint = 0;
+    this.walBytes = 0;
+    this.metrics = initialStoreMetrics();
   }
 
   async open() {
@@ -32,8 +75,25 @@ export class DurableDiscoveryStore {
     await this.acquireLock();
     try {
       this.state = await this.loadOrInitialize();
-      await this.compactWal();
-      return structuredClone(this.state);
+      const cursor = createJournalCursor(this.state);
+      let journal = Buffer.alloc(0);
+      try { journal = await readFile(this.walPath); }
+      catch (error) { if (error?.code !== "ENOENT") throw error; }
+      const recoveryStarted = process.hrtime.bigint();
+      const recovery = replayJournalChunk(cursor, journal);
+      if (recovery.incompleteBytes > 0) await truncateDurably(this.walPath, recovery.consumedBytes);
+      this.state = cursor.state;
+      this.sequence = cursor.sequence;
+      this.journalChainDigest = cursor.digest;
+      this.walBytes = recovery.consumedBytes;
+      this.transactionsSinceCheckpoint = recovery.applied;
+      this.lastCheckpointAtMs = Date.parse(this.state.persistence?.checkpointAt ?? this.state.updatedAt);
+      if (!Number.isFinite(this.lastCheckpointAtMs)) this.lastCheckpointAtMs = this.now().getTime();
+      this.metrics.recoveryCount += 1;
+      this.metrics.recoveredTransactions += recovery.applied;
+      this.metrics.recoveryMs += elapsedMs(recoveryStarted);
+      this.metrics.tornTailBytes += recovery.incompleteBytes;
+      return this.read();
     } catch (error) {
       await this.releaseLock();
       throw error;
@@ -42,25 +102,70 @@ export class DurableDiscoveryStore {
 
   read() {
     if (!this.state) throw new Error("Store is not open");
-    return structuredClone(this.state);
+    const snapshot = structuredClone(this.state);
+    if (Object.keys(this.runtimeHealth).length) snapshot.health = mergeHealth(snapshot.health, this.runtimeHealth);
+    return snapshot;
   }
 
   async transact(reason, mutator, afterDerive, options) {
-    const operation = this.transactionTail.then(() => this.performTransaction(reason, mutator, afterDerive, options));
+    if (this.closed) throw new Error("Store is not writable");
+    if (this.pendingTransactions >= this.maxPendingTransactions) {
+      this.metrics.backpressureWaits += 1;
+      await new Promise((resolve) => this.transactionSlotWaiters.push(resolve));
+    }
+    if (this.closed) {
+      this.releaseTransactionSlot();
+      throw new Error("Store is not writable");
+    }
+    this.pendingTransactions += 1;
+    this.metrics.queuePeak = Math.max(this.metrics.queuePeak, this.pendingTransactions);
+    const queuedAt = process.hrtime.bigint();
+    const operation = this.transactionTail.then(() => {
+      this.metrics.queueWaitMs += elapsedMs(queuedAt);
+      return this.performTransaction(reason, mutator, afterDerive, options);
+    });
     this.transactionTail = operation.catch(() => {});
-    return operation;
+    try { return await operation; }
+    finally {
+      this.pendingTransactions -= 1;
+      this.releaseTransactionSlot();
+    }
+  }
+
+  async updateRuntimeStatus(reason, update) {
+    if (!this.state || this.closed) throw new Error("Store is not writable");
+    const started = process.hrtime.bigint();
+    const current = structuredClone(this.runtimeHealth);
+    const result = typeof update === "function" ? await update(current) : update;
+    const next = result && typeof result === "object" ? result : current;
+    this.runtimeHealth = mergeHealth(this.runtimeHealth, structuredClone(next));
+    this.metrics.statusOnlyUpdates += 1;
+    this.metrics.statusOnlyMs += elapsedMs(started);
+    this.recordReason(reason, { kind: "status", logicalBytes: Buffer.byteLength(JSON.stringify(next) ?? "", "utf8") });
+    this.maybeLogMetrics();
+    return structuredClone(this.runtimeHealth);
   }
 
   async performTransaction(reason, mutator, afterDerive, { derive = true } = {}) {
     if (!this.state || this.closed) throw new Error("Store is not writable");
+    if (typeof reason !== "string" || !reason || reason.length > 160) throw new Error("Store transaction reason is invalid");
+    const started = process.hrtime.bigint();
+    const cpuStarted = process.cpuUsage();
     const transactionId = randomUUID();
-    const beforeDigest = this.state.integrity.digest;
-    const draft = structuredClone(this.state);
-    const result = await mutator(draft);
-    const next = result && typeof result === "object" ? result : draft;
+    const tracked = createTrackedDraft(this.state);
+    const next = tracked.proxy;
+    const result = await mutator(next);
+    if (result && result !== next && result !== tracked.raw) throw new Error("store_mutator_replacement_unsupported");
+    if (!tracked.changed.size) {
+      this.metrics.noOpTransactions += 1;
+      this.recordReason(reason, { kind: "noop", durationMs: elapsedMs(started) });
+      this.maybeLogMetrics();
+      return this.read();
+    }
+    if (Object.keys(this.runtimeHealth).length) next.health = mergeHealth(next.health, this.runtimeHealth);
     next.schemaVersion = STORE_SCHEMA_VERSION;
     next.collectorVersion = COLLECTOR_VERSION;
-    next.updatedAt = new Date().toISOString();
+    next.updatedAt = this.now().toISOString();
     enforceRetention(next);
     expireStalePriceAnchors(next, new Date(next.updatedAt));
     next.health.loops ??= {};
@@ -68,14 +173,16 @@ export class DurableDiscoveryStore {
       // Derived pricing has no remote I/O and cannot roll back durable ingestion
       // on failure. A failed derivation preserves the last-good opportunities,
       // marks them unavailable for freshness, and retries on the next commit.
-      const derived = structuredClone(next);
+      const previousPools = this.state.pools;
+      const previousOpportunities = this.state.opportunities;
       try {
-        resolveOnchainPoolEvidence(derived, new Date(next.updatedAt));
-        derived.opportunities = buildCanonicalOpportunities(pricingPoolsForState(derived), derived.tokenMetadata ?? {}, derived.opportunities ?? [], new Date(next.updatedAt));
-        Object.assign(next, derived);
+        resolveOnchainPoolEvidence(next, new Date(next.updatedAt));
+        next.opportunities = buildCanonicalOpportunities(pricingPoolsForState(next), next.tokenMetadata ?? {}, next.opportunities ?? [], new Date(next.updatedAt)).slice(0, MAX_OPPORTUNITIES);
         const previousError = next.health.loops.opportunities?.lastError;
         next.health.loops.opportunities = { phase: "idle", lastSuccessAt: next.updatedAt, lastError: previousError ? { ...previousError, recoveredAt: previousError.recoveredAt ?? next.updatedAt } : undefined };
       } catch {
+        next.pools = previousPools;
+        next.opportunities = previousOpportunities;
         next.health.loops.opportunities = { ...this.state.health.loops?.opportunities, phase: "retrying", lastError: { reasonCode: "opportunity_rebuild_failed", observedAt: next.updatedAt, retryAt: new Date(Date.parse(next.updatedAt) + 10_000).toISOString() } };
       }
     }
@@ -83,33 +190,136 @@ export class DurableDiscoveryStore {
     synchronizeDerivedHealth(next);
     if (afterDerive) await afterDerive(next);
     enforceRetention(next);
-    // Mutators may assign observations or diagnostics owned by a live client.
-    // Detach the exact commit before the first durable await so later cache or
-    // metric updates cannot change either the in-memory state or bytes written
-    // after the integrity digest has been calculated.
-    const committed = structuredClone(next);
-    committed.integrity = createIntegrity(committed);
-    const prepare = { type: "prepare", transactionId, at: committed.updatedAt, reason, beforeDigest, afterDigest: committed.integrity.digest };
+    const patch = tracked.buildPatch();
+    validatePatch(patch);
+    validateStateLimits(tracked.raw, patch);
+    const sequence = this.sequence + 1;
+    const beforeDigest = this.journalChainDigest;
+    const prepare = { journalVersion: JOURNAL_VERSION, type: "prepare", transactionId, sequence, at: tracked.raw.updatedAt, reason, beforeDigest, patch };
+    prepare.afterDigest = journalDigest(beforeDigest, journalPayload(prepare));
+    const prepareBytes = serializedLineBytes(prepare);
+    const commit = { journalVersion: JOURNAL_VERSION, type: "commit", transactionId, sequence, at: tracked.raw.updatedAt, afterDigest: prepare.afterDigest };
+    const commitBytes = serializedLineBytes(commit);
+    if (prepareBytes > MAX_DELTA_BYTES || this.walBytes + prepareBytes + commitBytes > MAX_WAL_BYTES) throw new Error("store_journal_limit_exceeded");
+
+    await this.injectFault("before-journal-prepare", { reason, sequence });
     await appendDurableLine(this.walPath, prepare);
-    await writeAtomicJson(this.statePath, committed);
-    await appendDurableLine(this.walPath, { type: "commit", transactionId, at: committed.updatedAt, afterDigest: committed.integrity.digest });
-    this.state = committed;
-    if ((await lineCount(this.walPath)) > MAX_WAL_LINES * 2) await this.compactWal();
-    return structuredClone(committed);
+    await this.injectFault("after-journal-prepare", { reason, sequence });
+    await appendDurableLine(this.walPath, commit);
+    await this.injectFault("after-journal-commit", { reason, sequence });
+
+    this.state = tracked.raw;
+    this.sequence = sequence;
+    this.journalChainDigest = prepare.afterDigest;
+    this.transactionsSinceCheckpoint += 1;
+    this.walBytes += prepareBytes + commitBytes;
+    this.metrics.transactions += 1;
+    this.metrics.logicalDeltaBytes += prepareBytes;
+    this.metrics.journalBytes += prepareBytes + commitBytes;
+    const cpu = process.cpuUsage(cpuStarted);
+    this.metrics.cpuMicros += cpu.user + cpu.system;
+    const durationMs = elapsedMs(started);
+    this.metrics.transactionMs += durationMs;
+    this.recordReason(reason, { kind: "delta", durationMs, logicalBytes: prepareBytes, physicalBytes: prepareBytes + commitBytes, patchOperations: patch.length });
+    try { await this.maybeCheckpoint(); }
+    catch (error) {
+      this.metrics.checkpointFailures += 1;
+      this.metrics.lastCheckpointError = safeFailure(error);
+      this.logMetric({ event: "collector_checkpoint_failure", reasonCode: safeFailure(error), sequence: this.sequence });
+    }
+    this.maybeLogMetrics();
+    return this.read();
   }
 
   integrityCheck() {
     if (!this.state) return { ok: false, reason: "store_not_open" };
     const expected = createIntegrity(this.state);
-    return expected.digest === this.state.integrity?.digest
-      ? { ok: true, schemaVersion: this.state.schemaVersion, digest: expected.digest }
-      : { ok: false, reason: "digest_mismatch", expected: expected.digest, actual: this.state.integrity?.digest };
+    return { ok: true, schemaVersion: this.state.schemaVersion, digest: expected.digest, checkpointDigest: this.state.integrity?.digest, journalDigest: this.journalChainDigest, sequence: this.sequence };
   }
 
   async close() {
     if (this.closed) return;
     this.closed = true;
-    await this.releaseLock();
+    try {
+      await this.transactionTail.catch(() => {});
+      await this.checkpoint();
+    } finally {
+      await this.releaseLock();
+    }
+  }
+
+  getMetrics() {
+    return structuredClone({ ...this.metrics, queueDepth: this.pendingTransactions, walBytes: this.walBytes, sequence: this.sequence, transactionsSinceCheckpoint: this.transactionsSinceCheckpoint, limits: STORE_LIMITS });
+  }
+
+  async maybeCheckpoint() {
+    const dueByAge = this.now().getTime() - this.lastCheckpointAtMs >= this.checkpointIntervalMs;
+    const dueByCount = this.transactionsSinceCheckpoint >= this.checkpointTransactionLimit;
+    const dueByWal = this.walBytes >= Math.floor(MAX_WAL_BYTES * 0.75);
+    if (!dueByAge && !dueByCount && !dueByWal) return false;
+    return this.checkpoint();
+  }
+
+  async checkpoint() {
+    if (!this.state || this.transactionsSinceCheckpoint === 0) return false;
+    const started = process.hrtime.bigint();
+    const checkpointed = structuredClone(this.state);
+    const checkpointAt = this.now().toISOString();
+    checkpointed.persistence = { journalVersion: JOURNAL_VERSION, appliedSequence: this.sequence, journalDigest: this.journalChainDigest, checkpointAt };
+    checkpointed.integrity = createIntegrity(checkpointed);
+    const serialized = `${JSON.stringify(checkpointed, null, 2)}\n`;
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    if (bytes > MAX_CHECKPOINT_BYTES) throw new Error("store_checkpoint_limit_exceeded");
+    await this.injectFault("before-checkpoint-write", { sequence: this.sequence });
+    await writeAtomicText(this.statePath, serialized, (stage) => this.injectFault(stage, { sequence: this.sequence }));
+    this.state = checkpointed;
+    this.lastCheckpointAtMs = Date.parse(checkpointAt);
+    this.transactionsSinceCheckpoint = 0;
+    this.metrics.checkpoints += 1;
+    this.metrics.checkpointBytes += bytes;
+    this.metrics.checkpointMs += elapsedMs(started);
+    try {
+      await writeAtomicText(this.walPath, "", (stage) => this.injectFault(`wal-${stage}`, { sequence: this.sequence }));
+      this.walBytes = 0;
+    } catch (error) {
+      this.logMetric({ event: "collector_wal_compaction_deferred", reasonCode: safeFailure(error), sequence: this.sequence });
+    }
+    return true;
+  }
+
+  recordReason(reason, sample) {
+    const current = this.metrics.reasons[reason] ?? { count: 0, logicalBytes: 0, physicalBytes: 0, durationMs: 0, patchOperations: 0, kinds: {} };
+    current.count += 1;
+    current.logicalBytes += sample.logicalBytes ?? 0;
+    current.physicalBytes += sample.physicalBytes ?? 0;
+    current.durationMs += sample.durationMs ?? 0;
+    current.patchOperations += sample.patchOperations ?? 0;
+    current.kinds[sample.kind] = (current.kinds[sample.kind] ?? 0) + 1;
+    this.metrics.reasons[reason] = current;
+    const entries = Object.entries(this.metrics.reasons);
+    if (entries.length > 32) delete this.metrics.reasons[entries.sort((a, b) => a[1].count - b[1].count || a[0].localeCompare(b[0]))[0][0]];
+  }
+
+  maybeLogMetrics() {
+    const nowMs = this.now().getTime();
+    if (nowMs - this.metrics.lastLogAtMs < this.metricsLogIntervalMs) return;
+    this.metrics.lastLogAtMs = nowMs;
+    this.logMetric({ event: "collector_store_metrics", ...this.getMetrics() });
+  }
+
+  logMetric(value) {
+    if (typeof this.metricsLogger !== "function") return;
+    const serialized = JSON.stringify(value);
+    this.metricsLogger(serialized.length <= 16_384 ? serialized : JSON.stringify({ event: value.event, reasonCode: "metric_payload_bounded", sequence: this.sequence }));
+  }
+
+  async injectFault(stage, context) {
+    if (typeof this.faultInjector === "function") await this.faultInjector(stage, context);
+  }
+
+  releaseTransactionSlot() {
+    const next = this.transactionSlotWaiters.shift();
+    if (next) next();
   }
 
   async loadOrInitialize() {
@@ -148,17 +358,6 @@ export class DurableDiscoveryStore {
     await rm(this.lockPath, { force: true });
   }
 
-  async compactWal() {
-    let rows = [];
-    try {
-      rows = (await readFile(this.walPath, "utf8")).split(/\r?\n/).filter(Boolean).slice(-MAX_WAL_LINES);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-    const temporary = `${this.walPath}.${process.pid}.tmp`;
-    await writeFile(temporary, rows.length ? `${rows.join("\n")}\n` : "", { encoding: "utf8", mode: 0o640 });
-    await rename(temporary, this.walPath);
-  }
 }
 
 export function initialState(now = new Date()) {
@@ -216,11 +415,15 @@ export function createIntegrity(state) {
 
 export function readStoreSnapshotSync(directory) {
   try {
-    const file = path.join(path.resolve(directory), "state.json");
+    const root = path.resolve(directory);
+    const file = path.join(root, "state.json");
     const state = migrate(JSON.parse(readFileSync(file, "utf8")));
     const expected = createIntegrity(state);
     if (state.integrity?.digest !== expected.digest) return { ok: false, reason: "digest_mismatch" };
-    return { ok: true, state };
+    const cursor = createJournalCursor(state);
+    try { replayJournalChunk(cursor, readFileSync(path.join(root, "wal.ndjson"))); }
+    catch (error) { if (error?.code !== "ENOENT") throw error; }
+    return { ok: true, state: cursor.state };
   } catch (error) {
     return { ok: false, reason: error?.code === "ENOENT" ? "store_unavailable" : "store_invalid" };
   }
@@ -232,20 +435,21 @@ function migrate(state) {
 }
 
 function enforceRetention(state) {
-  state.history = (state.history ?? []).slice(-MAX_HISTORY_RING);
-  state.reconciliation = (state.reconciliation ?? []).slice(-MAX_RECONCILIATION_RING);
-  state.eventRing = (state.eventRing ?? []).slice(-MAX_EVENT_RING);
-  state.marketSnapshots = (state.marketSnapshots ?? []).slice(-MAX_MARKET_SNAPSHOTS);
-  state.metadataQueue = (state.metadataQueue ?? []).slice(-256);
-  state.onchainQueue = (state.onchainQueue ?? []).slice(0, 512);
-  state.enrichmentQueue = (state.enrichmentQueue ?? []).slice(0, 512);
-  state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
+  trimTail(state, "history", MAX_HISTORY_RING);
+  trimTail(state, "reconciliation", MAX_RECONCILIATION_RING);
+  trimTail(state, "eventRing", MAX_EVENT_RING);
+  trimTail(state, "marketSnapshots", MAX_MARKET_SNAPSHOTS);
+  trimTail(state, "metadataQueue", 256);
+  trimHead(state, "onchainQueue", 512);
+  trimHead(state, "enrichmentQueue", 512);
+  trimHead(state, "opportunities", MAX_OPPORTUNITIES);
+  if (Object.keys(state.events ?? {}).length > MAX_CANONICAL_EVENTS) state.events = keepNewestRecordEntries(state.events ?? {}, MAX_CANONICAL_EVENTS, (event) => event.blockNumber ?? 0);
   const previousPools = state.pools ?? {};
   const cohortExpiresAt = Date.parse(state.proofCoverageCohort?.expiresAt ?? "");
   const protectedCohort = Number.isFinite(cohortExpiresAt) && Date.parse(state.updatedAt) <= cohortExpiresAt
     ? new Set(state.proofCoverageCohort.poolKeys ?? [])
     : new Set();
-  state.pools = retainPriorityPools(previousPools, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS, protectedCohort);
+  if (Object.keys(previousPools).length > MAX_POOLS) state.pools = retainPriorityPools(previousPools, MAX_POOLS, MAX_PROTECTED_PROVIDER_POOLS, protectedCohort);
   const evicted = Object.keys(previousPools).filter((key) => !state.pools[key]);
   if (evicted.length) {
     state.counters.retentionEvicted = (state.counters.retentionEvicted ?? 0) + evicted.length;
@@ -253,7 +457,8 @@ function enforceRetention(state) {
     state.reconciliation = state.reconciliation.slice(-MAX_RECONCILIATION_RING);
   }
   const retainedTokens = new Set(Object.values(state.pools).flatMap((pool) => [pool.token0, pool.token1]));
-  state.tokenMetadata = Object.fromEntries(Object.entries(state.tokenMetadata ?? {}).filter(([address]) => retainedTokens.has(address)));
+  const metadataEntries = Object.entries(state.tokenMetadata ?? {});
+  if (metadataEntries.some(([address]) => !retainedTokens.has(address))) state.tokenMetadata = Object.fromEntries(metadataEntries.filter(([address]) => retainedTokens.has(address)));
 }
 
 export function pricingPoolsForState(state) {
@@ -353,25 +558,48 @@ export function retainPriorityPools(record, maximum = MAX_POOLS, protectedMaximu
 }
 
 async function writeAtomicJson(target, value) {
+  return writeAtomicText(target, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function writeAtomicText(target, serialized, fault) {
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o640);
   try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await handle.writeFile(serialized, "utf8");
     await handle.sync();
+    await fault?.("after-checkpoint-file-sync");
   } finally {
     await handle.close();
   }
-  await rename(temporary, target);
+  try {
+    await fault?.("before-checkpoint-rename");
+    await rename(temporary, target);
+    await fault?.("after-checkpoint-rename");
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  }
   try {
     const directoryHandle = await open(path.dirname(target), "r");
     try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
   } catch { /* directory fsync is not available on every development platform */ }
+  return Buffer.byteLength(serialized, "utf8");
 }
 
 async function appendDurableLine(target, value) {
   const handle = await open(target, "a", 0o640);
   try {
     await handle.appendFile(`${JSON.stringify(value)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function truncateDurably(target, length) {
+  const handle = await open(target, "r+");
+  try {
+    await handle.truncate(length);
     await handle.sync();
   } finally {
     await handle.close();
@@ -387,17 +615,182 @@ async function readStaleLock(lockPath) {
   } catch { return true; }
 }
 
-async function lineCount(file) {
-  try { return (await readFile(file, "utf8")).split(/\r?\n/).filter(Boolean).length; }
-  catch (error) { return error?.code === "ENOENT" ? 0 : Promise.reject(error); }
+function createTrackedDraft(source) {
+  const raw = structuredClone(source);
+  const changed = new Map();
+  const rawByProxy = new WeakMap();
+  const proxyByTargetAndPath = new WeakMap();
+
+  const record = (path) => {
+    if (!path.length || path[0] === "integrity" || path[0] === "persistence") return;
+    changed.set(pathKey(path), path);
+  };
+  const wrap = (target, path) => {
+    if (!target || typeof target !== "object") return target;
+    let byPath = proxyByTargetAndPath.get(target);
+    if (!byPath) { byPath = new Map(); proxyByTargetAndPath.set(target, byPath); }
+    const key = pathKey(path);
+    if (byPath.has(key)) return byPath.get(key);
+    const proxy = new Proxy(target, {
+      get(current, property, receiver) {
+        const value = Reflect.get(current, property, receiver);
+        if (typeof property === "symbol" || !value || typeof value !== "object") return value;
+        return wrap(value, [...path, propertyKey(property)]);
+      },
+      set(current, property, value, receiver) {
+        const segment = propertyKey(property);
+        const assigned = cloneAssigned(value, rawByProxy);
+        const previous = Reflect.get(current, property, receiver);
+        const success = Reflect.set(current, property, assigned, receiver);
+        if (success && !Object.is(previous, assigned)) record(Array.isArray(current) ? path : [...path, segment]);
+        return success;
+      },
+      deleteProperty(current, property) {
+        const existed = Object.hasOwn(current, property);
+        const success = Reflect.deleteProperty(current, property);
+        if (success && existed) record(Array.isArray(current) ? path : [...path, propertyKey(property)]);
+        return success;
+      }
+    });
+    rawByProxy.set(proxy, target);
+    byPath.set(key, proxy);
+    return proxy;
+  };
+  const proxy = wrap(raw, []);
+  return {
+    raw,
+    proxy,
+    changed,
+    buildPatch() {
+      const paths = compactChangedPaths([...changed.values()]);
+      return paths.map((path) => {
+        const located = valueAtPath(raw, path);
+        return located.exists && located.value !== undefined
+          ? { op: "set", path, value: structuredClone(located.value) }
+          : { op: "remove", path };
+      });
+    }
+  };
 }
 
-function stableStringify(value, space) {
-  return JSON.stringify(sortValue(value), null, space);
+function compactChangedPaths(paths) {
+  return paths
+    .sort((left, right) => left.length - right.length || pathKey(left).localeCompare(pathKey(right)))
+    .filter((path, index, all) => !all.slice(0, index).some((parent) => isParentPath(parent, path)));
 }
 
-function sortValue(value) {
-  if (Array.isArray(value)) return value.map(sortValue);
+function isParentPath(parent, child) {
+  return parent.length <= child.length && parent.every((segment, index) => segment === child[index]);
+}
+
+function valueAtPath(state, path) {
+  let current = state;
+  for (const segment of path) {
+    if (!current || typeof current !== "object" || !Object.hasOwn(current, segment)) return { exists: false };
+    current = current[segment];
+  }
+  return { exists: true, value: current };
+}
+
+function cloneAssigned(value, rawByProxy) {
+  return detachValue(value, rawByProxy, new WeakMap());
+}
+
+function detachValue(value, rawByProxy, seen) {
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
+  const source = rawByProxy.get(value) ?? value;
+  if (seen.has(source)) return seen.get(source);
+  if (Array.isArray(source)) {
+    const copy = [];
+    seen.set(source, copy);
+    for (const item of source) copy.push(detachValue(item, rawByProxy, seen));
+    return copy;
+  }
+  const copy = {};
+  seen.set(source, copy);
+  for (const [key, item] of Object.entries(source)) copy[key] = detachValue(item, rawByProxy, seen);
+  return copy;
+}
+
+function pathKey(path) {
+  return JSON.stringify(path);
+}
+
+function propertyKey(property) {
+  return typeof property === "string" && /^(?:0|[1-9]\d*)$/.test(property) ? Number(property) : String(property);
+}
+
+function validateStateLimits(state, patch) {
+  if (Object.keys(state.pools ?? {}).length > MAX_POOLS || Object.keys(state.events ?? {}).length > MAX_CANONICAL_EVENTS) throw new Error("store_record_count_limit_exceeded");
+  if ((state.opportunities ?? []).length > MAX_OPPORTUNITIES) throw new Error("store_opportunity_count_limit_exceeded");
+  if ((state.metadataQueue ?? []).length > 256 || (state.onchainQueue ?? []).length > 512 || (state.enrichmentQueue ?? []).length > 512) throw new Error("store_queue_limit_exceeded");
+  const opportunityBytes = Buffer.byteLength(JSON.stringify(state.opportunities ?? []), "utf8");
+  if (opportunityBytes > MAX_OPPORTUNITIES_BYTES) throw new Error("store_opportunity_bytes_limit_exceeded");
+  for (const operation of patch) {
+    if (operation.op !== "set" || !["pools", "events", "tokenMetadata"].includes(operation.path[0]) || operation.path.length < 2) continue;
+    if (Buffer.byteLength(JSON.stringify(operation.value), "utf8") > MAX_RECORD_BYTES) throw new Error("store_record_bytes_limit_exceeded");
+  }
+}
+
+function trimTail(state, key, maximum) {
+  const values = state[key] ?? [];
+  if (values.length > maximum) state[key] = values.slice(-maximum);
+}
+
+function trimHead(state, key, maximum) {
+  const values = state[key] ?? [];
+  if (values.length > maximum) state[key] = values.slice(0, maximum);
+}
+
+function mergeHealth(base = {}, overlay = {}) {
+  return {
+    ...base,
+    ...overlay,
+    loops: { ...(base.loops ?? {}), ...(overlay.loops ?? {}) },
+    rpc: overlay.rpc ?? base.rpc
+  };
+}
+
+function initialStoreMetrics() {
+  return {
+    transactions: 0,
+    noOpTransactions: 0,
+    statusOnlyUpdates: 0,
+    logicalDeltaBytes: 0,
+    journalBytes: 0,
+    checkpointBytes: 0,
+    checkpoints: 0,
+    checkpointFailures: 0,
+    transactionMs: 0,
+    statusOnlyMs: 0,
+    checkpointMs: 0,
+    cpuMicros: 0,
+    queuePeak: 0,
+    queueWaitMs: 0,
+    backpressureWaits: 0,
+    recoveryCount: 0,
+    recoveredTransactions: 0,
+    recoveryMs: 0,
+    tornTailBytes: 0,
+    lastCheckpointError: undefined,
+    lastLogAtMs: 0,
+    reasons: {}
+  };
+}
+
+function serializedLineBytes(value) {
+  return Buffer.byteLength(`${JSON.stringify(value)}\n`, "utf8");
+}
+
+function elapsedMs(started) {
+  return Number(process.hrtime.bigint() - started) / 1_000_000;
+}
+
+function boundedOption(value, fallback, minimum, maximum) {
+  return Number.isSafeInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+
+function safeFailure(error) {
+  const value = error?.reasonCode ?? error?.code ?? error?.name ?? "checkpoint_failure";
+  return String(value).replace(/[^a-z0-9_-]/gi, "_").slice(0, 120).toLowerCase();
 }

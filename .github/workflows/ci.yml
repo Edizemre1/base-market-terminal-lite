@@ -69,6 +69,27 @@ jobs:
       - name: RPC resilience and bounded backfill contracts
         run: npm run test:rpc
 
+      - name: Collector persistence crash and resource contracts
+        run: npm run test:collector-persistence
+
+      - name: Collector persistence benchmark under production limits
+        run: |
+          unit="base-collector-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          runner_user="$(id -un)"
+          runner_group="$(id -gn)"
+          sudo systemd-run --quiet --wait --collect --pipe \
+            --unit="$unit" \
+            --setenv="SOURCE_SHA=$SOURCE_SHA" \
+            -p User="$runner_user" \
+            -p Group="$runner_group" \
+            -p CPUQuota=25% \
+            -p MemoryMax=512M \
+            -p IOWeight=50 \
+            -p Nice=10 \
+            -p WorkingDirectory="$GITHUB_WORKSPACE" \
+            "$(command -v node)" scripts/benchmark-collector-persistence.mjs \
+            --output test-results/collector-resource-benchmark.json
+
       - name: Pricing and enrichment contracts
         run: npm run test:enrichment
 
