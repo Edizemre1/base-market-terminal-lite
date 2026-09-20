@@ -25,13 +25,15 @@ if (worker) {
     const before = runWorker("legacy", path.join(root, "legacy"));
     const after = runWorker("delta", path.join(root, "delta"));
     if (before.fixtureDigest !== after.fixtureDigest || before.fixtureBytes !== after.fixtureBytes) throw new Error("benchmark_fixture_mismatch");
+    const enforcedCgroup = readCgroupLimits();
+    assertResourceEnvelope(enforcedCgroup);
     const report = {
       schemaVersion: 1,
       sourceSha: process.env.SOURCE_SHA || process.env.GITHUB_SHA || "local-unpinned",
       generatedAt: new Date().toISOString(),
       workload: { kind: "status_only_heartbeat", iterations: ITERATIONS, pools: FIXTURE_POOLS, paddingBytesPerPool: FIXTURE_PADDING_BYTES },
       fixture: { sha256: before.fixtureDigest, bytes: before.fixtureBytes },
-      enforcedCgroup: readCgroupLimits(),
+      enforcedCgroup,
       before,
       after,
       reduction: {
@@ -211,12 +213,24 @@ function readProcessWriteBytes() {
 }
 
 function readCgroupLimits() {
+  const membership = readOptional("/proc/self/cgroup")?.split(/\r?\n/).find((line) => line.startsWith("0::"));
+  const relative = membership?.slice(3) || "/";
+  const directory = path.resolve("/sys/fs/cgroup", `.${relative}`);
   return {
-    cpuMax: readOptional("/sys/fs/cgroup/cpu.max"),
-    memoryMax: readOptional("/sys/fs/cgroup/memory.max"),
-    ioWeight: readOptional("/sys/fs/cgroup/io.weight"),
+    path: relative,
+    cpuMax: readOptional(path.join(directory, "cpu.max")),
+    memoryMax: readOptional(path.join(directory, "memory.max")),
+    ioWeight: readOptional(path.join(directory, "io.weight")),
     nice: getPriority()
   };
+}
+
+function assertResourceEnvelope(limits) {
+  const [quota, period] = String(limits.cpuMax ?? "").split(/\s+/).map(Number);
+  if (!(quota > 0) || !(period > 0) || quota / period > 0.25) throw new Error("benchmark_cpu_quota_not_enforced");
+  if (Number(limits.memoryMax) !== 512 * 1_024 * 1_024) throw new Error("benchmark_memory_limit_not_enforced");
+  if (!/(?:^|\s)50(?:$|\s)/.test(String(limits.ioWeight ?? ""))) throw new Error("benchmark_io_weight_not_enforced");
+  if (limits.nice !== 10) throw new Error("benchmark_nice_not_enforced");
 }
 
 function readOptional(file) {
