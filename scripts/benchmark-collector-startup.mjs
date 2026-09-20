@@ -66,7 +66,7 @@ async function generateFixture(file, output) {
 
 async function runBaseline(fixture, output) {
   assertLinuxEnvelope();
-  const child = spawnSync(process.execPath, ["--max-old-space-size=259", ...process.execArgv, script, "--clone-storm", fixture], {
+  const child = spawnSync(process.execPath, ["--max-old-space-size=256", ...process.execArgv, script, "--clone-storm", fixture], {
     encoding: "utf8",
     env: { ...process.env, NODE_OPTIONS: "" },
     maxBuffer: 2 * 1_024 * 1_024
@@ -100,7 +100,7 @@ function cloneStorm(fixture) {
   const state = JSON.parse(readFileSync(fixture, "utf8"));
   process.stdout.write(`${JSON.stringify({ event: "clone_storm_start", fixtureBytes: statSync(fixture).size, isolate: isolateContract(), memory: memorySample() })}\n`);
   const held = [state];
-  for (let index = 1; index <= 8; index += 1) {
+  for (let index = 1; index <= 32; index += 1) {
     held.push(structuredClone(state));
     process.stdout.write(`${JSON.stringify({ event: "clone_complete", index, memory: memorySample() })}\n`);
   }
