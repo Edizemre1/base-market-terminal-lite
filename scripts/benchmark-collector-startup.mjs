@@ -75,18 +75,23 @@ async function runBaseline(fixture, output) {
     try { return [JSON.parse(line)]; } catch { return []; }
   });
   const stderr = String(child.stderr);
+  const completedClones = progress.filter((row) => row.event === "clone_complete").length;
+  const heapOutOfMemory = /heap out of memory/i.test(stderr);
+  const messageDeserialize = /node::worker::Message::Deserialize/.test(stderr);
+  const cloneStormInterrupted = completedClones > 0 && completedClones < 32;
   const report = {
     schemaVersion: 1,
     workload: "pre_fix_full_state_clone_storm",
     fixtureBytes: statSync(fixture).size,
-    reproduced: child.signal === "SIGABRT" && /heap out of memory/i.test(stderr) && /node::worker::Message::Deserialize/.test(stderr),
+    reproduced: child.signal === "SIGABRT" && heapOutOfMemory && cloneStormInterrupted,
     exitCode: child.status,
     signal: child.signal,
-    completedClones: progress.filter((row) => row.event === "clone_complete").length,
+    completedClones,
     isolate: progress.find((row) => row.event === "clone_storm_start")?.isolate,
     failureEvidence: {
-      heapOutOfMemory: /heap out of memory/i.test(stderr),
-      messageDeserialize: /node::worker::Message::Deserialize/.test(stderr),
+      heapOutOfMemory,
+      messageDeserialize,
+      cloneStormInterrupted,
       workerApiUsed: false
     },
     cgroup: readCgroupLimits()
