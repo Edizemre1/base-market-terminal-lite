@@ -673,6 +673,10 @@ test.describe("living Base terminal", () => {
       await detailPage.getByTestId("inspector-trade-cta").click();
       await expect(detailPage.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
       await expect(detailPage.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
+      const desktopTradeDock = detailPage.getByTestId("trade-drawer-content").getByTestId("trade-dock");
+      await expect(desktopTradeDock).toBeVisible();
+      await expect(desktopTradeDock).toBeInViewport();
+      await expect(desktopTradeDock).toContainText(locale === "tr" ? "İşlem Alanı" : "Trade Dock");
       await captureVisualEvidence(detailPage, testInfo.outputPath(`trade-drawer-${locale}-1440.png`), false);
       await detailPage.keyboard.press("Escape");
       await detailPage.route("**/api/chart", (route) => route.fulfill({ json: {
@@ -740,7 +744,15 @@ async function captureVisualEvidence(page: Page, path: string, fullPage: boolean
     hasShiftedScroller: [...document.querySelectorAll<HTMLElement>("*")].some((element) => element.scrollLeft !== 0),
     viewportWidth: window.innerWidth
   }))).toEqual({ horizontalOffset: 0, hasPageOverflow: false, hasShiftedScroller: false, viewportWidth: expectedWidth });
-  await page.screenshot({ path, fullPage });
+  await page.screenshot({
+    path,
+    fullPage,
+    animations: "disabled",
+    // Chromium can offset fixed shell chrome while stitching a tall page after
+    // earlier responsive viewport changes. Pinning the shell to the document
+    // keeps the evidence faithful to the zero-scroll layout being asserted.
+    style: fullPage ? '[data-testid="terminal-topbar"] { position: absolute !important; }' : undefined
+  });
 }
 
 async function expectTerminalShell(page: Page) {
