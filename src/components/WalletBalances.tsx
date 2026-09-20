@@ -12,6 +12,9 @@ export function WalletBalances({ autoRefresh = false }: { autoRefresh?: boolean 
   const { t, locale } = useI18n();
   const autoRefreshKeyRef = useRef<string | undefined>(undefined);
   const [now, setNow] = useState(() => Date.now());
+  const testIds = autoRefresh
+    ? { grid: "wallet-balance-grid", eth: "wallet-balance-eth", weth: "wallet-balance-weth", usdc: "wallet-balance-usdc", selected: "wallet-balance-selected" }
+    : { grid: "portfolio-balance-grid", eth: "portfolio-balance-eth", weth: "portfolio-balance-weth", usdc: "portfolio-balance-usdc", selected: "portfolio-balance-selected" };
   const connected = wallet.accountConnected && Boolean(wallet.address);
   const onBase = connected && wallet.chainId === BASE_CHAIN_ID;
 
@@ -34,11 +37,11 @@ export function WalletBalances({ autoRefresh = false }: { autoRefresh?: boolean 
   }
 
   const updatedAt = latestTimestamp(wallet.balanceUpdatedAt, ...Object.values(wallet.tokenBalances).map((balance) => balance.updatedAt));
-  return <section className="rounded-card border border-border-subtle bg-surface-interactive/70 p-3" data-testid="wallet-balance-grid" data-wallet-balance-network={onBase ? "base" : "wrong_network"}>
+  return <section className="rounded-card border border-border-subtle bg-surface-interactive/70 p-3" data-testid={testIds.grid} data-wallet-balance-network={onBase ? "base" : "wrong_network"}>
     <header className="flex items-start justify-between gap-3"><div><h3 className="text-label font-semibold text-content-primary">{t("wallet.balancesTitle")}</h3><p className="mt-1 text-meta leading-5 text-content-secondary">{t("wallet.balancesScope")}</p></div><button type="button" disabled={!onBase || wallet.balanceStatus === "balance_loading" || Object.values(wallet.tokenBalances).some((balance) => balance.status === "loading")} onClick={() => void wallet.refreshBalances()} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-control bg-surface-panel px-3 text-meta font-semibold text-content-primary disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={13} />{t("wallet.refreshBalances")}</button></header>
     <dl className="mt-3 grid gap-2 sm:grid-cols-2">
-      <BalanceFact label="ETH" value={formatNativeBalance(wallet, onBase, now, t)} testId="wallet-balance-eth" />
-      {wallet.trackedBalanceTokens.map((token) => <BalanceFact key={token.address} label={token.symbol} value={formatTokenBalance(wallet.tokenBalances[token.address], token.symbol, onBase, now, t)} testId={token.symbol === "WETH" ? "wallet-balance-weth" : token.symbol === "USDC" ? "wallet-balance-usdc" : "wallet-balance-selected"} />)}
+      <BalanceFact label="ETH" value={formatNativeBalance(wallet, onBase, now, t)} testId={testIds.eth} />
+      {wallet.trackedBalanceTokens.map((token) => <BalanceFact key={token.address} label={token.symbol} value={formatTokenBalance(wallet.tokenBalances[token.address], token.symbol, onBase, now, t)} testId={token.symbol === "WETH" ? testIds.weth : token.symbol === "USDC" ? testIds.usdc : testIds.selected} />)}
     </dl>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle/60 pt-3 text-meta"><span className="text-content-secondary">{t("wallet.portfolioTotal")}</span><strong className="text-right font-mono text-content-primary">{t("wallet.portfolioTotalUnavailable")}</strong></div>
     <p className="mt-2 text-meta leading-5 text-content-secondary">{t("wallet.portfolioTotalScope")}</p>

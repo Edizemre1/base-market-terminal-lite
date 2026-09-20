@@ -205,7 +205,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("wallet-balance-eth")).toHaveText("1 ETH");
     await expect(page.getByTestId("wallet-balance-weth")).toHaveText("0 WETH");
     await expect(page.getByTestId("wallet-balance-usdc")).toHaveText("1 USDC");
-    await expect(page.getByText(/Not calculated|Hesaplanmadı/)).toBeVisible();
+    await expect(page.getByTestId("wallet-details").getByText(/Not calculated|Hesaplanmadı/)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("wallet-balances-truth-1440-en.png"), fullPage: true });
     await page.getByRole("button", { name: /Close wallet picker|Cüzdan seçiciyi kapat/ }).click();
     await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
