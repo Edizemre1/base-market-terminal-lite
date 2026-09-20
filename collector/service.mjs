@@ -87,13 +87,13 @@ export class OnchainDiscoveryCollector {
   }
 
   async open() {
-    await this.store.open();
-    const state = await this.store.transact("initialize-enrichment-state", (draft) => {
+    await this.store.open({ returnView: true });
+    const state = await transactStoreView(this.store, "initialize-enrichment-state", (draft) => {
       ensureEnrichmentState(draft);
       seedEnrichmentQueue(draft, new Date());
       seedMetadataQueue(draft, new Date());
       seedOnchainQueue(draft, new Date());
-    });
+    }, undefined, { derive: false });
     this.updateContinuity(state);
     if (this.config.websocketUrl) this.startWebsocket();
     return state;
@@ -148,7 +148,7 @@ export class OnchainDiscoveryCollector {
       } else {
         // Narrow compatibility path for injected/test stores. The production
         // DurableDiscoveryStore always uses the zero-write runtime API above.
-        await this.store.transact(`loop-${name}-status`, (draft) => {
+        await transactStoreView(this.store, `loop-${name}-status`, (draft) => {
           draft.health = { ...draft.health, ...runtimeStatus };
         }, undefined, { derive: false }).catch(() => {});
       }
@@ -164,13 +164,13 @@ export class OnchainDiscoveryCollector {
   }
 
   async reconcileHead(signal) {
-    this.updateContinuity(this.store.read());
+    this.updateContinuity(readStoreView(this.store));
     const head = await this.rpc.blockNumber({ signal });
     const confirmedHead = Math.max(0, head - Math.max(...ENABLED.map((entry) => entry.confirmationPolicy.confirmations)));
     if (this.transport) this.transport.minimumHead = Math.max(this.transport.minimumHead, confirmedHead);
     this.lastObservedHead = head; this.lastObservedConfirmedHead = confirmedHead;
     throwIfAborted(signal);
-    return this.store.transact("independent-head-reconciliation", (draft) => {
+    return transactStoreView(this.store, "independent-head-reconciliation", (draft) => {
       throwIfAborted(signal);
       draft.currentHead = head; draft.confirmedHead = confirmedHead;
       draft.health = buildHealth(draft, head, confirmedHead, this.config.websocketUrl ? "websocket" : "confirmed_polling");
@@ -184,11 +184,11 @@ export class OnchainDiscoveryCollector {
     const confirmedHead = Math.max(0, head - confirmations);
     this.lastObservedHead = head;
     this.lastObservedConfirmedHead = confirmedHead;
-    let state = this.store.read();
+    let state = readStoreView(this.store);
     const cursors = ENABLED.map((entry) => state.cursors?.[entry.id]?.blockNumber ?? 0);
     if (cursors.some((cursor) => cursor <= 0)) {
       const initialCursor = Math.max(1, confirmedHead - this.config.bootstrapBlocks - 1);
-      state = await this.store.transact("initialize-bounded-cursors", (draft) => {
+      state = await transactStoreView(this.store, "initialize-bounded-cursors", (draft) => {
         throwIfAborted(signal);
         for (const entry of ENABLED) draft.cursors[entry.id] = { blockNumber: initialCursor, blockHash: undefined, updatedAt: new Date().toISOString() };
         draft.currentHead = head;
@@ -226,7 +226,7 @@ export class OnchainDiscoveryCollector {
       throwIfAborted(signal);
       cursor = toBlock;
       chunks += 1;
-      state = await this.store.transact("confirmed-log-reconciliation", (draft) => {
+      state = await transactStoreView(this.store, "confirmed-log-reconciliation", (draft) => {
         throwIfAborted(signal);
         const next = reconcileCanonicalWindow(draft, confirmed, fromBlock, toBlock, new Date(), { mutate: true });
         const committedAt = new Date();
@@ -255,7 +255,7 @@ export class OnchainDiscoveryCollector {
       });
       this.updateContinuity(state);
     }
-    return this.store.read();
+    return readStoreView(this.store);
   }
 
   async replayConfirmedEvent({ blockNumber, transactionHash, logIndex }) {
@@ -276,7 +276,7 @@ export class OnchainDiscoveryCollector {
     if (!binding.ok) throw new Error(`Replay pool binding rejected: ${binding.reason}`);
     const metadata = {};
     for (const token of [event.token0, event.token1]) metadata[token] = await enrichTokenMetadata(this.rpc, token, event.blockNumber);
-    const sandbox = applyCanonicalEvents(this.store.read(), [{ ...event, provisional: false, replay: true }], { replay: true });
+    const sandbox = applyCanonicalEvents(readStoreView(this.store), [{ ...event, provisional: false, replay: true }], { replay: true });
     const opportunities = buildCanonicalOpportunities(pricingPoolsForState(sandbox), { ...sandbox.tokenMetadata, ...metadata }, sandbox.opportunities);
     const evidence = {
       replay: true,
@@ -285,9 +285,9 @@ export class OnchainDiscoveryCollector {
       event,
       pool: sandbox.pools[event.poolKey],
       opportunities: opportunities.filter((opportunity) => opportunity.poolKeys.includes(event.poolKey)),
-      cursorBefore: Object.fromEntries(Object.entries(this.store.read().cursors).map(([id, cursor]) => [id, cursor.blockNumber]))
+      cursorBefore: Object.fromEntries(Object.entries(readStoreView(this.store).cursors).map(([id, cursor]) => [id, cursor.blockNumber]))
     };
-    await this.store.transact("deterministic-historical-replay-evidence", (draft) => {
+    await transactStoreView(this.store, "deterministic-historical-replay-evidence", (draft) => {
       draft.replayEvidence ??= [];
       draft.replayEvidence.push(evidence);
       draft.replayEvidence = draft.replayEvidence.slice(-16);
@@ -305,13 +305,13 @@ export class OnchainDiscoveryCollector {
   }
 
   async drainMetadata(signal) {
-    const state = this.store.read();
+    const state = readStoreView(this.store);
     const now = new Date();
     const batch = (state.metadataQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()).slice(0, this.config.metadataBatchSize);
     if (!batch.length) return;
     const results = Object.fromEntries(await Promise.all(batch.map(async (item) => [item.tokenAddress, await enrichTokenMetadata(this.rpc, item.tokenAddress, item.blockNumber, now, { signal })])));
     throwIfAborted(signal);
-    await this.store.transact("bounded-token-metadata-enrichment", (draft) => {
+    await transactStoreView(this.store, "bounded-token-metadata-enrichment", (draft) => {
       throwIfAborted(signal);
       const completed = new Set();
       for (const item of batch) {
@@ -348,9 +348,9 @@ export class OnchainDiscoveryCollector {
   }
 
   async runOnchainStateCycle(now = new Date(), signal) {
-    const before = this.store.read();
-    const scheduled = structuredClone(before);
-    if (hasOnchainSeedCandidate(scheduled, now)) seedOnchainQueue(scheduled, now);
+    const before = readStoreView(this.store);
+    const scheduled = { ...before, onchainQueue: (before.onchainQueue ?? []).map((item) => ({ ...item })), health: { ...before.health } };
+    if (hasOnchainSeedCandidate(scheduled, now)) seedOnchainQueue(scheduled, now, { persistHistory: false });
     const dueNow = (scheduled.onchainQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime());
     const rpcDue = selectBackfillRpcBatch(dueNow.filter((item) => poolNeedsOnchainRpc(before, item)), before.pools, this.config.onchainStateBatchSize, before.counters.backfillRpcAttempts ?? 0);
     const localDue = dueNow.filter((item) => !poolNeedsOnchainRpc(before, item)).slice(0, this.config.onchainLocalClassificationBatchSize ?? 128);
@@ -383,7 +383,7 @@ export class OnchainDiscoveryCollector {
     this.proofCost.successfulProofs += outcomes.filter(outcome => outcome.state?.status === "complete").length;
     const touchedPoolKeys = outcomes.flatMap((outcome) => outcome.remove ? [] : [outcome.item.poolKey]);
     let semanticBefore;
-    const after = await this.store.transact("bounded-onchain-pool-state", (draft) => {
+    const after = await transactStoreView(this.store, "bounded-onchain-pool-state", (draft) => {
       throwIfAborted(signal);
       semanticBefore = semanticSnapshot(draft, touchedPoolKeys);
       ensureEnrichmentState(draft);
@@ -442,8 +442,8 @@ export class OnchainDiscoveryCollector {
   }
 
   async runEnrichmentCycle(now = new Date(), signal) {
-    const before = this.store.read();
-    const scheduled = structuredClone(before);
+    const before = readStoreView(this.store);
+    const scheduled = { ...before, enrichmentQueue: (before.enrichmentQueue ?? []).map((item) => ({ ...item })), health: { ...before.health } };
     if (hasEnrichmentSeedCandidate(scheduled, now)) seedEnrichmentQueue(scheduled, now);
     const due = selectFairEnrichmentBatch(
       (scheduled.enrichmentQueue ?? []).filter((item) => !item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now.getTime()),
@@ -475,7 +475,7 @@ export class OnchainDiscoveryCollector {
     const touchedPoolKeys = outcomes.map((outcome) => outcome.item.poolKey);
     throwIfAborted(signal);
     let semanticBefore;
-    const after = await this.store.transact("bounded-pool-financial-enrichment", (draft) => {
+    const after = await transactStoreView(this.store, "bounded-pool-financial-enrichment", (draft) => {
       throwIfAborted(signal);
       semanticBefore = semanticSnapshot(draft, touchedPoolKeys);
       ensureEnrichmentState(draft);
@@ -568,7 +568,7 @@ export class OnchainDiscoveryCollector {
   }
 
   async refreshAnchorIfDue(now = new Date(), signal) {
-    const before = this.store.read();
+    const before = readStoreView(this.store);
     const current = before.priceAnchors?.wethUsdc;
     if (current?.nextRefreshAt && Date.parse(current.nextRefreshAt) > now.getTime()) return { loopSkipped: true };
     try {
@@ -638,7 +638,7 @@ export class OnchainDiscoveryCollector {
       const anchor = stabilizeWethUsdcAnchorRefresh(current, candidateAnchor, completedAt);
       throwIfAborted(signal);
       let semanticBefore;
-      const after = await this.store.transact("trusted-weth-usdc-anchor-refresh", (draft) => {
+      const after = await transactStoreView(this.store, "trusted-weth-usdc-anchor-refresh", (draft) => {
         throwIfAborted(signal);
         semanticBefore = semanticSnapshot(draft, []);
         ensureEnrichmentState(draft);
@@ -656,7 +656,7 @@ export class OnchainDiscoveryCollector {
       return after;
     } catch (error) {
       throwIfAborted(signal);
-      await this.store.transact("trusted-anchor-refresh-failure", (draft) => {
+      await transactStoreView(this.store, "trusted-anchor-refresh-failure", (draft) => {
         throwIfAborted(signal);
         ensureEnrichmentState(draft);
         const failedAt = new Date();
@@ -675,7 +675,7 @@ export class OnchainDiscoveryCollector {
   }
 
   async publishSemanticDeltas(before, _after, touchedPoolKeys) {
-    return this.store.transact("semantic-enrichment-deltas", (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
+    return transactStoreView(this.store, "semantic-enrichment-deltas", (draft) => appendSemanticDeltas(draft, before, touchedPoolKeys));
   }
 
   startWebsocket() {
@@ -691,7 +691,7 @@ export class OnchainDiscoveryCollector {
           method: "eth_subscribe",
           params: ["logs", { address: ENABLED.map((entry) => entry.address), topics: [[...new Set(ENABLED.map((entry) => entry.eventTopic))]] }]
         }));
-        void this.store.transact("websocket-connected", (draft) => {
+        void transactStoreView(this.store, "websocket-connected", (draft) => {
           draft.mode = "websocket";
           draft.health.mode = "websocket";
         }).catch(() => {});
@@ -710,10 +710,10 @@ export class OnchainDiscoveryCollector {
     if (!raw) return;
     const event = decodeFactoryLog({ ...raw, provisional: true });
     if (!event) {
-      await this.store.transact("malformed-provisional-event", (draft) => { draft.counters.malformedRejected += 1; });
+      await transactStoreView(this.store, "malformed-provisional-event", (draft) => { draft.counters.malformedRejected += 1; });
       return;
     }
-    await this.store.transact("provisional-websocket-event", (draft) => {
+    await transactStoreView(this.store, "provisional-websocket-event", (draft) => {
       const next = applyCanonicalEvents(draft, [{ ...event, provisional: true }], { mutate: true });
       next.provisional[event.idempotencyKey] = { ...event, receivedAt: new Date().toISOString() };
       next.provisional = Object.fromEntries(Object.entries(next.provisional).slice(-256));
@@ -726,7 +726,7 @@ export class OnchainDiscoveryCollector {
     this.websocket = undefined;
     if (!this.running && this.store.closed) return;
     if (this.websocketReconnectTimer || !this.config.websocketUrl) return;
-    void this.store.transact("websocket-reconnecting", (draft) => {
+    void transactStoreView(this.store, "websocket-reconnecting", (draft) => {
       draft.mode = "reconnecting";
       draft.counters.reconnectCount += 1;
       draft.health.mode = "reconnecting";
@@ -739,7 +739,7 @@ export class OnchainDiscoveryCollector {
   }
 
   async recordFailure(error) {
-    await this.store.transact("collector-scan-failure", (draft) => {
+    await transactStoreView(this.store, "collector-scan-failure", (draft) => {
       if (Number.isInteger(this.lastObservedHead)) draft.currentHead = this.lastObservedHead;
       if (Number.isInteger(this.lastObservedConfirmedHead)) draft.confirmedHead = this.lastObservedConfirmedHead;
       const cursors = ENABLED.map((entry) => draft.cursors?.[entry.id]?.blockNumber ?? 0);
@@ -772,6 +772,16 @@ export function classifyCollectorFailure(reasonCode) {
   if (value === "enospc" || value.includes("disk_full") || value.includes("journal_limit") || value.includes("checkpoint_limit")) return "resource_storage";
   if (value.includes("rpc") || value.includes("http_") || value.includes("endpoint") || value.includes("cooling")) return "rpc_provider";
   return "collector_operation";
+}
+
+function readStoreView(store) {
+  return typeof store.readView === "function" ? store.readView() : store.read();
+}
+
+function transactStoreView(store, reason, mutator, afterDerive, options) {
+  return typeof store.transactView === "function"
+    ? store.transactView(reason, mutator, afterDerive, options)
+    : store.transact(reason, mutator, afterDerive, options);
 }
 
 function semanticSnapshot(state, poolKeys) {
@@ -926,8 +936,8 @@ export function seedMetadataQueue(state, now) {
   state.metadataQueue = jobs.sort((a, b) => a.score - b.score || Date.parse(a.waitingSince) - Date.parse(b.waitingSince) || a.tokenAddress.localeCompare(b.tokenAddress)).slice(0, 256);
 }
 
-function seedOnchainQueue(state, now) {
-  seedBackfillQueue(state, now);
+function seedOnchainQueue(state, now, options) {
+  seedBackfillQueue(state, now, options);
 }
 
 function poolNeedsOnchainRpc(state, item) {

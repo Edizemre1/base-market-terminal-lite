@@ -90,6 +90,46 @@ jobs:
             "$(command -v node)" scripts/benchmark-collector-persistence.mjs \
             --output test-results/collector-resource-benchmark.json
 
+      - name: Production-shape collector startup and reader acceptance
+        run: |
+          fixture="$RUNNER_TEMP/base-collector-startup-${GITHUB_RUN_ID}.json"
+          trap 'rm -f -- "$fixture"' EXIT
+          mkdir -p test-results
+          node --experimental-strip-types scripts/benchmark-collector-startup.mjs \
+            --generate-fixture "$fixture" \
+            --output test-results/collector-startup-fixture-meta.json
+          source_device="$(findmnt -n -o SOURCE -T "$GITHUB_WORKSPACE")"
+          source_device="${source_device%%\[*}"
+          io_device="$(readlink -f "$source_device")"
+          test -b "$io_device"
+          runner_user="$(id -un)"
+          runner_group="$(id -gn)"
+          common=(
+            -p User="$runner_user"
+            -p Group="$runner_group"
+            -p CPUQuota=25%
+            -p MemoryMax=512M
+            -p IOWeight=50
+            -p Nice=10
+            -p LimitCORE=0
+            -p "IOWriteBandwidthMax=$io_device 262144"
+            -p WorkingDirectory="$GITHUB_WORKSPACE"
+          )
+          sudo systemd-run --quiet --wait --collect --pipe \
+            --unit="base-collector-startup-baseline-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --setenv="SOURCE_SHA=$SOURCE_SHA" \
+            "${common[@]}" \
+            "$(command -v node)" --experimental-strip-types scripts/benchmark-collector-startup.mjs \
+            --baseline "$fixture" \
+            --output test-results/collector-startup-before.json
+          sudo systemd-run --quiet --wait --collect --pipe \
+            --unit="base-collector-startup-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --setenv="SOURCE_SHA=$SOURCE_SHA" \
+            "${common[@]}" \
+            "$(command -v node)" --experimental-strip-types scripts/benchmark-collector-startup.mjs \
+            --acceptance "$fixture" \
+            --output test-results/collector-startup-after.json
+
       - name: Pricing and enrichment contracts
         run: npm run test:enrichment
 

@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createJournalCursor, journalDigest, journalPayload, replayJournalChunk } from "../collector/journal.mjs";
+import { createJournalCursor, journalDigest, journalPayload, replayJournalChunk, stableSha256, stableStringify } from "../collector/journal.mjs";
 import { DurableDiscoveryStore, createIntegrity, initialState, readStoreSnapshotSync } from "../collector/store.mjs";
 import { classifyCollectorFailure, failureBackoffMs } from "../collector/service.mjs";
 
@@ -178,6 +178,7 @@ test("checkpoint rename failure retains the acknowledged WAL for restart recover
   try {
     await store.open();
     await store.transact("rename-safe", (draft) => { draft.currentHead = 321; }, undefined, { derive: false });
+    await store.flush();
     assert.equal(store.getMetrics().checkpointFailures, 1);
     await copyCheckpointAndWal(source, recovery);
     const reopened = configuredStore(recovery);
@@ -201,6 +202,48 @@ test("journal rejects a commit without its prepare and detects chain tampering",
   prepare.afterDigest = journalDigest(prepare.beforeDigest, journalPayload(prepare));
   prepare.patch[0].value = 2;
   assert.throws(() => replayJournalChunk(createJournalCursor(initialState(NOW)), `${JSON.stringify(prepare)}\n${JSON.stringify({ ...commit, afterDigest: prepare.afterDigest })}\n`), /digest_mismatch/);
+});
+
+test("streaming stable SHA-256 remains byte-compatible with the canonical serializer", () => {
+  const fixtures = [
+    initialState(NOW),
+    { z: [1, undefined, Number.NaN, { b: true, a: "value" }], a: { omitted: undefined, kept: null } },
+    { nested: { c: 3, a: 1, b: 2 }, empty: [], unicode: "Mergen ₺" }
+  ];
+  for (const fixture of fixtures) {
+    assert.equal(stableSha256(fixture), createHash("sha256").update(stableStringify(fixture)).digest("hex"));
+  }
+});
+
+test("a due checkpoint runs behind the durable commit without blocking WAL readers", async () => {
+  const directory = await temporary("checkpoint-background");
+  let releaseCheckpoint;
+  let checkpointStarted;
+  const entered = new Promise((resolve) => { checkpointStarted = resolve; });
+  const blocked = new Promise((resolve) => { releaseCheckpoint = resolve; });
+  const store = configuredStore(directory, {
+    checkpointTransactionLimit: 1,
+    async faultInjector(stage) {
+      if (stage === "before-checkpoint-write") {
+        checkpointStarted();
+        await blocked;
+      }
+    }
+  });
+  try {
+    await store.open();
+    await store.transact("reader-visible", (draft) => { draft.currentHead = 444; }, undefined, { derive: false });
+    await entered;
+    assert.equal(readStoreSnapshotSync(directory).state.currentHead, 444);
+    assert.equal(store.getMetrics().checkpoints, 0);
+    releaseCheckpoint();
+    await store.flush();
+    assert.equal(store.getMetrics().checkpoints, 1);
+  } finally {
+    releaseCheckpoint?.();
+    await store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("transaction queue is bounded and exposes backpressure evidence", async () => {

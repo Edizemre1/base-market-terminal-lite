@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import path from "node:path";
-import { createJournalCursor, replayJournalChunk, type JournalCursor } from "../../../collector/journal.mjs";
+import { createJournalCursor, replayJournalChunk, stableSha256, type JournalCursor } from "../../../collector/journal.mjs";
 import type { BasePair } from "@/types/baseTerminal";
 
 export const ONCHAIN_STORE_SCHEMA_VERSION = 1;
@@ -497,15 +496,9 @@ function metadataVerification(left: StoredMetadata | undefined, right: StoredMet
 }
 
 function digestState(state: OnchainStoreState) {
-  const clone = structuredClone(state) as Partial<OnchainStoreState>;
+  const clone = { ...state } as Partial<OnchainStoreState>;
   delete clone.integrity;
-  return createHash("sha256").update(JSON.stringify(sortValue(clone))).digest("hex");
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue((value as Record<string, unknown>)[key])]));
+  return stableSha256(clone);
 }
 
 function normalizePoolKey(value: string) { return value.toLowerCase(); }

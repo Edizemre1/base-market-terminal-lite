@@ -45,14 +45,14 @@ export function proofWorkValue(pool) {
     + (matched ? Math.log1p(Math.max(0, pool.volume24hUsd ?? 0)) : 0);
 }
 
-export function seedBackfillQueue(state, now = new Date()) {
+export function seedBackfillQueue(state, now = new Date(), { persistHistory = true } = {}) {
   const existing = new Map((state.onchainQueue ?? []).map((job) => [job.poolKey, job]));
   const jobs = [];
   for (const pool of Object.values(state.pools ?? {})) {
     if (pool.status !== "confirmed" || pool.orphaned || pool.replay) continue;
     const previous = existing.get(pool.poolKey);
     // History lives with the bounded pool universe, not a disposable queue row.
-    pool.backfill ??= {
+    const seededHistory = {
       attempts: previous?.attempts ?? 0, consecutiveFailures: previous?.attempts ?? 0,
       createdAt: previous?.createdAt ?? now.toISOString(),
       nextAttemptAt: pool.onchainState?.nextRetryAt ?? previous?.nextAttemptAt ?? now.toISOString(),
@@ -60,7 +60,8 @@ export function seedBackfillQueue(state, now = new Date()) {
       lastSuccessfulHash: pool.onchainState?.status === "complete" ? pool.onchainState.blockHash : undefined,
       lastSuccessAt: pool.onchainState?.status === "complete" ? pool.onchainState.observedAt : undefined
     };
-    const history = pool.backfill;
+    const history = pool.backfill ?? seededHistory;
+    if (!pool.backfill && persistHistory) pool.backfill = history;
     if (Date.parse(history.nextAttemptAt) > now.getTime()) continue;
     if (pool.onchainState?.status === "complete" && now.getTime() - Date.parse(pool.onchainState.observedAt) < ONCHAIN_STATE_REFRESH_MS) continue;
     const priority = backfillPriority(pool, now, state.tokenMetadata);

@@ -21,3 +21,4 @@ export function journalPayload(row: Record<string, unknown>): Record<string, unk
 export function applyPatchOperations<T extends object>(state: T, operations: JournalPatchOperation[]): T;
 export function validatePatch(operations: JournalPatchOperation[]): true;
 export function stableStringify(value: unknown): string;
+export function stableSha256(value: unknown): string;

@@ -62,7 +62,9 @@ export function replayJournalChunk(cursor, input, { allowIncompleteTail = true }
 
 export function journalDigest(beforeDigest, payload) {
   if (!safeDigest(beforeDigest)) throw new Error("journal_before_digest_invalid");
-  return createHash("sha256").update(beforeDigest).update("\n").update(stableStringify(payload)).digest("hex");
+  const hash = createHash("sha256").update(beforeDigest).update("\n");
+  updateHashWithStableJson(hash, payload);
+  return hash.digest("hex");
 }
 
 export function journalPayload(row) {
@@ -110,6 +112,52 @@ export function validatePatch(operations) {
 
 export function stableStringify(value) {
   return JSON.stringify(sortValue(value));
+}
+
+export function stableSha256(value) {
+  const hash = createHash("sha256");
+  updateHashWithStableJson(hash, value);
+  return hash.digest("hex");
+}
+
+export function updateHashWithStableJson(hash, value) {
+  writeStableJson(hash, value, false);
+  return hash;
+}
+
+function writeStableJson(hash, value, arrayEntry) {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    hash.update(JSON.stringify(value));
+    return;
+  }
+  if (typeof value === "number") {
+    hash.update(Number.isFinite(value) ? JSON.stringify(value) : "null");
+    return;
+  }
+  if (typeof value !== "object") {
+    if (arrayEntry) hash.update("null");
+    return;
+  }
+  if (Array.isArray(value)) {
+    hash.update("[");
+    for (let index = 0; index < value.length; index += 1) {
+      if (index) hash.update(",");
+      writeStableJson(hash, value[index], true);
+    }
+    hash.update("]");
+    return;
+  }
+  hash.update("{");
+  let written = 0;
+  for (const key of Object.keys(value).sort()) {
+    const item = value[key];
+    if (item === undefined || typeof item === "function" || typeof item === "symbol") continue;
+    if (written++) hash.update(",");
+    hash.update(JSON.stringify(key));
+    hash.update(":");
+    writeStableJson(hash, item, false);
+  }
+  hash.update("}");
 }
 
 function validatePrepare(row) {

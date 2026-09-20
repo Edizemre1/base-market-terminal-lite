@@ -18,6 +18,7 @@
     "test:rpc": "node --test --test-concurrency=1 tests/rpc-resilience.test.mjs tests/backfill-resilience.test.mjs tests/relay-resilience.test.mjs tests/collector-resource-contract.test.mjs",
     "test:collector-persistence": "node --test --test-concurrency=1 tests/collector-persistence-contract.test.mjs tests/collector-resource-contract.test.mjs",
     "benchmark:collector-persistence": "node scripts/benchmark-collector-persistence.mjs --output test-results/collector-resource-benchmark.json",
+    "benchmark:collector-startup": "node --experimental-strip-types scripts/benchmark-collector-startup.mjs",
     "test:enrichment": "node --test tests/enrichment-contract.test.mjs",
     "test:quality": "node --test tests/market-quality-contract.test.mjs",
     "test:recovery": "node --test tests/performance-market-visibility-contract.test.mjs",

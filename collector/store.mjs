@@ -1,9 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { getHeapStatistics } from "node:v8";
+import { isMainThread, resourceLimits, threadId } from "node:worker_threads";
 import { BASE_CHAIN_ID, COLLECTOR_VERSION, FACTORY_REGISTRY } from "./factory-registry.mjs";
-import { JOURNAL_VERSION, createJournalCursor, journalDigest, journalPayload, replayJournalChunk, stableStringify, validatePatch } from "./journal.mjs";
+import { JOURNAL_VERSION, createJournalCursor, journalDigest, journalPayload, replayJournalChunk, stableSha256, validatePatch } from "./journal.mjs";
 import { buildCanonicalOpportunities, MAX_EVENT_RING, MAX_HISTORY_RING, MAX_PRICE_AGE_MS, MAX_RECONCILIATION_RING } from "./model.mjs";
 import { calculateProofFunnel } from "./proof-coverage.mjs";
 import { resolveOnchainPoolEvidence } from "./onchain-state.mjs";
@@ -67,14 +69,19 @@ export class DurableDiscoveryStore {
     this.lastCheckpointAtMs = 0;
     this.transactionsSinceCheckpoint = 0;
     this.walBytes = 0;
+    this.stateBytesEstimate = 0;
+    this.checkpointScheduled = false;
     this.metrics = initialStoreMetrics();
+    this.sampleResources("constructed");
   }
 
-  async open() {
+  async open({ returnView = false } = {}) {
     await mkdir(this.directory, { recursive: true, mode: 0o750 });
     await this.acquireLock();
     try {
+      this.sampleResources("open_before_load");
       this.state = await this.loadOrInitialize();
+      this.sampleResources("open_after_parse", { stateBytes: this.stateBytesEstimate });
       const cursor = createJournalCursor(this.state);
       let journal = Buffer.alloc(0);
       try { journal = await readFile(this.walPath); }
@@ -87,13 +94,14 @@ export class DurableDiscoveryStore {
       this.journalChainDigest = cursor.digest;
       this.walBytes = recovery.consumedBytes;
       this.transactionsSinceCheckpoint = recovery.applied;
-      this.lastCheckpointAtMs = Date.parse(this.state.persistence?.checkpointAt ?? this.state.updatedAt);
+      this.lastCheckpointAtMs = Date.parse(this.state.persistence?.checkpointAt ?? "");
       if (!Number.isFinite(this.lastCheckpointAtMs)) this.lastCheckpointAtMs = this.now().getTime();
       this.metrics.recoveryCount += 1;
       this.metrics.recoveredTransactions += recovery.applied;
       this.metrics.recoveryMs += elapsedMs(recoveryStarted);
       this.metrics.tornTailBytes += recovery.incompleteBytes;
-      return this.read();
+      this.sampleResources("open_after_recovery", { stateBytes: this.stateBytesEstimate, messageBytes: recovery.consumedBytes });
+      return returnView ? this.readView() : this.read();
     } catch (error) {
       await this.releaseLock();
       throw error;
@@ -101,13 +109,22 @@ export class DurableDiscoveryStore {
   }
 
   read() {
-    if (!this.state) throw new Error("Store is not open");
-    const snapshot = structuredClone(this.state);
-    if (Object.keys(this.runtimeHealth).length) snapshot.health = mergeHealth(snapshot.health, this.runtimeHealth);
+    const view = this.readView();
+    this.metrics.structuredCloneCalls += 1;
+    this.metrics.maxCloneSourceBytes = Math.max(this.metrics.maxCloneSourceBytes, this.stateBytesEstimate);
+    this.sampleResources("snapshot_clone_before", { stateBytes: this.stateBytesEstimate, messageBytes: this.stateBytesEstimate });
+    const snapshot = structuredClone(view);
+    this.sampleResources("snapshot_clone_after", { stateBytes: this.stateBytesEstimate, messageBytes: this.stateBytesEstimate });
     return snapshot;
   }
 
-  async transact(reason, mutator, afterDerive, options) {
+  readView() {
+    if (!this.state) throw new Error("Store is not open");
+    if (!Object.keys(this.runtimeHealth).length) return this.state;
+    return { ...this.state, health: mergeHealth(this.state.health, this.runtimeHealth) };
+  }
+
+  async transact(reason, mutator, afterDerive, options = {}) {
     if (this.closed) throw new Error("Store is not writable");
     if (this.pendingTransactions >= this.maxPendingTransactions) {
       this.metrics.backpressureWaits += 1;
@@ -125,11 +142,18 @@ export class DurableDiscoveryStore {
       return this.performTransaction(reason, mutator, afterDerive, options);
     });
     this.transactionTail = operation.catch(() => {});
-    try { return await operation; }
+    try {
+      const state = await operation;
+      return options.returnView ? state : this.read();
+    }
     finally {
       this.pendingTransactions -= 1;
       this.releaseTransactionSlot();
     }
+  }
+
+  transactView(reason, mutator, afterDerive, options = {}) {
+    return this.transact(reason, mutator, afterDerive, { ...options, returnView: true });
   }
 
   async updateRuntimeStatus(reason, update) {
@@ -152,15 +176,21 @@ export class DurableDiscoveryStore {
     const started = process.hrtime.bigint();
     const cpuStarted = process.cpuUsage();
     const transactionId = randomUUID();
+    this.metrics.structuredCloneCalls += 1;
+    this.metrics.maxCloneSourceBytes = Math.max(this.metrics.maxCloneSourceBytes, this.stateBytesEstimate);
+    this.sampleResources("transaction_before_draft", { stateBytes: this.stateBytesEstimate, messageBytes: this.stateBytesEstimate });
     const tracked = createTrackedDraft(this.state);
+    this.sampleResources("transaction_after_draft", { stateBytes: this.stateBytesEstimate, messageBytes: this.stateBytesEstimate });
     const next = tracked.proxy;
     const result = await mutator(next);
+    this.sampleResources("transaction_after_mutation", { stateBytes: this.stateBytesEstimate });
     if (result && result !== next && result !== tracked.raw) throw new Error("store_mutator_replacement_unsupported");
     if (!tracked.changed.size) {
       this.metrics.noOpTransactions += 1;
       this.recordReason(reason, { kind: "noop", durationMs: elapsedMs(started) });
       this.maybeLogMetrics();
-      return this.read();
+      tracked.release();
+      return this.readView();
     }
     if (Object.keys(this.runtimeHealth).length) next.health = mergeHealth(next.health, this.runtimeHealth);
     next.schemaVersion = STORE_SCHEMA_VERSION;
@@ -191,6 +221,8 @@ export class DurableDiscoveryStore {
     if (afterDerive) await afterDerive(next);
     enforceRetention(next);
     const patch = tracked.buildPatch();
+    tracked.release();
+    this.sampleResources("transaction_after_patch", { stateBytes: this.stateBytesEstimate });
     validatePatch(patch);
     validateStateLimits(tracked.raw, patch);
     const sequence = this.sequence + 1;
@@ -200,6 +232,7 @@ export class DurableDiscoveryStore {
     const prepareBytes = serializedLineBytes(prepare);
     const commit = { journalVersion: JOURNAL_VERSION, type: "commit", transactionId, sequence, at: tracked.raw.updatedAt, afterDigest: prepare.afterDigest };
     const commitBytes = serializedLineBytes(commit);
+    this.metrics.maxJournalMessageBytes = Math.max(this.metrics.maxJournalMessageBytes, prepareBytes, commitBytes);
     if (prepareBytes > MAX_DELTA_BYTES || this.walBytes + prepareBytes + commitBytes > MAX_WAL_BYTES) throw new Error("store_journal_limit_exceeded");
 
     await this.injectFault("before-journal-prepare", { reason, sequence });
@@ -207,6 +240,7 @@ export class DurableDiscoveryStore {
     await this.injectFault("after-journal-prepare", { reason, sequence });
     await appendDurableLine(this.walPath, commit);
     await this.injectFault("after-journal-commit", { reason, sequence });
+    this.sampleResources("transaction_after_journal", { stateBytes: this.stateBytesEstimate, messageBytes: prepareBytes });
 
     this.state = tracked.raw;
     this.sequence = sequence;
@@ -221,14 +255,10 @@ export class DurableDiscoveryStore {
     const durationMs = elapsedMs(started);
     this.metrics.transactionMs += durationMs;
     this.recordReason(reason, { kind: "delta", durationMs, logicalBytes: prepareBytes, physicalBytes: prepareBytes + commitBytes, patchOperations: patch.length });
-    try { await this.maybeCheckpoint(); }
-    catch (error) {
-      this.metrics.checkpointFailures += 1;
-      this.metrics.lastCheckpointError = safeFailure(error);
-      this.logMetric({ event: "collector_checkpoint_failure", reasonCode: safeFailure(error), sequence: this.sequence });
-    }
+    this.maybeCheckpoint();
     this.maybeLogMetrics();
-    return this.read();
+    this.sampleResources("transaction_complete", { stateBytes: this.stateBytesEstimate, messageBytes: prepareBytes });
+    return this.readView();
   }
 
   integrityCheck() {
@@ -241,7 +271,7 @@ export class DurableDiscoveryStore {
     if (this.closed) return;
     this.closed = true;
     try {
-      await this.transactionTail.catch(() => {});
+      await this.flush();
       await this.checkpoint();
     } finally {
       await this.releaseLock();
@@ -252,39 +282,117 @@ export class DurableDiscoveryStore {
     return structuredClone({ ...this.metrics, queueDepth: this.pendingTransactions, walBytes: this.walBytes, sequence: this.sequence, transactionsSinceCheckpoint: this.transactionsSinceCheckpoint, limits: STORE_LIMITS });
   }
 
-  async maybeCheckpoint() {
+  async flush() {
+    let observed;
+    do {
+      observed = this.transactionTail;
+      await observed.catch(() => {});
+    } while (observed !== this.transactionTail);
+  }
+
+  maybeCheckpoint() {
     const dueByAge = this.now().getTime() - this.lastCheckpointAtMs >= this.checkpointIntervalMs;
     const dueByCount = this.transactionsSinceCheckpoint >= this.checkpointTransactionLimit;
     const dueByWal = this.walBytes >= Math.floor(MAX_WAL_BYTES * 0.75);
     if (!dueByAge && !dueByCount && !dueByWal) return false;
-    return this.checkpoint();
+    this.scheduleCheckpoint();
+    return true;
+  }
+
+  scheduleCheckpoint() {
+    if (this.checkpointScheduled || this.closed) return false;
+    this.checkpointScheduled = true;
+    const checkpoint = this.transactionTail.then(() => this.checkpoint()).catch((error) => {
+      this.metrics.checkpointFailures += 1;
+      this.metrics.lastCheckpointError = safeFailure(error);
+      this.logMetric({ event: "collector_checkpoint_failure", reasonCode: safeFailure(error), sequence: this.sequence });
+    }).finally(() => { this.checkpointScheduled = false; });
+    this.transactionTail = checkpoint.catch(() => {});
+    return true;
   }
 
   async checkpoint() {
     if (!this.state || this.transactionsSinceCheckpoint === 0) return false;
     const started = process.hrtime.bigint();
-    const checkpointed = structuredClone(this.state);
+    const cpuStarted = process.cpuUsage();
+    this.sampleResources("checkpoint_start", { stateBytes: this.stateBytesEstimate });
+    const checkpointed = { ...this.state };
     const checkpointAt = this.now().toISOString();
     checkpointed.persistence = { journalVersion: JOURNAL_VERSION, appliedSequence: this.sequence, journalDigest: this.journalChainDigest, checkpointAt };
+    const integrityStarted = process.hrtime.bigint();
     checkpointed.integrity = createIntegrity(checkpointed);
+    this.metrics.checkpointIntegrityMs += elapsedMs(integrityStarted);
+    this.sampleResources("checkpoint_after_integrity", { stateBytes: this.stateBytesEstimate });
+    const serializationStarted = process.hrtime.bigint();
     const serialized = `${JSON.stringify(checkpointed, null, 2)}\n`;
     const bytes = Buffer.byteLength(serialized, "utf8");
+    this.metrics.checkpointSerializeMs += elapsedMs(serializationStarted);
+    this.metrics.maxCheckpointMessageBytes = Math.max(this.metrics.maxCheckpointMessageBytes, bytes);
+    this.sampleResources("checkpoint_after_serialize", { stateBytes: bytes, messageBytes: bytes });
     if (bytes > MAX_CHECKPOINT_BYTES) throw new Error("store_checkpoint_limit_exceeded");
     await this.injectFault("before-checkpoint-write", { sequence: this.sequence });
+    const writeStarted = process.hrtime.bigint();
+    const writeCpuStarted = process.cpuUsage();
     await writeAtomicText(this.statePath, serialized, (stage) => this.injectFault(stage, { sequence: this.sequence }));
+    const writeCpu = process.cpuUsage(writeCpuStarted);
+    const writeMs = elapsedMs(writeStarted);
+    const writeCpuMs = (writeCpu.user + writeCpu.system) / 1_000;
+    this.metrics.checkpointWriteMs += writeMs;
+    this.metrics.checkpointWriteCpuMs += writeCpuMs;
+    this.metrics.checkpointDiskWaitMs += Math.max(0, writeMs - writeCpuMs);
     this.state = checkpointed;
+    this.stateBytesEstimate = bytes;
     this.lastCheckpointAtMs = Date.parse(checkpointAt);
     this.transactionsSinceCheckpoint = 0;
     this.metrics.checkpoints += 1;
     this.metrics.checkpointBytes += bytes;
     this.metrics.checkpointMs += elapsedMs(started);
+    const cpu = process.cpuUsage(cpuStarted);
+    this.metrics.checkpointCpuMs += (cpu.user + cpu.system) / 1_000;
+    this.sampleResources("checkpoint_after_write", { stateBytes: bytes, messageBytes: bytes });
     try {
       await writeAtomicText(this.walPath, "", (stage) => this.injectFault(`wal-${stage}`, { sequence: this.sequence }));
       this.walBytes = 0;
     } catch (error) {
       this.logMetric({ event: "collector_wal_compaction_deferred", reasonCode: safeFailure(error), sequence: this.sequence });
     }
+    this.sampleResources("checkpoint_complete", { stateBytes: bytes });
     return true;
+  }
+
+  sampleResources(phase, { stateBytes = 0, messageBytes = 0 } = {}) {
+    const memory = process.memoryUsage();
+    const cgroupMemory = readCgroupMemoryCurrent();
+    const sample = {
+      heapUsed: memory.heapUsed,
+      external: memory.external,
+      arrayBuffers: memory.arrayBuffers,
+      rss: memory.rss,
+      cgroupMemory,
+      stateBytes,
+      messageBytes,
+      pendingTransactions: this.pendingTransactions,
+      transactionWaiters: this.transactionSlotWaiters.length,
+      onchainQueueDepth: this.state?.onchainQueue?.length ?? 0,
+      enrichmentQueueDepth: this.state?.enrichmentQueue?.length ?? 0
+    };
+    this.metrics.resourceSamples += 1;
+    this.metrics.peakHeapUsed = Math.max(this.metrics.peakHeapUsed, sample.heapUsed);
+    this.metrics.peakExternal = Math.max(this.metrics.peakExternal, sample.external);
+    this.metrics.peakArrayBuffers = Math.max(this.metrics.peakArrayBuffers, sample.arrayBuffers);
+    this.metrics.peakRss = Math.max(this.metrics.peakRss, sample.rss);
+    this.metrics.peakCgroupMemory = Math.max(this.metrics.peakCgroupMemory, sample.cgroupMemory ?? 0);
+    this.metrics.maxObservedStateBytes = Math.max(this.metrics.maxObservedStateBytes, stateBytes);
+    this.metrics.maxObservedMessageBytes = Math.max(this.metrics.maxObservedMessageBytes, messageBytes);
+    const previous = this.metrics.resourcePhases[phase];
+    this.metrics.resourcePhases[phase] = previous ? {
+      samples: previous.samples + 1,
+      peakHeapUsed: Math.max(previous.peakHeapUsed, sample.heapUsed),
+      peakRss: Math.max(previous.peakRss, sample.rss),
+      peakCgroupMemory: Math.max(previous.peakCgroupMemory ?? 0, sample.cgroupMemory ?? 0),
+      maxMessageBytes: Math.max(previous.maxMessageBytes, messageBytes)
+    } : { samples: 1, peakHeapUsed: sample.heapUsed, peakRss: sample.rss, peakCgroupMemory: sample.cgroupMemory, maxMessageBytes: messageBytes };
+    return sample;
   }
 
   recordReason(reason, sample) {
@@ -325,6 +433,7 @@ export class DurableDiscoveryStore {
   async loadOrInitialize() {
     try {
       const raw = await readFile(this.statePath, "utf8");
+      this.stateBytesEstimate = Buffer.byteLength(raw, "utf8");
       const parsed = migrate(JSON.parse(raw));
       const expected = createIntegrity(parsed);
       if (parsed.integrity?.digest !== expected.digest) throw new Error("Store integrity digest mismatch");
@@ -332,7 +441,7 @@ export class DurableDiscoveryStore {
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
       const state = initialState();
-      await writeAtomicJson(this.statePath, state);
+      this.stateBytesEstimate = await writeAtomicJson(this.statePath, state);
       return state;
     }
   }
@@ -410,7 +519,7 @@ export function initialState(now = new Date()) {
 export function createIntegrity(state) {
   const clone = { ...state };
   delete clone.integrity;
-  return { algorithm: "sha256", digest: createHash("sha256").update(stableStringify(clone)).digest("hex") };
+  return { algorithm: "sha256", digest: stableSha256(clone) };
 }
 
 export function readStoreSnapshotSync(directory) {
@@ -618,8 +727,8 @@ async function readStaleLock(lockPath) {
 function createTrackedDraft(source) {
   const raw = structuredClone(source);
   const changed = new Map();
-  const rawByProxy = new WeakMap();
-  const proxyByTargetAndPath = new WeakMap();
+  let rawByProxy = new WeakMap();
+  let proxyByTargetAndPath = new WeakMap();
 
   const record = (path) => {
     if (!path.length || path[0] === "integrity" || path[0] === "persistence") return;
@@ -666,9 +775,14 @@ function createTrackedDraft(source) {
       return paths.map((path) => {
         const located = valueAtPath(raw, path);
         return located.exists && located.value !== undefined
-          ? { op: "set", path, value: structuredClone(located.value) }
+          ? { op: "set", path, value: located.value }
           : { op: "remove", path };
       });
+    },
+    release() {
+      changed.clear();
+      rawByProxy = new WeakMap();
+      proxyByTargetAndPath = new WeakMap();
     }
   };
 }
@@ -752,6 +866,7 @@ function mergeHealth(base = {}, overlay = {}) {
 }
 
 function initialStoreMetrics() {
+  const heap = getHeapStatistics();
   return {
     transactions: 0,
     noOpTransactions: 0,
@@ -764,6 +879,12 @@ function initialStoreMetrics() {
     transactionMs: 0,
     statusOnlyMs: 0,
     checkpointMs: 0,
+    checkpointCpuMs: 0,
+    checkpointIntegrityMs: 0,
+    checkpointSerializeMs: 0,
+    checkpointWriteMs: 0,
+    checkpointWriteCpuMs: 0,
+    checkpointDiskWaitMs: 0,
     cpuMicros: 0,
     queuePeak: 0,
     queueWaitMs: 0,
@@ -774,8 +895,45 @@ function initialStoreMetrics() {
     tornTailBytes: 0,
     lastCheckpointError: undefined,
     lastLogAtMs: 0,
+    structuredCloneCalls: 0,
+    maxCloneSourceBytes: 0,
+    maxJournalMessageBytes: 0,
+    maxCheckpointMessageBytes: 0,
+    maxObservedStateBytes: 0,
+    maxObservedMessageBytes: 0,
+    resourceSamples: 0,
+    peakHeapUsed: 0,
+    peakExternal: 0,
+    peakArrayBuffers: 0,
+    peakRss: 0,
+    peakCgroupMemory: 0,
+    runtime: {
+      node: process.version,
+      isMainThread,
+      threadId,
+      heapLimitBytes: heap.heap_size_limit,
+      resourceLimits: {
+        maxOldGenerationSizeMb: resourceLimits.maxOldGenerationSizeMb,
+        maxYoungGenerationSizeMb: resourceLimits.maxYoungGenerationSizeMb,
+        codeRangeSizeMb: resourceLimits.codeRangeSizeMb,
+        stackSizeMb: resourceLimits.stackSizeMb
+      },
+      execArgvFlags: process.execArgv.filter((entry) => entry.startsWith("--")).map((entry) => entry.split("=", 1)[0]).slice(0, 16)
+    },
+    resourcePhases: {},
     reasons: {}
   };
+}
+
+function readCgroupMemoryCurrent() {
+  if (process.platform !== "linux") return undefined;
+  try {
+    const membership = readFileSync("/proc/self/cgroup", "utf8").split(/\r?\n/).find((line) => line.startsWith("0::"));
+    const relative = membership?.slice(3) || "/";
+    return Number(readFileSync(path.resolve("/sys/fs/cgroup", `.${relative}`, "memory.current"), "utf8").trim());
+  } catch {
+    return undefined;
+  }
 }
 
 function serializedLineBytes(value) {
