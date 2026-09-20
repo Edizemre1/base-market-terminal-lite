@@ -15,7 +15,7 @@ export async function getPairChart(
   pair: ChartPairInput,
   mode: MarketDataMode
 ): Promise<PairChartResult> {
-  if (mode !== "dexscreener" || pair.dataSource !== "dexscreener") {
+  if (mode !== "dexscreener" || pair.dataSource === "mock" || !pair.pairAddress) {
     return mockChartProvider.getPairChart(pair);
   }
 

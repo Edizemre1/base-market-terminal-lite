@@ -7,6 +7,7 @@ import {
   writeRadarStateToUrl,
   type RadarState
 } from "@/lib/base-terminal/radar";
+import { safeSetStorageItem } from "@/lib/safeStorage";
 
 export function useRadarFilters() {
   const [radarState, setRadarState] = useState<RadarState>(DEFAULT_RADAR_STATE);
@@ -22,7 +23,7 @@ export function useRadarFilters() {
       return;
     }
 
-    window.localStorage.setItem(RADAR_FILTER_STORAGE_KEY, JSON.stringify(radarState));
+    safeSetStorageItem(RADAR_FILTER_STORAGE_KEY, JSON.stringify(radarState));
     writeRadarStateToUrl(radarState);
   }, [radarState, radarStateLoaded]);
 

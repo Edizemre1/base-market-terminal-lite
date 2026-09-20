@@ -1,49 +1,13 @@
-import type { ChartPairInput, PairChartProvider } from "./types";
+import type { PairChartProvider } from "./types";
 
 export const mockChartProvider: PairChartProvider = {
-  name: "Synthetic chart preview",
+  name: "Chart unavailable",
   readOnly: true,
-  getPairChart: (pair) => ({
-    source: "synthetic",
-    label: "Chart preview \u00b7 OHLCV unavailable",
+  getPairChart: () => ({
+    source: "unavailable",
+    label: "OHLCV unavailable",
     updatedAt: new Date().toISOString(),
-    candles: buildSyntheticCandles(pair),
+    candles: [],
     unavailableReason: "Read-only OHLCV is not connected for this pair."
   })
 };
-
-export function buildSyntheticCandles(pair: ChartPairInput) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const points = pair.chart.length > 0 ? pair.chart : [1];
-  const volumePerPoint = pair.volume24h / Math.max(points.length, 1);
-  const intervalSeconds = getSyntheticIntervalSeconds(pair.timeframe);
-
-  return points.map((close, index) => {
-    const previous = points[index - 1] ?? close;
-    const movement = Math.abs(close - previous);
-    const wick = Math.max(movement * 0.45, Math.abs(close) * 0.006, 0.0001);
-
-    return {
-      timestamp: nowSeconds - (points.length - index - 1) * intervalSeconds,
-      open: previous,
-      high: Math.max(previous, close) + wick,
-      low: Math.max(0, Math.min(previous, close) - wick),
-      close,
-      volume: volumePerPoint
-    };
-  });
-}
-
-function getSyntheticIntervalSeconds(timeframe: ChartPairInput["timeframe"]) {
-  switch (timeframe) {
-    case "15m":
-      return 15 * 60;
-    case "4h":
-      return 4 * 60 * 60;
-    case "1d":
-      return 24 * 60 * 60;
-    case "1h":
-    default:
-      return 60 * 60;
-  }
-}

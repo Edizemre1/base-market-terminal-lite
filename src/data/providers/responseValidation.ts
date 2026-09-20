@@ -1,3 +1,5 @@
+import { parseStrictFiniteNumber } from "@/lib/marketMath";
+
 type FetchInit = RequestInit & {
   next?: {
     revalidate: number;
@@ -28,16 +30,7 @@ export function readString(value: unknown): string | undefined {
 }
 
 export function readNumber(value: unknown): number | undefined {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : undefined;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return undefined;
+  return parseStrictFiniteNumber(value);
 }
 
 export function readHttpUrl(value: unknown): string | undefined {
@@ -52,6 +45,22 @@ export function readHttpUrl(value: unknown): string | undefined {
     return parsed.protocol === "http:" || parsed.protocol === "https:"
       ? parsed.toString()
       : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readAllowedHttpsUrl(value: unknown, allowedHosts: string[]) {
+  const url = readString(value);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLocaleLowerCase("en-US");
+    const allowed = allowedHosts.some((host) => {
+      const normalizedHost = host.toLocaleLowerCase("en-US");
+      return hostname === normalizedHost || hostname.endsWith(`.${normalizedHost}`);
+    });
+    return parsed.protocol === "https:" && allowed ? parsed.toString() : undefined;
   } catch {
     return undefined;
   }

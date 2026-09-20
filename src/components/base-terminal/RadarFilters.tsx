@@ -32,17 +32,17 @@ export function RadarFilterPanel({
 
   return (
     <section
-      className="min-h-0 overflow-hidden border border-base-line bg-base-panel"
+      className="min-h-0 overflow-hidden border border-border-subtle bg-surface-panel"
       data-testid="radar-filters"
     >
-      <div className="flex min-h-8 items-center justify-between border-b border-base-line bg-base-raised px-2">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
+      <div className="flex min-h-8 items-center justify-between border-b border-border-subtle bg-surface-raised px-2">
+        <h2 className="text-meta font-semibold uppercase tracking-eyebrow text-content-primary">
           Radar filters
         </h2>
         <button
           type="button"
           onClick={onReset}
-          className="font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted hover:text-base-mint"
+          className="font-mono text-meta uppercase tracking-eyebrow text-content-secondary hover:text-content-primary"
         >
           Reset
         </button>
@@ -57,7 +57,7 @@ export function RadarFilterPanel({
                 key={preset}
                 type="button"
                 onClick={() => applyPreset(preset)}
-                className="h-6 border border-base-line bg-base-elevated px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-base-muted hover:border-base-mint hover:text-base-mint"
+                className="h-6 border border-border-subtle bg-surface-interactive px-1 font-mono text-meta uppercase tracking-eyebrow text-content-secondary hover:border-border-strong hover:text-content-primary"
               >
                 {preset}
               </button>
@@ -157,15 +157,15 @@ function RadarSelect({
   children: ReactNode;
 }) {
   return (
-    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-base-line bg-base-elevated text-[10px]">
-      <span className="border-r border-base-line px-1 font-mono uppercase tracking-[0.08em] text-base-muted">
+    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-border-subtle bg-surface-interactive text-meta">
+      <span className="border-r border-border-subtle px-1 font-mono uppercase tracking-eyebrow text-content-secondary">
         {label}
       </span>
       <select
         data-testid={`radar-select-${label.toLowerCase().replace(/\s+/g, "-")}`}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-6 min-w-0 bg-base-panel px-1 font-mono text-[10px] text-base-text outline-none"
+        className="h-6 min-w-0 bg-surface-panel px-1 font-mono text-meta text-content-primary outline-none"
       >
         {children}
       </select>
@@ -183,8 +183,8 @@ function RadarInput({
   onChange: (value: number | undefined) => void;
 }) {
   return (
-    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-base-line bg-base-elevated text-[10px]">
-      <span className="border-r border-base-line px-1 font-mono uppercase tracking-[0.08em] text-base-muted">
+    <label className="grid grid-cols-[58px_minmax(0,1fr)] items-center border border-border-subtle bg-surface-interactive text-meta">
+      <span className="border-r border-border-subtle px-1 font-mono uppercase tracking-eyebrow text-content-secondary">
         {label}
       </span>
       <input
@@ -192,7 +192,7 @@ function RadarInput({
         value={value ?? ""}
         onChange={(event) => onChange(toOptionalNumber(event.target.value))}
         placeholder="Any"
-        className="h-6 min-w-0 bg-base-panel px-1 font-mono text-[10px] text-base-text outline-none placeholder:text-base-muted"
+        className="h-6 min-w-0 bg-surface-panel px-1 font-mono text-meta text-content-primary outline-none placeholder:text-content-secondary"
       />
     </label>
   );
@@ -212,10 +212,10 @@ function RadarToggle({
       type="button"
       onClick={onClick}
       className={cx(
-        "h-6 border px-1 font-mono text-[9px] uppercase tracking-[0.08em]",
+        "h-6 border px-1 font-mono text-meta uppercase tracking-eyebrow",
         active
-          ? "border-base-mint/45 bg-base-mint/10 text-base-mint"
-          : "border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint"
+          ? "border-brand-accent/45 bg-brand-accent/10 text-brand-accent"
+          : "border-border-subtle bg-surface-interactive text-content-secondary hover:border-border-strong hover:text-content-primary"
       )}
     >
       {label}

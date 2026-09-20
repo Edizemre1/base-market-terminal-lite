@@ -1,0 +1,53 @@
+import type { BasePair } from "@/types/baseTerminal";
+import { calculateCanonicalUsdcPrice, type CanonicalPrice } from "../../../collector/model.mjs";
+
+export type { CanonicalPrice };
+
+export const BASE_USDC_ADDRESS = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+export const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
+
+export function calculateOpportunityUsdcPrice(focusTokenAddress: string, pairs: BasePair[], now = new Date()): CanonicalPrice {
+  const pricingPools = pairs.flatMap((pair) => {
+    if (pair.providerDiscoveryState === "conflicting" || pair.priceReconciliation?.status === "conflict") return [];
+    const token0 = normalizeAddress(pair.baseTokenAddress);
+    const token1 = normalizeAddress(pair.quoteTokenAddress);
+    const poolKey = (pair.pairAddress ?? pair.id).toLowerCase();
+    const proof = pair.onchainStateEvidence;
+    const observedAt = proof?.observedAt;
+    const direct = token0 === proof?.token0 && token1 === proof?.token1;
+    const inverted = token0 === proof?.token1 && token1 === proof?.token0;
+    const rate = direct ? positive(proof?.observedPrice0In1) : inverted ? positive(proof?.observedPrice1In0) : undefined;
+    if (!token0 || !token1 || !rate || !observedAt) return [];
+    return [{
+      poolKey,
+      chainId: 8453,
+      token0,
+      token1,
+      status: "confirmed",
+      orphaned: false,
+      verifiedSource: Boolean(pair.pairAddress && pair.dataProviders?.includes("onchain") && (pair.metadataVerificationState === "verified" || pair.metadataVerificationState === "legacy_verified" || pair.onchainProvenance?.decimalsVerified)),
+      onchainState: { ...proof, token0, token1, observedPrice0In1: rate, decimals0: direct ? proof?.decimals0 : proof?.decimals1, decimals1: direct ? proof?.decimals1 : proof?.decimals0 },
+      priceToken1PerToken0: rate,
+      liquidityUsd: nonNegative(pair.liquidityUsd),
+      onchainLiquidityUsd: nonNegative(pair.liquidityReconciliation?.onchain),
+      providerLiquidityUsd: nonNegative(pair.liquidityReconciliation?.provider),
+      providerEnrichment: { status: pair.providerDiscoveryState, providers: pair.dataProviders, observedAt: pair.priceReconciliation?.providerObservedAt },
+      priceReconciliation: pair.priceReconciliation,
+      liquidityResolutionState: pair.liquidityState,
+      volume24hUsd: nonNegative(pair.volumes?.h24),
+      trades24h: pair.txns?.h24 ? pair.txns.h24.buys + pair.txns.h24.sells : undefined,
+      observedAt,
+      confirmedAt: pair.onchainProvenance?.confirmedAt,
+      blockNumber: pair.blockNumber
+    }];
+  });
+  return calculateCanonicalUsdcPrice(focusTokenAddress, pricingPools, now);
+}
+
+function normalizeAddress(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && /^0x[0-9a-f]{40}$/.test(normalized) ? normalized : undefined;
+}
+
+function positive(value: number | undefined) { return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined; }
+function nonNegative(value: number | undefined) { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined; }

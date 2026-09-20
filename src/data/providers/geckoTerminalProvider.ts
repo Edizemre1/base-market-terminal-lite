@@ -8,6 +8,7 @@ export function createGeckoTerminalProvider(): MarketDataProvider {
     mode: "geckoterminal",
     name: "GeckoTerminal placeholder",
     readOnly: true,
+    getAllPairs: () => [],
     getNewPairs: () => [],
     getVolumeInflows: () => [],
     getMomentumPairs: () => [],

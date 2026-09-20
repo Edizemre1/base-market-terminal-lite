@@ -21,24 +21,24 @@ export function PinnedPairsPanel({
 }) {
   return (
     <section
-      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      className="flex min-h-0 flex-col overflow-hidden border border-border-subtle bg-surface-panel"
       data-testid="pinned-pairs-panel"
     >
-      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
+      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-border-subtle bg-surface-raised px-2">
         <div className="flex items-center gap-2">
-          <Star size={11} className="text-base-mint" fill="currentColor" aria-hidden="true" />
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
+          <Star size={11} className="text-brand-accent" fill="currentColor" aria-hidden="true" />
+          <h2 className="text-meta font-semibold uppercase tracking-eyebrow text-content-primary">
             Pinned
           </h2>
         </div>
-        <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+        <span className="font-mono text-meta uppercase tracking-eyebrow text-content-secondary">
           local
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {pairs.length === 0 ? (
-          <div className="px-2 py-3 text-[11px] text-base-muted">
-            <p className="font-mono text-base-text">
+          <div className="px-2 py-3 text-meta text-content-secondary">
+            <p className="font-mono text-content-primary">
               {filtersActive ? "No pinned pairs match filters." : "No pinned pairs."}
             </p>
             <p className="mt-1">Use the star on rows or search results.</p>
@@ -49,9 +49,9 @@ export function PinnedPairsPanel({
               key={pair.key}
               data-testid={`pinned-pair-${pair.currentPairId ?? pair.key}`}
               className={cx(
-                "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-base-line px-2 py-1.5 text-[11px] last:border-b-0",
-                pair.currentPairId === selectedPairId && "bg-base-mint/10",
-                pair.stale && "bg-base-amber/5"
+                "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-border-subtle px-2 py-2 text-meta last:border-b-0",
+                pair.currentPairId === selectedPairId && "bg-brand-accent/10",
+                pair.stale && "bg-freshness-delayed/5"
               )}
             >
               <button
@@ -68,32 +68,32 @@ export function PinnedPairsPanel({
                   size="sm"
                 />
                 <span className="min-w-0">
-                  <span className="block truncate font-mono font-semibold text-base-text">
+                  <span className="block truncate font-mono font-semibold text-content-primary">
                     {pair.pair}
                   </span>
                   <span
                     className={cx(
-                      "block truncate text-[10px]",
-                      pair.stale ? "font-mono text-base-amber" : "text-base-muted"
+                      "block truncate text-meta",
+                      pair.stale ? "font-mono text-freshness-delayed" : "text-content-secondary"
                     )}
                   >
                     {pair.stale ? "Stale - not in current feed" : pair.dex}
                   </span>
                 </span>
               </button>
-              <span className="text-right font-mono text-[10px]">
-                <span className="block text-base-text">{pair.price}</span>
-                <span className={pair.change24h >= 0 ? "text-base-mint" : "text-base-rose"}>
-                  {formatPercent(pair.change24h)}
+              <span className="text-right font-mono text-meta">
+                <span className="block text-content-primary">{pair.price}</span>
+                <span className={(pair.change24h ?? 0) >= 0 ? "text-market-positive" : "text-market-negative"}>
+                  {pair.change24h === undefined ? "N/A" : formatPercent(pair.change24h)}
                 </span>
-                <span className="block text-[9px] text-base-muted">
-                  L {formatCompactCurrency(pair.liquidity || pair.volume24h)}
+                <span className="block text-meta text-content-secondary">
+                  L {pair.liquidity === undefined && pair.volume24h === undefined ? "N/A" : formatCompactCurrency(pair.liquidity ?? pair.volume24h ?? 0)}
                 </span>
               </span>
               <button
                 type="button"
                 onClick={() => onUnpin(pair.key)}
-                className="grid h-6 w-6 place-items-center border border-base-line bg-base-elevated text-base-mint hover:border-base-rose hover:text-base-rose"
+                className="grid h-6 w-6 place-items-center border border-border-subtle bg-surface-interactive text-brand-accent hover:border-market-negative hover:text-market-negative"
                 aria-label={`Unpin ${pair.pair}`}
               >
                 <Star size={12} fill="currentColor" aria-hidden="true" />
@@ -137,21 +137,21 @@ export function OpportunityFeed({
   return (
     <section
       id={id}
-      className="flex min-h-0 flex-col overflow-hidden border border-base-line bg-base-panel"
+      className="flex min-h-0 flex-col overflow-hidden border border-border-subtle bg-surface-panel"
       data-testid={`feed-${kind}`}
     >
-      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-base-line bg-base-raised px-2">
+      <div className="flex min-h-8 shrink-0 items-center justify-between border-b border-border-subtle bg-surface-raised px-2">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-base-muted">{marker}</span>
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-base-text">
+          <span className="font-mono text-meta text-content-secondary">{marker}</span>
+          <h2 className="text-meta font-semibold uppercase tracking-eyebrow text-content-primary">
             {title}
           </h2>
         </div>
-        <span className="border border-base-line bg-base-elevated px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-base-muted">
+        <span className="border border-border-subtle bg-surface-interactive px-2 py-1 font-mono text-meta uppercase tracking-eyebrow text-content-secondary">
           {pairs.length} rows
         </span>
       </div>
-      <div className="grid shrink-0 grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] border-b border-base-line bg-base-elevated px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-base-muted">
+      <div className="grid shrink-0 grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] border-b border-border-subtle bg-surface-interactive px-2 py-2 text-meta font-semibold uppercase tracking-eyebrow text-content-secondary">
         <span>Pair</span>
         <span>Age</span>
         <span className="text-right">Liquidity</span>
@@ -176,7 +176,7 @@ export function OpportunityFeed({
         ) : null}
 
         {fallbackPairs.length > 0 ? (
-          <div className="border-b border-base-line bg-base-amber/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-base-amber">
+          <div className="border-b border-border-subtle bg-freshness-delayed/10 px-2 py-1 font-mono text-meta uppercase tracking-eyebrow text-freshness-delayed">
             Demo fallback
           </div>
         ) : null}
@@ -201,16 +201,16 @@ export function OpportunityFeed({
 function FeedEmptyState({ kind }: { kind: FeedKind }) {
   if (kind === "new") {
     return (
-      <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
-        <p className="font-mono text-base-text">No qualified new pairs found.</p>
+      <div className="border-b border-border-subtle px-2 py-4 text-meta text-content-secondary last:border-b-0">
+        <p className="font-mono text-content-primary">No qualified new pairs found.</p>
         <p className="mt-1">Try Volume Inflow or Momentum.</p>
       </div>
     );
   }
 
   return (
-    <div className="border-b border-base-line px-2 py-4 text-[11px] text-base-muted last:border-b-0">
-      <p className="font-mono text-base-text">No qualified pairs found.</p>
+    <div className="border-b border-border-subtle px-2 py-4 text-meta text-content-secondary last:border-b-0">
+      <p className="font-mono text-content-primary">No qualified pairs found.</p>
       <p className="mt-1">Read-only market data is limited right now.</p>
     </div>
   );
@@ -237,20 +237,20 @@ function FeedRow({
     <div
       data-testid={`pair-row-${kind}-${pair.id}`}
       className={cx(
-        "relative border-b border-base-line last:border-b-0",
-        selectedPairId === pair.id && "bg-base-mint/10"
+        "relative border-b border-border-subtle last:border-b-0",
+        selectedPairId === pair.id && "bg-brand-accent/10"
       )}
     >
       <button
         type="button"
         onClick={() => onSelect(pair.id)}
-        className="grid min-h-11 w-full grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] items-center px-2 py-1 pr-8 text-left text-[11px] hover:bg-base-mint/5"
+        className="grid min-h-11 w-full grid-cols-[minmax(0,1.5fr)_30px_50px_50px_44px] items-center px-2 py-1 pr-8 text-left text-meta hover:bg-surface-interactive"
       >
         <span className="flex min-w-0 items-center gap-2">
           <span
             className={cx(
-              "h-1.5 w-1.5 shrink-0 rounded-full",
-              isFallbackRow ? "bg-base-amber" : "bg-base-mint"
+              "h-1.5 w-1.5 shrink-0 rounded-pill",
+              isFallbackRow ? "bg-freshness-delayed" : "bg-brand-accent"
             )}
           />
           <PairAvatarStack
@@ -261,46 +261,46 @@ function FeedRow({
             size="sm"
           />
           <span className="min-w-0">
-            <span className="block truncate font-mono font-semibold text-base-text">
+            <span className="block truncate font-mono font-semibold text-content-primary">
               {pair.pair}
             </span>
             <span className="flex min-w-0 items-center gap-1">
               <span
                 className={cx(
-                  "truncate text-[9px] leading-3",
-                  isFallbackRow ? "font-mono text-base-amber" : "text-base-muted"
+                  "truncate text-meta leading-3",
+                  isFallbackRow ? "font-mono text-freshness-delayed" : "text-content-secondary"
                 )}
               >
                 {getFeedRowSubtitle(pair, isFallbackRow)}
               </span>
               {!isFallbackRow ? (
-                <span className="shrink-0 border border-base-line bg-base-elevated px-1 font-mono text-[8px] uppercase text-base-muted">
+                <span className="shrink-0 border border-border-subtle bg-surface-interactive px-1 font-mono text-meta uppercase text-content-secondary">
                   {pair.dexName ?? pair.dex}
                 </span>
               ) : null}
             </span>
           </span>
         </span>
-        <span className="font-mono text-[10px] text-base-muted">{pair.age}</span>
-        <span className="text-right font-mono text-[10px] text-base-text">
-          {formatCompactCurrency(pair.liquidity)}
+        <span className="font-mono text-meta text-content-secondary">{pair.age}</span>
+        <span className="text-right font-mono text-meta text-content-primary">
+          {pair.liquidity === undefined ? "N/A" : formatCompactCurrency(pair.liquidity)}
         </span>
-        <span className="text-right font-mono text-[10px] text-base-text">
-          {formatCompactCurrency(pair.volume24h)}
+        <span className="text-right font-mono text-meta text-content-primary">
+          {pair.volume24h === undefined ? "N/A" : formatCompactCurrency(pair.volume24h)}
         </span>
         <span
           className={cx(
-            "justify-self-end border px-1 py-0.5 text-right font-mono text-[10px]",
-            pair.change24h >= 0
-              ? "border-base-mint/35 bg-base-mint/10 text-base-mint"
-              : "border-base-rose/35 bg-base-rose/10 text-base-rose"
+            "justify-self-end border px-1 py-1 text-right font-mono text-meta",
+            (pair.change24h ?? 0) >= 0
+              ? "border-brand-accent/35 bg-brand-accent/10 text-brand-accent"
+              : "border-market-negative/35 bg-market-negative/10 text-market-negative"
           )}
         >
           {kind === "momentum"
-            ? pair.momentumScore
+            ? pair.momentumScore ?? "N/A"
             : kind === "inflow"
-              ? `+${formatCompactCurrency(pair.inflow24h)}`
-              : formatPercent(pair.change24h)}
+              ? pair.inflow24h === undefined ? "N/A" : `+${formatCompactCurrency(pair.inflow24h)}`
+              : pair.change24h === undefined ? "N/A" : formatPercent(pair.change24h)}
         </span>
       </button>
       <button
@@ -308,8 +308,8 @@ function FeedRow({
         type="button"
         onClick={() => onTogglePin(pair)}
         className={cx(
-          "absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center border border-base-line bg-base-elevated text-base-muted hover:border-base-mint hover:text-base-mint",
-          isPinned && "border-base-mint/45 bg-base-mint/10 text-base-mint"
+          "absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center border border-border-subtle bg-surface-interactive text-content-secondary hover:border-border-strong hover:text-content-primary",
+          isPinned && "border-brand-accent/45 bg-brand-accent/10 text-brand-accent"
         )}
         aria-label={isPinned ? `Unpin ${pair.pair}` : `Pin ${pair.pair}`}
       >

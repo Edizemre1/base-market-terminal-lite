@@ -41,9 +41,25 @@ export function pairsRepresentSamePair(left: BasePair, right: BasePair) {
   const leftPairAddress = left.pairAddress?.toLowerCase();
   const rightPairAddress = right.pairAddress?.toLowerCase();
 
+  // A pool address is the canonical identity. Equal symbols can describe many
+  // distinct pools, so never fall back to the route label when both are known.
+  if (leftPairAddress && rightPairAddress) {
+    return leftPairAddress === rightPairAddress;
+  }
+
+  const hasExactTokenRoutes = Boolean(
+    left.baseTokenAddress && left.quoteTokenAddress &&
+    right.baseTokenAddress && right.quoteTokenAddress
+  );
+  if (hasExactTokenRoutes) {
+    return (
+      left.baseTokenAddress?.toLowerCase() === right.baseTokenAddress?.toLowerCase() &&
+      left.quoteTokenAddress?.toLowerCase() === right.quoteTokenAddress?.toLowerCase()
+    );
+  }
+
   return (
     left.id === right.id ||
-    (Boolean(leftPairAddress && rightPairAddress) && leftPairAddress === rightPairAddress) ||
     normalizePairIdentity(left.pair) === normalizePairIdentity(right.pair)
   );
 }

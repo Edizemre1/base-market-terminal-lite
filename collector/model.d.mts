@@ -1,0 +1,36 @@
+export type CanonicalPrice = {
+  chainId: 8453;
+  tokenAddress?: string;
+  primaryPoolKey?: string;
+  adapterFamily?: string;
+  tokenOrientation?: "direct" | "inverted";
+  decimals?: { token0?: number; token1?: number };
+  rawPoolPrice?: { numerator?: string; denominator?: string };
+  inversionApplied?: boolean;
+  value?: number;
+  rawValue?: string;
+  tier: "A" | "B" | "C" | "UNPRICED";
+  kind: "direct" | "converted" | "unpriced";
+  sourcePoolKeys: string[];
+  anchor?: string;
+  observedAt?: string;
+  blockNumber?: number;
+  sourceBlocks?: Array<{ poolKey: string; blockNumber: number; blockHash: string; observedAt: string }>;
+  anchorPrice?: number;
+  anchorPoolKeys?: string[];
+  providerProvenance?: Array<Record<string, unknown>>;
+  agreement?: Array<Record<string, unknown>>;
+  liquidityEvidence?: Array<Record<string, unknown>>;
+  expiresAt?: string;
+  eligible?: boolean;
+  eligibilityReason?: string;
+  rejectionReason?: string;
+  freshness: "fresh" | "unavailable";
+  reasonCode: string;
+  qualityStatus?: "consensus" | "single_path";
+  selectionReason?: string;
+  maximumDeviation?: number;
+};
+
+export function calculateCanonicalUsdcPrice(tokenAddress: string, pools: Array<Record<string, unknown>>, now?: Date, options?: { maxAgeMs?: number; minimumLiquidityUsd?: number }): CanonicalPrice;
+export function eventsAfterId<T extends { id: string }>(ring: T[], lastEventId?: string): T[];
