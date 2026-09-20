@@ -1,14 +1,13 @@
 "use client";
 
 import {
+  Activity,
   Bell,
   BriefcaseBusiness,
-  Droplets,
-  PanelsTopLeft,
+  Rows3,
   Search,
   Star,
-  X,
-  WalletCards
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -37,12 +36,10 @@ import {
 } from "@/lib/base-terminal/terminalNavigation";
 
 const navItems = [
-  { href: "/terminal", labelKey: "nav.terminal", view: "terminal", icon: PanelsTopLeft },
-  { href: "/terminal?view=markets", labelKey: "nav.markets", view: "markets", icon: Droplets },
+  { href: "/terminal", labelKey: "nav.terminal", view: "terminal", icon: Activity },
+  { href: "/terminal?view=markets", labelKey: "nav.markets", view: "markets", icon: Rows3 },
   { href: "/terminal?view=watchlist", labelKey: "nav.watchlist", view: "watchlist", icon: Star },
-  { href: "/terminal?view=portfolio", labelKey: "nav.portfolio", view: "portfolio", icon: BriefcaseBusiness, desktopOnly: true },
-  { href: "/terminal?view=alerts", labelKey: "nav.alerts", view: "alerts", icon: Bell, desktopOnly: true },
-  { href: "/terminal?view=portfolio", labelKey: "nav.wallet", view: "portfolio", icon: WalletCards, mobileOnly: true }
+  { href: "/terminal?view=portfolio", labelKey: "nav.portfolio", view: "portfolio", icon: BriefcaseBusiness }
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

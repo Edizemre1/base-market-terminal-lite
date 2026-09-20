@@ -70,6 +70,9 @@ export function IconButton({
   label,
   selected = false,
   children,
+  onClick,
+  disabled,
+  type = "button",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string;
@@ -79,6 +82,9 @@ export function IconButton({
   return (
     <button
       {...props}
+      type={type}
+      onClick={onClick}
+      disabled={disabled || (type !== "submit" && !onClick)}
       aria-label={label}
       title={label}
       className={cx(

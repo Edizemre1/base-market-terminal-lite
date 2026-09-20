@@ -57,6 +57,10 @@ Before a canary, stop the collector and preserve the exact release pointer, unit
 
 The new reader can open the legacy schema-v1 checkpoint and ignores legacy WAL bookkeeping because legacy commits were already materialized into `state.json`. A code rollback is safe only after a clean stop of the new collector has checkpointed all committed version-2 deltas. Verify `appliedSequence`, checkpoint integrity, an empty WAL and the absence of `collector.lock` before switching code. If the new process did not stop cleanly, do not point old code at a WAL-only state: either recover and checkpoint with the exact new candidate offline, or restore the preserved pre-canary checkpoint/WAL pair and explicitly accept loss of canary-only observations.
 
+## Latest canary disposition
+
+`NOT_RUN_SAFE_STOP`: the exact `cc93bd316308360dd3a26dfee17fa24927a3bf9e` candidate canary did not start because shared-host I/O pressure failed the pre-start capacity gate. No candidate process ran and no live resource acceptance was earned. The canonical staging collector must remain disabled, inactive and PID 0 until a separately authorized canary passes every gate below; this UI package does not relax any limit or authorize activation.
+
 ## Prepared 30-minute canary (not executed)
 
 1. Require an exact GREEN Actions SHA and independently verified artifact/manifest. Reconfirm the staging collector is disabled, inactive and PID 0; confirm no deploy, retention, rollback or extraction is active.

@@ -137,7 +137,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await connectWalletOnly(page);
     const methodsAfterConnect = await walletMethods(page);
-    await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
     await expect(page.getByTestId("connect-wallet-button")).toContainText("0x1111...1111");
     expect((await walletMethods(page)).filter((method) => method === "eth_requestAccounts")).toHaveLength(methodsAfterConnect.filter((method) => method === "eth_requestAccounts").length);
   });

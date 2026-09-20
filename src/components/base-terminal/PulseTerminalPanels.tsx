@@ -202,10 +202,10 @@ export function MarketActivityPanel({ pair, signals, snapshot }: { pair: BasePai
       </div>
       <div className="space-y-2 px-3 pb-3">
         {pairSignals.length > 0 ? pairSignals.map((signal) => (
-          <button key={signal.key} type="button" className="w-full rounded-card bg-surface-interactive/70 p-3 text-left">
+          <div key={signal.key} className="w-full rounded-card bg-surface-interactive/70 p-3 text-left">
             <span className="flex items-center justify-between gap-2"><span className={cx("text-meta font-bold uppercase", signalTone(signal))}>{t(signalKey(signal.type))}</span><span className="font-mono text-meta text-content-secondary">{formatRelativeTime(signal.createdAt)}</span></span>
             <span className="mt-1 block text-meta leading-4 text-content-secondary">{localizeSignalDetail(signal, locale, t)}</span>
-          </button>
+          </div>
         )) : windows.map((window) => {
           const txns = pair.txns?.[window];
           const volume = pair.volumes?.[window];

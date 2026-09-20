@@ -80,8 +80,36 @@ test.describe("living Base terminal", () => {
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
 
+  test("keeps four primary destinations, direct discovery search, and board position", async ({ page }) => {
+    const desktopNav = page.getByRole("navigation", { name: /Base terminal navigation|Base terminal menüsü/ });
+    await expect(desktopNav.locator("a")).toHaveCount(4);
+    await expect(desktopNav).toContainText(/Pulse|Nabız/);
+    await expect(desktopNav).toContainText(/Discover|Keşfet/);
+    await expect(desktopNav).toContainText(/Watchlist|Takip Listesi/);
+    await expect(desktopNav).toContainText(/Portfolio|Portföy/);
+    await expect(page.getByTestId("connect-wallet-button")).toBeVisible();
+    await expect(page.getByTestId("mergen-account-button")).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open alert center|Alarm merkezini aç/ })).toBeVisible();
+
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
+    const matrix = page.getByTestId("market-matrix");
+    await expect(matrix.getByRole("columnheader", { name: /Price \(USD\)|Fiyat \(USD\)/ })).toBeVisible();
+    await expect(matrix.getByRole("columnheader", { name: /Age|Yaş/ })).toBeVisible();
+    const search = page.getByTestId("market-board-search");
+    await search.fill("BLOB");
+    await expect(page.getByTestId("market-result-count")).toContainText("1");
+    await page.getByRole("button", { name: /Clear market search|Piyasa aramasını temizle/ }).last().click();
+    await expect(page.getByTestId("market-result-count")).toContainText("24");
+
+    const board = page.getByTestId("market-board-scroll");
+    await board.evaluate((element) => { element.scrollTop = 220; element.dispatchEvent(new Event("scroll")); });
+    await page.getByRole("link", { name: /Pulse|Nabız/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
+    await expect.poll(() => board.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  });
+
   test("applies filters, shows active chips, updates result count, and resets", async ({ page }) => {
-    await page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=markets/);
     await page.getByTestId("open-market-filters").click();
     await page.getByTestId("market-filters-sheet").getByLabel(/Search token|Token, piyasa çifti/).fill("BLOB");
@@ -101,7 +129,7 @@ test.describe("living Base terminal", () => {
     for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
       await pinMarketFromSearch(page, id);
     }
-    await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Watchlist|Takip Listesi/, exact: true }).first().click();
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
     await page.reload();
     await expect(page.getByTestId("pinned-multichart")).toContainText("4/4");
@@ -266,12 +294,12 @@ test.describe("living Base terminal", () => {
 
     await page.keyboard.press("Escape");
     await pinMarketFromSearch(page, "pepe-weth");
-    await page.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Watchlist|Takip Listesi/, exact: true }).first().click();
     await expect(page).toHaveURL(/view=watchlist/);
     const watchlist = page.getByTestId("pinned-multichart").getByTestId("market-signal-group");
     await expect(watchlist.locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
 
-    await page.getByRole("link", { name: /Terminal/, exact: true }).first().click();
+    await page.getByRole("link", { name: /Pulse|Nabız/, exact: true }).first().click();
     await expect(page.getByTestId("live-market-wall").locator('[data-signal-type="security_unknown"]')).toHaveCount(0);
   });
 
@@ -347,7 +375,7 @@ test.describe("living Base terminal", () => {
   });
 
   test("filters by signal with a translated empty state and persists the safe preference", async ({ page }) => {
-    const marketsLink = page.getByRole("link", { name: /Markets|Piyasalar/, exact: true }).first();
+    const marketsLink = page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first();
     await marketsLink.click();
     await expect(marketsLink).toHaveAttribute("aria-current", "page");
     await page.getByTestId("open-market-filters").click();
@@ -427,7 +455,7 @@ test.describe("living Base terminal", () => {
   test("is usable without horizontal page overflow at required breakpoints", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    for (const viewport of [{ width: 2048, height: 1152 }, { width: 1728, height: 1117 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 430, height: 932 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
+    for (const viewport of [{ width: 2048, height: 1152 }, { width: 1920, height: 1080 }, { width: 1728, height: 1117 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 430, height: 932 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
       await page.setViewportSize(viewport);
       await page.goto("/terminal?data=mock");
       await expectTerminalShell(page);
@@ -447,7 +475,8 @@ test.describe("living Base terminal", () => {
       }
       if (viewport.width === 390) {
         await expect(page.getByRole("navigation", { name: /Mobile terminal|Mobil terminal/ })).toBeVisible();
-        await expect(page.getByRole("link", { name: /Wallet|Cüzdan/, exact: true })).toBeVisible();
+        await expect(page.getByRole("link", { name: /Portfolio|Portföy/, exact: true })).toBeVisible();
+        await expect(page.getByTestId("connect-wallet-button")).toBeVisible();
       }
     }
     expect(consoleErrors).toEqual([]);
@@ -465,16 +494,38 @@ test.describe("living Base terminal", () => {
     await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toHaveCount(0);
   });
 
+  test("keeps trade controls beside the chart on desktop and in a mobile sheet", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/terminal?data=mock&view=workspace&pair=blob-usdc");
+    await expect(page.getByTestId("workspace-trade-panel")).toBeVisible();
+    await expect(page.getByTestId("workspace-trade-panel").getByTestId("trade-dock")).toBeVisible();
+    await expect(page.getByTestId("workspace-mobile-trade-cta")).toBeHidden();
+    await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByTestId("workspace-trade-panel")).toBeHidden();
+    await expect(page.getByTestId("workspace-mobile-trade-cta")).toBeVisible();
+    await page.getByTestId("workspace-mobile-trade-cta").getByRole("button").click();
+    await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
+  });
+
   for (const visualLocale of ["en", "tr"] as const) {
     test(`captures required terminal visual evidence (${visualLocale})`, async ({ page, request }, testInfo) => {
-      test.setTimeout(180_000);
+      test.setTimeout(240_000);
       const locale = visualLocale;
       await page.context().addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
-      for (const viewport of [{ width: 2048, height: 1152, name: "desktop-2048" }, { width: 1728, height: 1117, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 430, height: 932, name: "mobile-430" }, { width: 390, height: 844, name: "mobile-390" }, { width: 360, height: 800, name: "mobile-360" }]) {
+      for (const viewport of [{ width: 2048, height: 1152, name: "desktop-2048" }, { width: 1920, height: 1080, name: "desktop-1920" }, { width: 1728, height: 1117, name: "desktop-1728" }, { width: 1440, height: 900, name: "desktop-1440" }, { width: 1280, height: 800, name: "desktop-1280" }, { width: 1024, height: 768, name: "tablet-1024" }, { width: 768, height: 1024, name: "tablet-768" }, { width: 430, height: 932, name: "mobile-430" }, { width: 390, height: 844, name: "mobile-390" }, { width: 360, height: 800, name: "mobile-360" }]) {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await captureVisualEvidence(page, testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), true);
+        if ([1920, 1440, 1280, 768, 390].includes(viewport.width)) {
+          await page.goto("/terminal?data=mock&view=markets");
+          if (viewport.width < 768) await page.getByTestId("open-market-board").click();
+          await captureVisualEvidence(page, testInfo.outputPath(`discover-${locale}-${viewport.name}.png`), viewport.width >= 768);
+          if (viewport.width < 768) await page.keyboard.press("Escape");
+          await page.goto("/terminal?data=mock");
+        }
         if (viewport.width === 390) {
           await page.getByTestId("open-market-board").click();
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
@@ -638,7 +689,7 @@ test.describe("living Base terminal", () => {
       for (const id of ["blob-usdc", "toshi-weth", "degen-weth", "mochi-usdc"]) {
         await pinMarketFromSearch(detailPage, id);
       }
-      await detailPage.getByRole("link", { name: /Watchlist|İzleme/, exact: true }).first().click();
+      await detailPage.getByRole("link", { name: /Watchlist|Takip Listesi/, exact: true }).first().click();
       await expect(detailPage.getByTestId("pinned-multichart")).toContainText("4/4");
       await captureVisualEvidence(detailPage, testInfo.outputPath(`watchlist-populated-${locale}-1440.png`), true);
       await detailPage.evaluate(() => {

@@ -10,7 +10,7 @@ This is the canonical design-language contract for Base Terminal. It applies to 
 4. Controls and overlays share one behavior contract.
 5. Every viewport and language preserves the same decision order.
 
-The terminal remains a live, information-rich workspace. Its persistent decision order is compact Live Tape → six-lane Live Market Wall → Market Board. Pair selection, Inspector, Pair Workspace, account, wallet and deliberate trade lifecycle remain available through progressive disclosure rather than competing as equal dashboard layers.
+The terminal remains a live, information-rich workspace. Its persistent decision order is compact Live Tape → six-lane Live Market Wall → Market Board. The four primary destinations are Pulse, Discover, Watchlist and Portfolio; search, Base network, Mergen account and wallet remain fixed shell controls, while Alerts remains a header action. Pair selection, Inspector, Pair Workspace and the deliberate trade lifecycle remain available without making account and wallet the same identity.
 
 ## Token layers
 
@@ -98,10 +98,11 @@ Compact variants serve rows and lanes. Full variants serve sections, pages and o
 - Compact Market Board rows are 40px/13px; comfortable rows are 48px/13px.
 - Mobile opportunities use one identity row, a 2×2 evidence grid, signal summary, one primary action and secondary actions through inspect/overflow.
 - Inspector is a fixed 400px desktop drawer and a bottom sheet capped at 92dvh on mobile.
+- Pair Workspace keeps the real chart and activity/detail evidence in the main column. At desktop widths the existing 400px Trade Dock is persistently visible at right; below the desktop breakpoint a prominent action opens the same dock as an accessible bottom sheet.
 - Inspector opens with token identity, price/freshness, movement, liquidity/volume, trade status, wallet status and primary signals. Raw reason codes, pool addresses, provider internals, pricing paths and timestamps live under **Technical details** or Pools.
 - Wallet chrome distinguishes Connect, Reconnect, Locked, Wrong network and session-verified Connected. A connected summary identifies the provider, Base network and native balance; full public-address and selected-token balance truth lives in the Wallet drawer.
 - Primary market naming is token-first. Raw `/ WETH` and `/ USDC` pairs are secondary pool evidence, represented on main surfaces by `via WETH`, `via USDC`, `direct USDC` or `unpriced`.
-- Mobile navigation is Terminal / Markets / Watchlist / Wallet. Alerts remain a header action.
+- Desktop and mobile primary navigation is Pulse / Discover / Watchlist / Portfolio. Alerts remain a header action; Mergen Account and Wallet remain separate fixed shell controls.
 
 ## Overlay contract
 
@@ -155,7 +156,7 @@ Actions begin with verbs. Empty/loading/error copy follows what happened → why
 - Compact Market Board: 40px/13px; comfortable: 48px/13px.
 - Inspector desktop width: fixed 400px.
 - Live change feedback: short tint on the changed cell only.
-- Mobile navigation: Terminal / Markets / Watchlist / Wallet; Alerts in header.
+- Primary navigation: Pulse / Discover / Watchlist / Portfolio; Alerts in header; account and wallet stay separate.
 - Muted violet is permitted only for volume semantics.
 - Mint is never decorative.
 

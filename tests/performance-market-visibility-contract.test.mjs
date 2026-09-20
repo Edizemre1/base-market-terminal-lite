@@ -79,3 +79,28 @@ test("fresh validated provider prices reach the UI without weakening pending sem
   assert.match(surface, /if \(!price\) return t\("terminalV3\.pricingPending"\)/);
   assert.match(inspector, /resolveOpportunityMarketPrice\(opportunity, pair\)/);
 });
+
+test("package two keeps discovery dense and trade placement explicit", async () => {
+  const [shell, terminal, surface, dictionaries] = await Promise.all([
+    source("src/components/AppShell.tsx"),
+    source("src/components/BaseTerminal.tsx"),
+    source("src/components/base-terminal/TerminalMarketSurface.tsx"),
+    source("src/i18n/dictionaries.ts")
+  ]);
+  const navDefinition = shell.match(/const navItems = \[([\s\S]*?)\] as const;/)?.[1] ?? "";
+  assert.match(navDefinition, /view: "terminal", icon: Activity/);
+  assert.match(navDefinition, /view: "markets", icon: Rows3/);
+  assert.doesNotMatch(navDefinition, /view: "alerts"/);
+  assert.doesNotMatch(navDefinition, /labelKey: "nav\.wallet"/);
+  assert.match(terminal, /data-testid="workspace-trade-panel"/);
+  assert.match(terminal, /data-testid="workspace-mobile-trade-cta"/);
+  assert.match(terminal, /pollCapabilities=\{false\}/);
+  assert.match(surface, /data-testid="market-board-search"/);
+  assert.match(surface, /BOARD_SCROLL_POSITIONS/);
+  assert.match(surface, /terminalV3\.column\.priceUsd/);
+  assert.match(surface, /terminalV3\.column\.age/);
+  assert.match(dictionaries, /"nav\.terminal": "Pulse"/);
+  assert.match(dictionaries, /"nav\.markets": "Discover"/);
+  assert.match(dictionaries, /"nav\.terminal": "Nabız"/);
+  assert.match(dictionaries, /"nav\.markets": "Keşfet"/);
+});

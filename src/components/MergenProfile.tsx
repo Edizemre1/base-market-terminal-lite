@@ -48,7 +48,7 @@ function ProfileReady({ profile, locale }: { profile: NonNullable<ReturnType<typ
       <ProfileFact label={t("account.membership")} value={t(profile.membership === "pro" ? "account.membershipPro" : "account.membershipFree")} />
     </dl>
     <a href={`/api/account/profile?locale=${locale}`} className="mt-3 inline-flex min-h-control-touch w-full items-center justify-center gap-2 rounded-control bg-surface-interactive px-3 text-label font-semibold text-content-primary" data-testid="canonical-profile-link"><ExternalLink size={14} />{t("account.openProfileSettings")}</a>
-    <form action={`/api/account/logout?locale=${locale}`} method="post" className="mt-2"><button type="submit" className="inline-flex min-h-control-touch w-full items-center justify-center gap-2 rounded-control border border-border-subtle px-3 text-label font-semibold text-content-secondary" data-testid="mergen-sign-out"><LogOut size={14} />{t("account.signOut")}</button></form>
+    <form action={`/api/account/logout?locale=${locale}`} method="post" noValidate className="mt-2"><button type="submit" className="inline-flex min-h-control-touch w-full items-center justify-center gap-2 rounded-control border border-border-subtle px-3 text-label font-semibold text-content-secondary" data-testid="mergen-sign-out"><LogOut size={14} />{t("account.signOut")}</button></form>
     <p className="mt-3 text-meta leading-5 text-content-secondary">{t("account.walletSeparate")}</p>
   </div>;
 }

@@ -39,7 +39,7 @@ const SPEND_TOKENS: Record<SpendTokenKey, Omit<TradeToken, "decimals">> = {
 };
 const SPEND_TOKEN_DECIMALS: Record<SpendTokenKey, number> = { USDC: 6, WETH: 18 };
 
-export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, onSideChange, onInteractionChange }: {
+export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, onSideChange, onInteractionChange, pollCapabilities = true }: {
   pair: BasePair;
   marketDataMode: MarketTerminalSnapshot["mode"];
   amount: string;
@@ -47,6 +47,7 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
   side: TradeSide;
   onSideChange: (side: TradeSide) => void;
   onInteractionChange: (locked: boolean) => void;
+  pollCapabilities?: boolean;
 }) {
   const wallet = useWallet();
   const setWalletSpendToken = wallet.setSpendToken;
@@ -114,16 +115,16 @@ export function TradeDock({ pair, marketDataMode, amount, onAmountChange, side, 
     mountedRef.current = true;
     const refreshCapabilities = () => void fetchTradeCapabilities().then((value) => { if (active) setCapabilities(value); }).catch(() => { if (active) setCapabilities(disabledTradeCapabilities()); });
     refreshCapabilities();
-    const capabilityTimer = window.setInterval(() => { if (document.visibilityState === "visible") refreshCapabilities(); }, 15_000);
+    const capabilityTimer = pollCapabilities ? window.setInterval(() => { if (document.visibilityState === "visible") refreshCapabilities(); }, 15_000) : undefined;
     const stored = readStoredTransaction();
     if (stored) { setTransactionHash(stored.hash); setTransactionStatus(stored.status); }
     return () => {
       active = false;
       mountedRef.current = false;
       quoteAbortRef.current?.abort();
-      window.clearInterval(capabilityTimer);
+      if (capabilityTimer !== undefined) window.clearInterval(capabilityTimer);
     };
-  }, []);
+  }, [pollCapabilities]);
 
   useEffect(() => {
     if (quoteContextKeyRef.current === quoteContextKey) return;

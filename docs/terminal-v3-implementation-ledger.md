@@ -12,8 +12,8 @@ This ledger records the decisions that keep the terminal source-correct while it
 
 ## Information architecture
 
-- `/terminal` is canonical. The primary navigation is Terminal, Markets, Watchlist, Portfolio, and Alerts.
-- Terminal combines a real market tape, six deterministic and bounded opportunity streams, a dense market board, a decision-first context inspector, a route-backed pair workspace, a pinned multichart, and an intent-opened trade drawer. The global Trade entry remains visible even when the current snapshot has zero precomputed execution candidates and starts from exact Base USDC → WETH contracts without inventing a market price.
+- `/terminal` is canonical. The primary navigation is Pulse, Discover, Watchlist, and Portfolio. Alerts remains in the header; global search, Base network, Mergen account and wallet stay fixed, with account and wallet explicitly separate.
+- Pulse combines a real market tape and six deterministic bounded opportunity streams. Discover is the full-width dense market board. Both retain the decision-first Context Inspector; the route-backed Pair Workspace keeps the real chart in the main column and the existing guarded Trade Dock persistently visible at desktop widths, with an accessible trade sheet on mobile. Quote access is not hidden merely because canonical pricing proof is pending.
 - A single refresh loop owns snapshots. Selected and pinned OHLCV remain lazy and bounded.
 - User interaction freezes disruptive reordering; a pending snapshot is applied explicitly or after the existing safe unlock period.
 

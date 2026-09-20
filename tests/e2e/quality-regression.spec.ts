@@ -4,7 +4,7 @@ test.describe("terminal quality regression", () => {
   test("serves canonical views with localized titles and one h1", async ({ page, context }) => {
     for (const locale of ["en", "tr"] as const) {
       await context.addCookies([{ name: "mergen_locale", value: locale, domain: "127.0.0.1", path: "/" }]);
-      for (const [route, title] of [["/terminal?data=mock", locale === "tr" ? "Terminal" : "Terminal"], ["/terminal?data=mock&view=markets", locale === "tr" ? "Piyasalar" : "Markets"], ["/terminal?data=mock&view=watchlist", locale === "tr" ? "İzleme Listesi" : "Watchlist"], ["/terminal?data=mock&view=portfolio", locale === "tr" ? "Portföy" : "Portfolio"], ["/terminal?data=mock&view=alerts", locale === "tr" ? "Alarmlar" : "Alerts"]] as const) {
+      for (const [route, title] of [["/terminal?data=mock", locale === "tr" ? "Nabız" : "Pulse"], ["/terminal?data=mock&view=markets", locale === "tr" ? "Keşfet" : "Discover"], ["/terminal?data=mock&view=watchlist", locale === "tr" ? "Takip Listesi" : "Watchlist"], ["/terminal?data=mock&view=portfolio", locale === "tr" ? "Portföy" : "Portfolio"], ["/terminal?data=mock&view=alerts", locale === "tr" ? "Alarmlar" : "Alerts"]] as const) {
         await page.goto(route);
         await expect(page).toHaveTitle(`${title} | Mergen.finance`);
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
@@ -54,6 +54,29 @@ test.describe("terminal quality regression", () => {
     };
     await page.route("**/api/market-snapshot?data=mock", (route) => route.fulfill({ json: omitted }));
     await page.getByTestId("refresh-terminal").click();
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
+  });
+
+  test("lets navigation and selection win over a late provider response", async ({ page, request }) => {
+    const initial = await (await request.get("/api/market-snapshot?data=mock")).json();
+    const future = new Date(Date.parse(initial.generatedAt) + 1_000).toISOString();
+    const next = { ...initial, version: "late-provider-response", generatedAt: future, receivedAt: future, sourceUpdatedAt: future };
+    let releaseResponse: (() => void) | undefined;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await page.goto("/terminal?data=mock");
+    await page.route("**/api/market-snapshot?data=mock", async (route) => {
+      await responseGate;
+      await route.fulfill({ json: next });
+    });
+
+    await page.getByTestId("refresh-terminal").click();
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
+    await expect(page).toHaveURL(/view=markets/);
+    await page.getByTestId("matrix-row-blob-usdc").getByTestId("open-market-inspector").click();
+    await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
+    const completedRefresh = page.waitForResponse((response) => response.url().includes("/api/market-snapshot?data=mock"));
+    releaseResponse?.();
+    await completedRefresh;
     await expect(page.getByTestId("selected-pair-title")).toHaveText("BLOB");
   });
 
