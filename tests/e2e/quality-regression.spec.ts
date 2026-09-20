@@ -59,7 +59,7 @@ test.describe("terminal quality regression", () => {
 
   test("lets navigation and selection win over a late provider response", async ({ page, request }) => {
     const initial = await (await request.get("/api/market-snapshot?data=mock")).json();
-    const future = new Date(Date.parse(initial.generatedAt) + 1_000).toISOString();
+    const future = new Date(Date.now() + 1_000).toISOString();
     const next = { ...initial, version: "late-provider-response", generatedAt: future, receivedAt: future, sourceUpdatedAt: future };
     let releaseResponse: (() => void) | undefined;
     const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });

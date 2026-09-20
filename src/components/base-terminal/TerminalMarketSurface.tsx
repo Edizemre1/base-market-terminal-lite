@@ -137,7 +137,7 @@ export function OpportunityLanes(props: Parameters<typeof OpportunityScanner>[0]
   return <OpportunityScanner {...props} />;
 }
 
-export function MarketMatrix({ snapshot, placementSnapshot = snapshot, selectedPair, onSelect, isPairPinned, onInteractionChange, watchlistOnly = false }: {
+export function MarketMatrix({ snapshot, placementSnapshot = snapshot, selectedPair, onSelect, isPairPinned, onInteractionChange, watchlistOnly = false, navigationContext = "discover" }: {
   snapshot: MarketTerminalSnapshot;
   placementSnapshot?: MarketTerminalSnapshot;
   selectedPair: BasePair;
@@ -145,6 +145,7 @@ export function MarketMatrix({ snapshot, placementSnapshot = snapshot, selectedP
   isPairPinned: (pair: BasePair) => boolean;
   onInteractionChange: (locked: boolean) => void;
   watchlistOnly?: boolean;
+  navigationContext?: "pulse" | "discover" | "watchlist";
 }) {
   const { t, formatCompactCurrency, formatPercent } = useI18n();
   const overlay = useOverlayManager();
@@ -163,11 +164,8 @@ export function MarketMatrix({ snapshot, placementSnapshot = snapshot, selectedP
     const container = scrollContainerRef.current;
     if (!container) return;
     const frame = window.requestAnimationFrame(() => { container.scrollTop = BOARD_SCROLL_POSITIONS.get(scrollScope) ?? 0; });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      BOARD_SCROLL_POSITIONS.set(scrollScope, container.scrollTop);
-    };
-  }, [scrollScope]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [navigationContext, scrollScope]);
   useEffect(() => { if (overlay.active.type === "filters" || overlay.active.type === "columns") setDraft(preferences); }, [overlay.active.type, preferences]);
   useEffect(() => {
     const openPoolDetails = (event: Event) => {

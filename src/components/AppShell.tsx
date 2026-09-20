@@ -437,7 +437,7 @@ function HeaderProductLabel() {
 function HeaderAlertLink() {
   const { t } = useI18n();
   const searchParams = useSearchParams();
-  return <Link href={withTerminalContext("/terminal?view=alerts", searchParams)} prefetch={false} onClick={(event) => handleTerminalAnchor(event, "alerts")} className="cmi-icon-button" aria-label={t("header.alerts")} title={t("header.alerts")}><Bell size={16} /></Link>;
+  return <Link href={withTerminalContext("/terminal?view=alerts", searchParams)} prefetch={false} onClick={(event) => handleTerminalAnchor(event, "alerts")} data-client-route="terminal" className="cmi-icon-button" aria-label={t("header.alerts")} title={t("header.alerts")}><Bell size={16} /></Link>;
 }
 
 function LocaleSwitcher() {
