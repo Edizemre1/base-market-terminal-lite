@@ -7,7 +7,7 @@ This ledger records the decisions that keep the terminal source-correct while it
 - One canonical `MarketTerminalSnapshot` supplies every market surface. Pair identity is Base chain + token addresses + pool address; symbols are presentation only.
 - Missing market fields remain unavailable. They are never coerced into zero, safety, popularity, or a favorable signal.
 - Existing finite-number, reciprocal-price, OHLCV, stale snapshot, alert, wallet race, EIP-6963, Base chain, BigInt balance, locale, sanitization, accessibility, and responsive contracts stay in force.
-- One wallet controller owns provider selection and lifecycle. A stored verified provider is a preference only: a fresh page shows `Reconnect`, performs no wallet RPC, and cannot display an address until the user explicitly reconnects. Connection and balance states are separate, late reads are account/session-bound, and app-local disconnect removes listeners without claiming to revoke extension permission.
+- One wallet controller owns provider selection and lifecycle. A stored verified provider is a preference only: a fresh page shows `Reconnect`, performs no wallet RPC, and cannot display an address until the user explicitly reconnects. Connection and balance states are separate, late native/token reads are account/session-bound, and app-local disconnect removes listeners without claiming to revoke extension permission. ETH, WETH, USDC and the selected market token share explicit loading/zero/unavailable truth in Wallet and Portfolio; no synthetic portfolio total is shown.
 - Production stays read-only. Transaction execution is a server capability enabled only by an explicit staging environment flag.
 
 ## Information architecture
@@ -31,6 +31,7 @@ This ledger records the decisions that keep the terminal source-correct while it
 - Indicative context never contains calldata. The server returns a validated transaction quote, not an executable claim. Execution becomes eligible only after a fresh wallet simulation and revalidation of target, calldata, value, chain, raw amounts, balance, allowance, minimum receive, timestamps, and expiry.
 - The quote fingerprint binds wallet, chain, pair orientation, token metadata, amounts, slippage, provider route, target, calldata, value, and expiry. Any bound-field change invalidates review.
 - ERC-20 approval is exact-amount only, is shown separately, and requires its own user action. Swap requires a second user action after chain, balance, allowance, expiry, fingerprint, and simulation checks.
+- Buy/Sell direction keeps spend and receive assets explicit. Native ETH Max subtracts a bounded gas reserve, while review and final submission independently re-read spend and native gas capacity. Closing review invalidates its simulation, so reopening requires a fresh simulation.
 - There is no automatic signing or broadcasting. Duplicate approval/swap submissions are locked. User rejection, submission, pending, confirmation, failure, and replacement remain explicit states.
 
 ## Staging and release gates

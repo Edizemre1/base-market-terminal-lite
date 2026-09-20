@@ -47,8 +47,9 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("wallet-details")).toContainText(/Previously authorized|Daha önce yetkilendirilmiş/);
     await expect(page.getByTestId("wallet-details")).toContainText("MetaMask");
     await expect(page.getByTestId("wallet-details")).toContainText("Base Mainnet · 8453");
-    await expect(page.getByTestId("wallet-native-balance")).toHaveText("1 ETH");
-    await expect(page.getByTestId("wallet-token-balance")).toHaveText("1 USDC");
+    await expect(page.getByTestId("wallet-balance-eth")).toHaveText("1 ETH");
+    await expect(page.getByTestId("wallet-balance-weth")).toHaveText("0 WETH");
+    await expect(page.getByTestId("wallet-balance-usdc")).toHaveText("1 USDC");
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
   });
 
@@ -68,7 +69,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await connectWalletOnly(page);
     await page.getByTestId("connect-wallet-button").click();
-    await expect(page.getByTestId("wallet-native-balance")).toHaveText("0 ETH");
+    await expect(page.getByTestId("wallet-balance-eth")).toHaveText("0 ETH");
 
     await page.reload();
     await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-status", "reconnect_required");
@@ -80,7 +81,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await page.goto("/terminal?data=mock");
     await connectWalletOnly(page);
     await page.getByTestId("connect-wallet-button").click();
-    await expect(page.getByTestId("wallet-native-balance")).toContainText(/Unavailable|Kullanılamıyor/);
+    await expect(page.getByTestId("wallet-balance-eth")).toContainText(/Unavailable|Kullanılamıyor/);
     await page.getByRole("button", { name: /Close wallet picker|Cüzdan seçiciyi kapat/ }).click();
 
     await page.evaluate(() => (window as Window & { __walletHarness?: { setAccounts: (accounts: string[]) => void } }).__walletHarness?.setAccounts(["0x2222222222222222222222222222222222222222"]));
@@ -89,6 +90,19 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("connect-wallet-button")).toHaveAttribute("data-wallet-status", "locked_or_no_accounts");
     await expect(page.getByTestId("connect-wallet-button")).not.toContainText("0x2222");
     expect(await walletMethods(page)).not.toContain("eth_sendTransaction");
+  });
+
+  test("does not commit a late token balance after the wallet account is lost", async ({ page }) => {
+    await installVerifiedWalletStub(page, { tokenBalanceDelayMs: 500 });
+    await page.goto("/terminal?data=mock");
+    await connectWalletOnly(page);
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-balance-grid")).toBeVisible();
+    await page.evaluate(() => (window as Window & { __walletHarness?: { setAccounts: (accounts: string[]) => void } }).__walletHarness?.setAccounts([]));
+    await page.waitForTimeout(650);
+    await expect(page.getByTestId("wallet-balance-grid")).toHaveCount(0);
+    await expect(page.getByTestId("wallet-exact-address")).toHaveCount(0);
+    expect(await sentTransactions(page)).toHaveLength(0);
   });
 
   test("keeps Trade asset-scoped without automatic wallet or quote calls", async ({ page }) => {
@@ -102,6 +116,9 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).toBeVisible();
     await expect(page.getByTestId("trade-spend-token")).toHaveValue("USDC");
     await expect(page.getByTestId("trade-dock")).toContainText("USDC → PEPE");
+    await page.getByRole("tab", { name: /Sell|Sat/ }).click();
+    await expect(page.getByTestId("trade-dock")).toContainText("PEPE → USDC");
+    await expect(page.getByTestId("trade-dock")).toContainText(/Receive token|Alınacak token/);
     expect(await walletMethods(page)).toEqual([]);
     expect(quoteRequests).toBe(0);
   });
@@ -177,6 +194,71 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("trade-dock")).toContainText(/timed out|zaman aşımına/);
     await expect(page.getByTestId("trade-dock")).not.toContainText(/No route was found|işlem rotası bulunamadı/);
     await page.screenshot({ path: testInfo.outputPath("trade-provider-unavailable-1440.png"), fullPage: false });
+  });
+
+  test("shows explicit balance truth and keeps native Max below the ETH balance for gas", async ({ page }, testInfo) => {
+    await mockEnabledTradeServer(page);
+    await installVerifiedWalletStub(page);
+    await page.goto("/terminal?data=mock&view=portfolio");
+    await connectWalletOnly(page);
+    await page.getByTestId("connect-wallet-button").click();
+    await expect(page.getByTestId("wallet-balance-eth")).toHaveText("1 ETH");
+    await expect(page.getByTestId("wallet-balance-weth")).toHaveText("0 WETH");
+    await expect(page.getByTestId("wallet-balance-usdc")).toHaveText("1 USDC");
+    await expect(page.getByText(/Not calculated|Hesaplanmadı/)).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("wallet-balances-truth-1440-en.png"), fullPage: true });
+    await page.getByRole("button", { name: /Close wallet picker|Cüzdan seçiciyi kapat/ }).click();
+    await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
+    await openTradeDrawer(page);
+    await page.getByTestId("trade-spend-token").selectOption("ETH");
+    await page.getByRole("button", { name: /Max|Maks/, exact: true }).click();
+    await expect(page.getByLabel(/From amount|Gönderen miktarı/)).toHaveValue("0.999625");
+    await expect(page.getByTestId("trade-native-max-reserve")).toBeVisible();
+    expect(await walletMethods(page)).toContain("eth_gasPrice");
+    expect(await sentTransactions(page)).toHaveLength(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
+    await page.screenshot({ path: testInfo.outputPath("wallet-trade-native-max-390-tr.png"), fullPage: true });
+  });
+
+  test("drops a late quote after the bound amount changes", async ({ page }) => {
+    await installVerifiedWalletStub(page);
+    await mockEnabledTradeServer(page, { delayMs: 600 });
+    await page.goto("/terminal?data=mock");
+    await connectWallet(page);
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
+    await page.getByLabel(/From amount|Gönderen miktarı/).fill("0.2");
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ })).toHaveCount(0);
+    await expect(page.getByTestId("trade-dock")).not.toContainText("Mocked CI route");
+    expect(await sentTransactions(page)).toHaveLength(0);
+  });
+
+  test("blocks review when the wallet has no bounded ETH gas reserve", async ({ page }) => {
+    await installVerifiedWalletStub(page, { balanceHex: "0x1", allowanceRaw: "1000000" });
+    await mockEnabledTradeServer(page);
+    await page.goto("/terminal?data=mock");
+    await connectWallet(page);
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
+    await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
+    await expect(page.getByTestId("trade-review-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("trade-dock")).toContainText(/enough ETH|yeterli ETH/);
+    expect(await sentTransactions(page)).toHaveLength(0);
+  });
+
+  test("closing review clears the simulation and requires a fresh simulation", async ({ page }) => {
+    await installVerifiedWalletStub(page, { allowanceRaw: "1000000" });
+    await mockEnabledTradeServer(page);
+    await page.goto("/terminal?data=mock");
+    await connectWallet(page);
+    await page.getByRole("button", { name: /Get fresh quote|Taze teklif al/ }).click();
+    await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
+    await expect(page.getByTestId("trade-review-dialog")).toBeVisible();
+    const firstSimulationCount = (await walletMethods(page)).filter((method) => method === "eth_estimateGas").length;
+    await page.getByRole("button", { name: /Close transaction review|İşlem incelemesini kapat/ }).click();
+    await page.getByRole("button", { name: /Review swap|Swap'ı gözden geçir/ }).click();
+    await expect.poll(async () => (await walletMethods(page)).filter((method) => method === "eth_estimateGas").length).toBe(firstSimulationCount + 1);
+    expect(await sentTransactions(page)).toHaveLength(0);
   });
 
   test("expires a short-lived valid quote without sending a transaction", async ({ page }, testInfo) => {

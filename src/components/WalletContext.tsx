@@ -22,6 +22,8 @@ import {
   type WalletSimulationResult
 } from "@/lib/wallet";
 import type { TransactionDraft } from "@/lib/trade/types";
+import { NATIVE_TOKEN_ADDRESS } from "@/lib/trade/types";
+import { buildBalanceOfData, formatRawTokenAmount, isEvmAddress } from "@/lib/trade/validation";
 import { safeGetStorageItem, safeRemoveStorageItem, safeSetStorageItem } from "@/lib/safeStorage";
 import { useOverlayManager } from "@/components/OverlayManager";
 
@@ -35,6 +37,7 @@ type WalletContextValue = {
   address?: string;
   chainId?: number;
   balanceEth?: string;
+  balanceWei?: string;
   balanceStatus: WalletBalanceStatus;
   balanceUpdatedAt?: string;
   connectionOrigin?: WalletConnectionOrigin;
@@ -51,6 +54,9 @@ type WalletContextValue = {
   connect: () => Promise<void>;
   switchToBase: () => Promise<void>;
   refreshBalance: () => Promise<void>;
+  refreshBalances: () => Promise<void>;
+  readGasPrice: () => Promise<string>;
+  readNativeBalance: () => Promise<string>;
   disconnect: () => void;
   readContract: (to: string, data: string) => Promise<string>;
   simulateTransaction: (draft: TransactionDraft) => Promise<WalletSimulationResult>;
@@ -61,10 +67,22 @@ type WalletContextValue = {
   closePicker: () => void;
   spendToken: WalletBalanceToken;
   setSpendToken: (token: WalletBalanceToken) => void;
+  selectedToken?: WalletBalanceToken;
+  setSelectedToken: (token: WalletBalanceToken | undefined) => void;
+  trackedBalanceTokens: WalletBalanceToken[];
+  tokenBalances: Record<string, WalletTokenBalanceState>;
 };
 
-export type WalletBalanceToken = { address: string; symbol: string; decimals: number };
-export const BASE_USDC_BALANCE_TOKEN: WalletBalanceToken = { address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", symbol: "USDC", decimals: 6 };
+export type WalletBalanceToken = { address: string; symbol: string; decimals?: number; decimalsVerified: boolean };
+export type WalletTokenBalanceState = {
+  status: "idle" | "loading" | "ready" | "stale" | "unavailable" | "metadata_unavailable";
+  raw?: string;
+  value?: string;
+  updatedAt?: string;
+};
+export const BASE_ETH_BALANCE_TOKEN: WalletBalanceToken = { address: NATIVE_TOKEN_ADDRESS, symbol: "ETH", decimals: 18, decimalsVerified: true };
+export const BASE_WETH_BALANCE_TOKEN: WalletBalanceToken = { address: "0x4200000000000000000000000000000000000006", symbol: "WETH", decimals: 18, decimalsVerified: true };
+export const BASE_USDC_BALANCE_TOKEN: WalletBalanceToken = { address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", symbol: "USDC", decimals: 6, decimalsVerified: true };
 
 export const WALLET_PROVIDER_STORAGE_KEY = "mergen-pulse:wallet-provider:v2";
 const LEGACY_WALLET_PROVIDER_STORAGE_KEYS = ["mergen-pulse:wallet-provider:v1", "base-terminal-lite:wallet-provider"];
@@ -86,6 +104,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WalletControllerState>(() => controller.getState());
   const [ready, setReady] = useState(false);
   const [spendToken, setSpendToken] = useState<WalletBalanceToken>(BASE_USDC_BALANCE_TOKEN);
+  const [selectedToken, setSelectedTokenState] = useState<WalletBalanceToken>();
+  const [tokenBalances, setTokenBalances] = useState<Record<string, WalletTokenBalanceState>>({});
+  const tokenBalanceRequestRef = useRef(0);
+  const trackedBalanceTokens = useMemo(() => dedupeBalanceTokens([BASE_WETH_BALANCE_TOKEN, BASE_USDC_BALANCE_TOKEN, selectedToken]), [selectedToken]);
 
   useEffect(() => {
     const unsubscribe = controller.subscribe(setState);
@@ -116,6 +138,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [controller, overlay]);
   const switchToBase = useCallback(() => controller.switchToBase(), [controller]);
   const refreshBalance = useCallback(() => controller.refreshBalance(), [controller]);
+  const readGasPrice = useCallback(() => controller.readGasPrice(), [controller]);
+  const readNativeBalance = useCallback(() => controller.readNativeBalance(), [controller]);
   const disconnect = useCallback(() => {
     controller.disconnect();
     overlay.close();
@@ -127,6 +151,55 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const pickerOpen = overlay.active.type === "wallet_picker";
   const openPicker = useCallback(() => overlay.open("wallet_picker"), [overlay]);
   const closePicker = useCallback(() => overlay.close(), [overlay]);
+  const setSelectedToken = useCallback((token: WalletBalanceToken | undefined) => {
+    if (!token || !isEvmAddress(token.address)) {
+      setSelectedTokenState(undefined);
+      return;
+    }
+    setSelectedTokenState({ ...token, address: token.address.toLowerCase(), symbol: token.symbol.slice(0, 24) });
+  }, []);
+
+  useEffect(() => {
+    tokenBalanceRequestRef.current += 1;
+    setTokenBalances({});
+  }, [state.address, state.chainId, state.selectedProviderId]);
+
+  const refreshBalances = useCallback(async () => {
+    const address = state.address;
+    const providerId = state.selectedProviderId;
+    const requestId = tokenBalanceRequestRef.current + 1;
+    tokenBalanceRequestRef.current = requestId;
+    if (!address || state.chainId !== BASE_CHAIN_ID || (state.status !== "connected" && state.status !== "wrong_network")) {
+      setTokenBalances({});
+      await controller.refreshBalance();
+      return;
+    }
+
+    setTokenBalances(Object.fromEntries(trackedBalanceTokens.map((token) => [token.address, {
+      status: token.decimals === undefined || !token.decimalsVerified ? "metadata_unavailable" : "loading"
+    } satisfies WalletTokenBalanceState])));
+
+    const [tokenResults] = await Promise.all([
+      Promise.all(trackedBalanceTokens.map(async (token): Promise<readonly [string, WalletTokenBalanceState]> => {
+        if (token.decimals === undefined || !token.decimalsVerified) return [token.address, { status: "metadata_unavailable" } satisfies WalletTokenBalanceState] as const;
+        const data = buildBalanceOfData(address);
+        if (!data) return [token.address, { status: "unavailable" } satisfies WalletTokenBalanceState] as const;
+        try {
+          const result = await controller.readContract(token.address, data);
+          const raw = BigInt(result === "0x" ? "0x0" : result).toString();
+          const value = formatRawTokenAmount(raw, token.decimals, Math.min(token.decimals, 8));
+          return [token.address, value === undefined ? { status: "unavailable" } : { status: "ready", raw, value, updatedAt: new Date().toISOString() } satisfies WalletTokenBalanceState] as const;
+        } catch {
+          return [token.address, { status: "unavailable" } satisfies WalletTokenBalanceState] as const;
+        }
+      })),
+      controller.refreshBalance()
+    ]);
+
+    const current = controller.getState();
+    if (requestId !== tokenBalanceRequestRef.current || current.address?.toLowerCase() !== address.toLowerCase() || current.chainId !== BASE_CHAIN_ID || current.selectedProviderId !== providerId) return;
+    setTokenBalances(Object.fromEntries(tokenResults) as Record<string, WalletTokenBalanceState>);
+  }, [controller, state.address, state.chainId, state.selectedProviderId, state.status, trackedBalanceTokens]);
 
   useEffect(() => {
     if ((state.status !== "connected" && state.status !== "wrong_network") || !state.selectedProviderId) return;
@@ -150,6 +223,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         connect,
         switchToBase,
         refreshBalance,
+        refreshBalances,
+        readGasPrice,
+        readNativeBalance,
         disconnect,
         readContract,
         simulateTransaction,
@@ -159,13 +235,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         openPicker,
         closePicker,
         spendToken,
-        setSpendToken
+        setSpendToken,
+        selectedToken,
+        setSelectedToken,
+        trackedBalanceTokens,
+        tokenBalances
       };
     },
-    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, readContract, readTransactionReceipt, ready, refreshBalance, selectProvider, sendTransaction, simulateTransaction, spendToken, state, switchToBase]
+    [closePicker, connect, connectProvider, disconnect, openPicker, pickerOpen, readContract, readGasPrice, readNativeBalance, readTransactionReceipt, ready, refreshBalance, refreshBalances, selectProvider, selectedToken, sendTransaction, setSelectedToken, simulateTransaction, spendToken, state, switchToBase, tokenBalances, trackedBalanceTokens]
   );
 
   return <WalletContext.Provider value={value}>{children}<WalletPicker /></WalletContext.Provider>;
+}
+
+function dedupeBalanceTokens(tokens: Array<WalletBalanceToken | undefined>) {
+  const seen = new Set<string>();
+  return tokens.filter((token): token is WalletBalanceToken => {
+    if (!token || token.address === NATIVE_TOKEN_ADDRESS) return false;
+    const key = token.address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function readPreferredProviderId() {

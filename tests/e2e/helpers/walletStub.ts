@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 
-export async function installVerifiedWalletStub(page: Page, options: { chainId?: string; rejectConnection?: boolean; requestAccountsEmpty?: boolean; allowanceRaw?: string; initialAccounts?: string[]; balanceHex?: string; balanceError?: boolean; tokenBalanceHex?: string } = {}) {
-  await page.addInitScript(({ account, initialChain, reject, emptyRequest, initialAllowance, authorizedAccounts, nativeBalance, failBalance, tokenBalance }) => {
+export async function installVerifiedWalletStub(page: Page, options: { chainId?: string; rejectConnection?: boolean; requestAccountsEmpty?: boolean; allowanceRaw?: string; initialAccounts?: string[]; balanceHex?: string; balanceError?: boolean; tokenBalanceHex?: string; tokenBalances?: Record<string, string>; tokenBalanceDelayMs?: number; gasPriceHex?: string } = {}) {
+  await page.addInitScript(({ account, initialChain, reject, emptyRequest, initialAllowance, authorizedAccounts, nativeBalance, failBalance, tokenBalance, balancesByToken, balanceDelay, gasPrice }) => {
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     const requests: Array<{ method: string; params?: unknown }> = [];
     let chainId = initialChain;
@@ -17,11 +17,12 @@ export async function installVerifiedWalletStub(page: Page, options: { chainId?:
         if (method === "eth_requestAccounts") { if (reject) throw Object.assign(new Error("Rejected"), { code: 4001 }); if (emptyRequest) { accounts = []; emit("accountsChanged", accounts); return accounts; } accounts = accounts.length ? accounts : [account]; emit("accountsChanged", accounts); return accounts; }
         if (method === "eth_chainId") return chainId;
         if (method === "eth_getBalance") { if (failBalance) throw new Error("Balance unavailable"); return nativeBalance; }
+        if (method === "eth_gasPrice") return gasPrice;
         if (method === "wallet_switchEthereumChain") { chainId = "0x2105"; emit("chainChanged", chainId); return null; }
         if (method === "eth_call") {
-          const call = Array.isArray(params) ? params[0] as { data?: string } : undefined;
+          const call = Array.isArray(params) ? params[0] as { data?: string; to?: string } : undefined;
           if (call?.data?.startsWith("0xdd62ed3e")) return `0x${allowance.toString(16)}`;
-          if (call?.data?.startsWith("0x70a08231")) return tokenBalance;
+          if (call?.data?.startsWith("0x70a08231")) { if (balanceDelay > 0) await new Promise((resolve) => setTimeout(resolve, balanceDelay)); return (call.to && balancesByToken[call.to.toLowerCase()]) ?? tokenBalance; }
           return "0x";
         }
         if (method === "eth_estimateGas") return "0x186a0";
@@ -42,5 +43,5 @@ export async function installVerifiedWalletStub(page: Page, options: { chainId?:
     const setChain = (next: string) => { chainId = next; emit("chainChanged", chainId); };
     const listenerCount = () => [...listeners.values()].reduce((total, entries) => total + entries.size, 0);
     Object.assign(window, { ethereum: provider, __walletHarness: { requests, emit, disconnect, setAccounts, setChain, listenerCount } });
-  }, { account: "0x1111111111111111111111111111111111111111", initialChain: options.chainId ?? "0x2105", reject: options.rejectConnection ?? false, emptyRequest: options.requestAccountsEmpty ?? false, initialAllowance: options.allowanceRaw ?? "0", authorizedAccounts: options.initialAccounts ?? [], nativeBalance: options.balanceHex ?? "0xde0b6b3a7640000", failBalance: options.balanceError ?? false, tokenBalance: options.tokenBalanceHex ?? "0xf4240" });
+  }, { account: "0x1111111111111111111111111111111111111111", initialChain: options.chainId ?? "0x2105", reject: options.rejectConnection ?? false, emptyRequest: options.requestAccountsEmpty ?? false, initialAllowance: options.allowanceRaw ?? "0", authorizedAccounts: options.initialAccounts ?? [], nativeBalance: options.balanceHex ?? "0xde0b6b3a7640000", failBalance: options.balanceError ?? false, tokenBalance: options.tokenBalanceHex ?? "0xf4240", balancesByToken: Object.fromEntries(Object.entries(options.tokenBalances ?? {}).map(([key, value]) => [key.toLowerCase(), value])), balanceDelay: options.tokenBalanceDelayMs ?? 0, gasPrice: options.gasPriceHex ?? "0x3b9aca00" });
 }

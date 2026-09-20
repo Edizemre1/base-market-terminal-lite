@@ -1,13 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { Check, ChevronDown, Copy, ExternalLink, LogOut, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Copy, ExternalLink, LogOut, ShieldCheck, WalletCards, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useWallet } from "@/components/WalletContext";
+import { WalletBalances } from "@/components/WalletBalances";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cx } from "@/lib/format";
-import { BASE_CHAIN_ID, type WalletProviderOption } from "@/lib/wallet";
-import { buildBalanceOfData, formatRawTokenAmount } from "@/lib/trade/validation";
+import type { WalletProviderOption } from "@/lib/wallet";
 
 const OFFICIAL_WALLETS = [
   { name: "MetaMask", url: "https://metamask.io/download" },
@@ -15,48 +15,14 @@ const OFFICIAL_WALLETS = [
   { name: "Rabby", url: "https://rabby.io/" }
 ] as const;
 
-type TokenBalanceState = { status: "idle" | "loading" | "ready" | "unavailable"; value?: string; updatedAt?: string };
-
 export function WalletPicker() {
   const wallet = useWallet();
-  const { accountConnected, address, chainId, readContract, spendToken } = wallet;
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [getWalletOpen, setGetWalletOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [tokenBalance, setTokenBalance] = useState<TokenBalanceState>({ status: "idle" });
-  const tokenRequestRef = useRef(0);
   const { pickerOpen } = wallet;
   const installed = useMemo(() => wallet.providers.filter((provider) => provider.compatibility === "verified"), [wallet.providers]);
   const otherInstalled = useMemo(() => wallet.providers.filter((provider) => provider.compatibility !== "verified"), [wallet.providers]);
-
-  const loadTokenBalance = useCallback(async () => {
-    const requestId = ++tokenRequestRef.current;
-    const token = spendToken;
-    if (!pickerOpen || !accountConnected || chainId !== BASE_CHAIN_ID || !address) {
-      setTokenBalance({ status: "idle" });
-      return;
-    }
-    const data = buildBalanceOfData(address);
-    if (!data) {
-      setTokenBalance({ status: "unavailable" });
-      return;
-    }
-    setTokenBalance({ status: "loading" });
-    try {
-      const result = await readContract(token.address, data);
-      if (requestId !== tokenRequestRef.current) return;
-      const value = formatRawTokenAmount(BigInt(result).toString(), token.decimals, Math.min(token.decimals, 8));
-      setTokenBalance(value === undefined ? { status: "unavailable" } : { status: "ready", value, updatedAt: new Date().toISOString() });
-    } catch {
-      if (requestId === tokenRequestRef.current) setTokenBalance({ status: "unavailable" });
-    }
-  }, [accountConnected, address, chainId, pickerOpen, readContract, spendToken]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    void loadTokenBalance();
-    return () => { tokenRequestRef.current += 1; };
-  }, [loadTokenBalance, pickerOpen]);
 
   if (!pickerOpen) return null;
   const connected = wallet.accountConnected && Boolean(wallet.address);
@@ -74,7 +40,7 @@ export function WalletPicker() {
           <button type="button" onClick={wallet.closePicker} className="grid h-control-touch w-control-touch shrink-0 place-items-center rounded-pill bg-surface-interactive text-content-secondary hover:text-content-primary" aria-label={t("wallet.closePicker")} data-overlay-autofocus><X size={15} /></button>
         </div>
 
-        {connected && wallet.address ? renderConnectedWalletDetails(tokenBalance, async () => { await Promise.all([wallet.refreshBalance(), loadTokenBalance()]); }, copied, async () => { try { await navigator.clipboard.writeText(wallet.address!); setCopied(true); window.setTimeout(() => setCopied(false), 1_500); } catch { setCopied(false); } }) : <>
+        {connected && wallet.address ? renderConnectedWalletDetails(copied, async () => { try { await navigator.clipboard.writeText(wallet.address!); setCopied(true); window.setTimeout(() => setCopied(false), 1_500); } catch { setCopied(false); } }) : <>
           {reconnectable && wallet.selectedProviderId ? <section className="mt-4 rounded-panel border border-border-subtle bg-surface-interactive/70 p-3" data-testid="wallet-reconnect-panel"><div className="flex items-center gap-3"><ProviderIcon provider={wallet.selectedProvider} /><span className="min-w-0 flex-1"><strong className="block truncate text-label text-content-primary">{wallet.selectedProvider?.name ?? t("wallet.reconnect")}</strong><span className="mt-1 block text-meta text-content-secondary">{t(wallet.status === "locked_or_no_accounts" ? "wallet.lockedBody" : "wallet.reconnectBody")}</span></span></div><button type="button" onClick={() => void wallet.connectProvider(wallet.selectedProviderId!)} disabled={wallet.status === "connecting"} className="mt-3 min-h-11 w-full rounded-control bg-brand-action px-3 text-label font-bold text-content-on-accent disabled:cursor-wait disabled:opacity-60" data-testid="wallet-reconnect-button">{wallet.status === "connecting" ? t("wallet.connecting") : t("wallet.reconnect")}</button></section> : null}
           <ProviderGroup title={t("wallet.installed")} providers={installed} onConnect={wallet.connectProvider} />
           {otherInstalled.length > 0 ? <ProviderGroup title={t("wallet.otherInstalled")} providers={otherInstalled} onConnect={wallet.connectProvider} unverified /> : null}
@@ -94,10 +60,7 @@ export function WalletPicker() {
     </div>
   );
 
-  function renderConnectedWalletDetails(selectedBalance: TokenBalanceState, onRefresh: () => Promise<void>, addressCopied: boolean, onCopy: () => Promise<void>) {
-    const nativeBalance = wallet.wrongNetwork ? t("wallet.balanceUnavailableWrongNetwork") : wallet.balanceStatus === "balance_loading" ? t("wallet.balanceLoading") : wallet.balanceStatus === "balance_unavailable" || wallet.balanceEth === undefined ? t("wallet.balanceUnavailable") : `${wallet.balanceEth} ETH`;
-    const selectedTokenBalance = wallet.wrongNetwork ? t("wallet.balanceUnavailableWrongNetwork") : selectedBalance.status === "loading" ? t("wallet.balanceLoading") : selectedBalance.status === "unavailable" || selectedBalance.value === undefined ? t("wallet.balanceUnavailable") : `${selectedBalance.value} ${wallet.spendToken.symbol}`;
-    const updatedAt = latestTimestamp(wallet.balanceUpdatedAt, selectedBalance.updatedAt);
+  function renderConnectedWalletDetails(addressCopied: boolean, onCopy: () => Promise<void>) {
     return <section className="mt-4 space-y-3" data-testid="wallet-details">
       <div className="rounded-panel border border-border-subtle bg-surface-interactive/70 p-3">
         <div className="flex items-center gap-3"><ProviderIcon provider={wallet.selectedProvider} /><span className="min-w-0 flex-1"><strong className="block truncate text-label text-content-primary">{wallet.selectedProvider?.name ?? t("wallet.connected")}</strong><span className="mt-1 block text-meta text-operation-success">{t(wallet.connectionOrigin === "previously_authorized" ? "wallet.previouslyAuthorized" : "wallet.explicitConnection")}</span></span><ShieldCheck size={16} className="text-trust-verified" /></div>
@@ -107,13 +70,11 @@ export function WalletPicker() {
         <WalletFact label={t("wallet.connectionStatus")} value={t(wallet.wrongNetwork ? "wallet.statusWrongNetwork" : "wallet.statusConnected")} />
         <WalletFact label={t("wallet.provider")} value={wallet.selectedProvider?.name ?? t("common.unknown")} />
         <WalletFact label={t("wallet.network")} value={wallet.wrongNetwork ? t("wallet.chain", { id: wallet.chainId ?? "—" }) : "Base Mainnet · 8453"} />
-        <WalletFact label={t("wallet.nativeBalance")} value={nativeBalance} testId="wallet-native-balance" />
-        <WalletFact label={t("wallet.tokenBalance", { token: wallet.spendToken.symbol })} value={selectedTokenBalance} testId="wallet-token-balance" />
-        <WalletFact label={t("wallet.lastUpdated")} value={updatedAt ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(updatedAt)) : t("common.unavailable")} />
       </dl>
+      <WalletBalances autoRefresh />
       <div className="rounded-control bg-surface-interactive p-3"><span className="text-meta text-content-secondary">{t("wallet.address")}</span><div className="mt-1 flex items-center gap-2"><code className="min-w-0 flex-1 break-all font-mono text-meta text-content-primary" data-testid="wallet-exact-address">{wallet.address}</code><button type="button" onClick={() => void onCopy()} className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-surface-panel text-content-secondary" aria-label={t("wallet.copyAddress")}>{addressCopied ? <Check size={14} className="text-operation-success" /> : <Copy size={14} />}</button></div></div>
       {wallet.wrongNetwork ? <div className="rounded-control bg-freshness-delayed/10 p-3 text-label text-freshness-delayed"><p>{t("wallet.wrongNetwork")}</p><button type="button" onClick={() => void wallet.switchToBase()} className="mt-2 min-h-10 w-full rounded-control bg-freshness-delayed/15 px-3 font-bold">{t("wallet.switchBase")}</button></div> : null}
-      <div className="grid gap-2 sm:grid-cols-2"><button type="button" disabled={wallet.wrongNetwork || wallet.balanceStatus === "balance_loading" || selectedBalance.status === "loading"} onClick={() => void onRefresh()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-surface-interactive px-3 text-label font-semibold text-content-primary disabled:opacity-50"><RefreshCw size={14} />{t("wallet.refreshBalances")}</button><a href={`https://basescan.org/address/${wallet.address}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-surface-interactive px-3 text-label font-semibold text-content-primary"><ExternalLink size={14} />{t("wallet.openBaseScan")}</a></div>
+      <a href={`https://basescan.org/address/${wallet.address}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control bg-surface-interactive px-3 text-label font-semibold text-content-primary"><ExternalLink size={14} />{t("wallet.openBaseScan")}</a>
       <button type="button" onClick={wallet.disconnect} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control border border-border-subtle text-label font-semibold text-content-secondary"><LogOut size={14} />{t("wallet.disconnectTerminal")}</button>
     </section>;
   }
@@ -136,11 +97,6 @@ function ProviderIcon({ provider }: { provider: WalletProviderOption | undefined
 
 function WalletFact({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return <div className="rounded-control bg-surface-interactive p-3"><dt className="text-meta text-content-secondary">{label}</dt><dd className="mt-1 break-words font-mono text-meta text-content-primary" data-testid={testId}>{value}</dd></div>;
-}
-
-function latestTimestamp(first: string | undefined, second: string | undefined) {
-  const values = [first, second].filter((value): value is string => Boolean(value)).sort();
-  return values.at(-1);
 }
 
 function walletError(t: ReturnType<typeof useI18n>["t"], code: NonNullable<ReturnType<typeof useWallet>["errorCode"]>) {

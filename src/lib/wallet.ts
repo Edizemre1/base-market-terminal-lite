@@ -57,6 +57,7 @@ export type WalletControllerState = ReadOnlyWalletSnapshot & {
   status: WalletControllerStatus;
   balanceStatus: WalletBalanceStatus;
   balanceEth?: string;
+  balanceWei?: string;
   balanceUpdatedAt?: string;
   connectionOrigin?: WalletConnectionOrigin;
   error?: string;
@@ -146,6 +147,7 @@ export class ReadOnlyWalletController {
       status: this.state.chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
       address,
       balanceEth: undefined,
+      balanceWei: undefined,
       balanceStatus: this.state.chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
       balanceUpdatedAt: undefined,
       error: undefined
@@ -165,6 +167,7 @@ export class ReadOnlyWalletController {
       status: chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
       chainId,
       balanceEth: undefined,
+      balanceWei: undefined,
       balanceStatus: chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
       balanceUpdatedAt: undefined,
       error: undefined
@@ -187,6 +190,7 @@ export class ReadOnlyWalletController {
       status: chainId === BASE_CHAIN_ID ? "connected" : "wrong_network",
       chainId,
       balanceEth: undefined,
+      balanceWei: undefined,
       balanceStatus: chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
       balanceUpdatedAt: undefined,
       error: undefined
@@ -271,6 +275,7 @@ export class ReadOnlyWalletController {
       address: undefined,
       chainId: undefined,
       balanceEth: undefined,
+      balanceWei: undefined,
       balanceUpdatedAt: undefined,
       connectionOrigin: undefined,
       error: undefined,
@@ -386,22 +391,39 @@ export class ReadOnlyWalletController {
     const provider = this.selectedProvider;
     const address = this.state.address;
     if (!provider || !this.sessionVerified || !address || this.state.chainId !== BASE_CHAIN_ID) {
-      this.patchState({ balanceStatus: "idle", balanceEth: undefined, balanceUpdatedAt: undefined });
+      this.patchState({ balanceStatus: "idle", balanceEth: undefined, balanceWei: undefined, balanceUpdatedAt: undefined });
       return;
     }
     const requestVersion = ++this.balanceRequestVersion;
     const lifecycleGeneration = this.lifecycleGeneration;
-    this.patchState({ balanceStatus: "balance_loading", balanceEth: undefined, balanceUpdatedAt: undefined });
+    this.patchState({ balanceStatus: "balance_loading", balanceEth: undefined, balanceWei: undefined, balanceUpdatedAt: undefined });
     try {
-      const balanceEth = await readWalletBalance(provider, address);
+      const balanceWei = await readWalletBalanceRaw(provider, address);
+      const balanceEth = balanceWei === undefined ? undefined : formatWei(BigInt(balanceWei));
       if (provider === this.selectedProvider && address === this.state.address && requestVersion === this.balanceRequestVersion && lifecycleGeneration === this.lifecycleGeneration) {
-        this.patchState({ balanceStatus: balanceEth === undefined ? "balance_unavailable" : "balance_ready", balanceEth, balanceUpdatedAt: balanceEth === undefined ? undefined : new Date().toISOString() });
+        this.patchState({ balanceStatus: balanceEth === undefined ? "balance_unavailable" : "balance_ready", balanceEth, balanceWei, balanceUpdatedAt: balanceEth === undefined ? undefined : new Date().toISOString() });
       }
     } catch {
       if (provider === this.selectedProvider && address === this.state.address && requestVersion === this.balanceRequestVersion && lifecycleGeneration === this.lifecycleGeneration) {
-        this.patchState({ balanceStatus: "balance_unavailable", balanceEth: undefined, balanceUpdatedAt: undefined });
+        this.patchState({ balanceStatus: "balance_unavailable", balanceEth: undefined, balanceWei: undefined, balanceUpdatedAt: undefined });
       }
     }
+  }
+
+  async readGasPrice() {
+    const provider = this.getProviderForExplicitAction();
+    const value = normalizeHexQuantity(await provider.request({ method: "eth_gasPrice" }));
+    if (!value) throw new Error("Wallet returned an invalid gas price");
+    return value;
+  }
+
+  async readNativeBalance() {
+    const provider = this.getProviderForExplicitAction();
+    const address = this.state.address;
+    if (!address || this.state.chainId !== BASE_CHAIN_ID) throw new Error("A verified Base wallet is required");
+    const value = await readWalletBalanceRaw(provider, address);
+    if (value === undefined) throw new Error("Wallet returned an invalid native balance");
+    return value;
   }
 
   async readContract(to: string, data: string) {
@@ -560,6 +582,7 @@ export class ReadOnlyWalletController {
       status: next.address ? next.chainId === BASE_CHAIN_ID ? "connected" : "wrong_network" : "locked_or_no_accounts",
       balanceStatus: next.address && next.chainId === BASE_CHAIN_ID ? "balance_loading" : "idle",
       balanceEth: undefined,
+      balanceWei: undefined,
       balanceUpdatedAt: undefined,
       connectionOrigin,
       error: undefined,
@@ -621,9 +644,14 @@ export async function requestWalletConnection(provider: Eip1193Provider): Promis
 }
 
 export async function readWalletBalance(provider: Eip1193Provider, address: string) {
+  const raw = await readWalletBalanceRaw(provider, address);
+  return raw === undefined ? undefined : formatWei(BigInt(raw));
+}
+
+export async function readWalletBalanceRaw(provider: Eip1193Provider, address: string) {
   const value = await provider.request({ method: "eth_getBalance", params: [address, "latest"] });
   if (typeof value !== "string" || !/^0x[0-9a-f]+$/i.test(value)) return undefined;
-  return formatWei(BigInt(value));
+  return BigInt(value).toString();
 }
 
 export async function switchWalletToBase(provider: Eip1193Provider) {
@@ -726,6 +754,7 @@ function clearSessionState(status: WalletControllerStatus): Partial<WalletContro
     address: undefined,
     chainId: undefined,
     balanceEth: undefined,
+    balanceWei: undefined,
     balanceStatus: "idle",
     balanceUpdatedAt: undefined,
     connectionOrigin: undefined,

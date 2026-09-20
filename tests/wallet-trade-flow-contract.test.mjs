@@ -23,10 +23,14 @@ test("wallet session truth requires explicit reconnect and separates balance sta
 
 test("wallet details expose origin, exact balances and app-local disconnect", () => {
   const picker = read("src/components/WalletPicker.tsx");
+  const balances = read("src/components/WalletBalances.tsx");
+  const context = read("src/components/WalletContext.tsx");
   const button = read("src/components/WalletButton.tsx");
-  for (const marker of ["wallet-connection-origin", "wallet-exact-address", "wallet-native-balance", "wallet-token-balance", "wallet.disconnectTerminal", "basescan.org/address", "wallet.refreshBalances"]) assert.match(picker, new RegExp(marker.replace(/[.]/g, "\\."), "u"));
-  assert.match(picker, /buildBalanceOfData/u);
-  assert.match(picker, /BigInt\(result\)\.toString\(\)/u);
+  for (const marker of ["wallet-connection-origin", "wallet-exact-address", "wallet.disconnectTerminal", "basescan.org/address"]) assert.match(picker, new RegExp(marker.replace(/[.]/g, "\\."), "u"));
+  for (const marker of ["wallet-balance-eth", "wallet-balance-weth", "wallet-balance-usdc", "wallet-balance-selected", "wallet.refreshBalances", "wallet.balanceStale", "wallet.portfolioTotalUnavailable"]) assert.match(balances, new RegExp(marker.replace(/[.]/g, "\\."), "u"));
+  assert.match(context, /buildBalanceOfData/u);
+  assert.match(context, /requestId !== tokenBalanceRequestRef\.current/u);
+  assert.match(context, /metadata_unavailable/u);
   assert.match(button, /data-connection-origin/u);
   assert.match(button, /selectedProvider\?\.name/u);
 });
@@ -42,8 +46,11 @@ test("Trade stays asset-scoped and preserves the exact Base USDC to WETH fallbac
   assert.match(terminal, /BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006"/u);
   assert.match(terminal, /return buildDefaultTradeContext\(selectedPairWithLiveChart\)/u);
   assert.doesNotMatch(terminal.match(/const openTrade[\s\S]*?\n  \}, \[handleSelectPairById/u)?.[0] ?? "", /rankingEligibility/u);
-  assert.match(dock, /type SpendTokenKey = "USDC" \| "WETH"/u);
+  assert.match(dock, /type SpendTokenKey = "ETH" \| "USDC" \| "WETH"/u);
   assert.match(dock, /useState<SpendTokenKey>\("USDC"\)/u);
+  assert.match(dock, /trade\.nativeMaxReserve/u);
+  assert.match(dock, /verifyFunds/u);
+  assert.match(dock, /wallet\.readGasPrice/u);
   assert.match(dock, /data-reason-code=\{quoteFailureCode\}/u);
   assert.match(surface, /canCheckQuote = hasExactTradeTarget\(pair, opportunity\)/u);
   assert.match(inspector, /data-testid="inspector-trade-cta"/u);
