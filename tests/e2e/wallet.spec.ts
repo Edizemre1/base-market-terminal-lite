@@ -208,6 +208,7 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     await expect(page.getByTestId("wallet-details").getByText(/Not calculated|Hesaplanmadı/)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("wallet-balances-truth-1440-en.png"), fullPage: true });
     await page.getByRole("button", { name: /Close wallet picker|Cüzdan seçiciyi kapat/ }).click();
+    await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
     await page.getByRole("link", { name: /Discover|Keşfet/, exact: true }).first().click();
     await openTradeDrawer(page);
     await page.getByTestId("trade-spend-token").selectOption("ETH");
@@ -217,7 +218,6 @@ test.describe("explicit wallet and transaction lifecycle", () => {
     expect(await walletMethods(page)).toContain("eth_gasPrice");
     expect(await sentTransactions(page)).toHaveLength(0);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByTestId("locale-switcher").getByRole("button", { name: "tr", exact: true }).click();
     await page.screenshot({ path: testInfo.outputPath("wallet-trade-native-max-390-tr.png"), fullPage: true });
   });
 
