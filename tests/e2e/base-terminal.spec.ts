@@ -528,12 +528,16 @@ test.describe("living Base terminal", () => {
         }
         if (viewport.width === 390) {
           await page.getByTestId("open-market-board").click();
+          const searchBox = await page.getByTestId("market-board-search").boundingBox();
+          expect(searchBox?.width).toBeGreaterThan(300);
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await captureVisualEvidence(page, testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), false);
           await page.getByTestId("inspector-trade-cta").click();
           await expect(page.locator("[data-overlay-state]")).toHaveAttribute("data-overlay-state", "trade_drawer");
           await expect(page.getByRole("dialog", { name: /Trade Dock|İşlem Alanı/ })).toBeVisible();
+          await expect(page.getByTestId("trade-dock")).toBeInViewport();
+          await expect.poll(() => page.getByTestId("trade-lifecycle").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
           await captureVisualEvidence(page, testInfo.outputPath(`trade-sheet-${locale}-mobile-390.png`), false);
         }
       }

@@ -357,8 +357,8 @@ function TradeLifecycle({ connected, hasAmount, quoteStatus, quoteAvailable, quo
   ];
 
   return (
-    <ol className="flex gap-1 overflow-x-auto border-b border-border-subtle/60 bg-surface-raised px-3 py-2" aria-label={t("trade.dock")} data-testid="trade-lifecycle">
-      {steps.map((step, index) => <li key={`${step.label}-${index}`} className={cx("flex min-w-[112px] items-center gap-2 rounded-control px-2 py-1 text-meta", lifecycleTone(step.state))} data-lifecycle-state={step.state}><span className="grid h-5 w-5 shrink-0 place-items-center rounded-pill border border-current font-mono text-meta">{step.state === "complete" ? "✓" : index + 1}</span><span className="leading-4">{step.label}</span></li>)}
+    <ol className="grid grid-cols-3 gap-1 border-b border-border-subtle/60 bg-surface-raised px-3 py-2" aria-label={t("trade.dock")} data-testid="trade-lifecycle">
+      {steps.map((step, index) => <li key={`${step.label}-${index}`} className={cx("flex min-w-0 items-center gap-1 rounded-control px-2 py-1 text-meta", lifecycleTone(step.state))} data-lifecycle-state={step.state}><span className="grid h-5 w-5 shrink-0 place-items-center rounded-pill border border-current font-mono text-meta">{step.state === "complete" ? "✓" : index + 1}</span><span className="min-w-0 leading-4">{step.label}</span></li>)}
     </ol>
   );
 }
