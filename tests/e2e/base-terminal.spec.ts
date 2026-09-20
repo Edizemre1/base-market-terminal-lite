@@ -518,6 +518,11 @@ test.describe("living Base terminal", () => {
         await page.setViewportSize(viewport);
         await page.goto("/terminal?data=mock");
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        if (viewport.width === 1440) {
+          const brandBox = await page.getByTestId("product-brand").boundingBox();
+          expect(brandBox?.x).toBeGreaterThanOrEqual(0);
+          expect(brandBox?.width).toBeGreaterThan(100);
+        }
         await captureVisualEvidence(page, testInfo.outputPath(`terminal-${locale}-${viewport.name}.png`), true);
         if ([1920, 1440, 1280, 768, 390].includes(viewport.width)) {
           await page.goto("/terminal?data=mock&view=markets");
@@ -530,6 +535,8 @@ test.describe("living Base terminal", () => {
           await page.getByTestId("open-market-board").click();
           const searchBox = await page.getByTestId("market-board-search").boundingBox();
           expect(searchBox?.width).toBeGreaterThan(300);
+          const identityBox = await page.locator("[data-market-mobile-identity]").first().boundingBox();
+          expect(identityBox?.width).toBeGreaterThan(100);
           await page.getByTestId("market-card-pepe-weth").getByRole("button", { name: /Inspect|incele/ }).click();
           await expect(page.getByTestId("context-inspector")).toBeVisible();
           await captureVisualEvidence(page, testInfo.outputPath(`market-sheet-${locale}-mobile-390.png`), false);

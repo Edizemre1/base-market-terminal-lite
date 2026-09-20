@@ -54,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="fixed left-0 right-0 top-0 z-layer-shell h-14 border-b border-border-subtle/60 bg-surface-panel/95 backdrop-blur-xl"
           data-testid="terminal-topbar"
         >
-          <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto_auto_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto_auto_auto] lg:px-4">
+          <div className="grid h-full grid-cols-[minmax(72px,100px)_minmax(65px,1fr)_auto_auto_auto_auto] items-center gap-2 px-2 lg:grid-cols-[minmax(180px,220px)_minmax(240px,1fr)_auto_auto_auto_auto_auto] lg:px-4 2xl:grid-cols-[minmax(220px,270px)_minmax(300px,1fr)_auto_auto_auto_auto_auto]">
             <Link href="/terminal" prefetch={false} onClick={(event) => handleTerminalAnchor(event, "terminal")} className="flex min-w-0 items-center gap-3">
               <MergenMark className="h-7 w-5" />
               <span className="min-w-0">
@@ -73,15 +73,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <TerminalSearchBox />
 
             <div className="hidden min-w-0 items-center justify-end gap-1 overflow-hidden text-meta font-semibold uppercase tracking-eyebrow xl:flex">
-              <HeaderHeartbeat />
+              <span className="hidden 2xl:contents"><HeaderHeartbeat /></span>
               <TopChip
                 label={<HeaderBaseNetworkLabel />}
                 tone="network"
                 icon={<BaseNetworkIcon className="h-4 w-4" />}
               />
-              <Suspense fallback={<DataSourceFallback />}>
-                <DataSourceSwitcher />
-              </Suspense>
+              <span className="hidden 2xl:contents"><Suspense fallback={<DataSourceFallback />}><DataSourceSwitcher /></Suspense></span>
             </div>
             <Suspense><HeaderAlertLink /></Suspense>
             <LocaleSwitcher />
